@@ -10,7 +10,7 @@ export interface DialogConfig {
   buttons?: Array<{
     text: string;
     primary?: boolean;
-    callback?: () => void;
+    callback?: () => void | Promise<void>;
   }>;
 }
 

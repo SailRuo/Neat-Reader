@@ -36,7 +36,7 @@ type DialogType = 'info' | 'success' | 'error' | 'warning';
 interface DialogButton {
   text: string;
   primary?: boolean;
-  callback?: () => void;
+  callback?: () => void | Promise<void>;
 }
 
 // 属性定义
@@ -64,9 +64,9 @@ const handleClose = () => {
   emit('close');
 };
 
-const handleButtonClick = (button: DialogButton) => {
+const handleButtonClick = async (button: DialogButton) => {
   if (button.callback) {
-    button.callback();
+    await button.callback();
   }
   emit('buttonClick', button);
   emit('close');

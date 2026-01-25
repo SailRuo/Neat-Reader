@@ -262,11 +262,10 @@ const removeBook = async (book: any) => {
             const result = await ebookStore.removeBook(book.id, book.storageType)
             
             if (result) {
-              // 强制刷新书籍列表
-              await ebookStore.loadBooks()
+              // 书籍已经从响应式数组中移除，不需要额外刷新
               dialogStore.showSuccessDialog('书籍删除成功')
             } else {
-              // 如果删除失败，恢复原始书籍列表
+              // 如果删除失败，显示错误信息
               dialogStore.showErrorDialog('删除书籍失败', '无法删除指定书籍')
             }
           } catch (error) {
