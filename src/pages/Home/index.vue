@@ -237,12 +237,17 @@ const uploadToBaidupan = async (book: any) => {
 }
 
 // 删除书籍
-const removeBook = async (book: any) => {
-  if (!book) return
+const removeBook = async (book: any) => { // 这里的 book 是通过模板传进来的
+  if (!book) return;
   
+  // 立即将需要删除的对象锁定在局部变量中，防止被 closeContextMenu 影响
+  const targetBookId = book.id;
+  const targetTitle = book.title;
+  const targetStorage = book.storageType;
+
   dialogStore.showDialog({
     title: '确认删除',
-    message: `确定要删除《${book.title}》吗？`,
+    message: `确定要删除《${targetTitle}》吗？`,
     type: 'warning',
     buttons: [
       { text: '取消' },
@@ -250,40 +255,37 @@ const removeBook = async (book: any) => {
         text: '删除', 
         primary: true,
         callback: async () => {
+          console.log('开始执行删除逻辑, ID:', targetBookId);
           try {
-            // 先从UI中移除书籍（乐观更新）
-            const bookIndex = books.value.findIndex(b => b.id === book.id)
-            if (bookIndex !== -1) {
-              // 记录找到的书籍，确保删除操作正确执行
-              console.log('找到要删除的书籍，索引:', bookIndex)
-            }
-            
-            // 调用store中的删除方法
-            const result = await ebookStore.removeBook(book.id, book.storageType)
-            
+            const result = await ebookStore.removeBook(targetBookId, targetStorage);
             if (result) {
-              // 书籍已经从响应式数组中移除，不需要额外刷新
-              dialogStore.showSuccessDialog('书籍删除成功')
+              dialogStore.showSuccessDialog('书籍删除成功');
             } else {
-              // 如果删除失败，显示错误信息
-              dialogStore.showErrorDialog('删除书籍失败', '无法删除指定书籍')
+              dialogStore.showErrorDialog('删除失败', '无法删除指定书籍');
             }
           } catch (error) {
-            console.error('删除书籍失败:', error)
-            dialogStore.showErrorDialog('删除书籍失败', error instanceof Error ? error.message : String(error))
+            console.error('删除过程报错:', error);
+            dialogStore.showErrorDialog('删除失败', error instanceof Error ? error.message : String(error));
           }
         }
       }
     ]
   })
   
-  closeContextMenu()
+  closeContextMenu(); // 这里虽然清空了 selectedBook，但上面的局部变量已锁定数据
 }
 
 // 生命周期钩子
 onMounted(async () => {
-  // 初始化电子书存储
-  await ebookStore.initialize()
+  try {
+    console.log('首页加载，开始初始化电子书存储...');
+    // 初始化电子书存储
+    await ebookStore.initialize();
+    console.log('电子书存储初始化完成');
+    console.log('当前书籍数量:', ebookStore.books.length);
+  } catch (error) {
+    console.error('初始化电子书存储失败:', error);
+  }
 })
 </script>
 

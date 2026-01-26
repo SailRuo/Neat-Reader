@@ -1,39 +1,43 @@
 <template>
-  <div v-show="visible" class="dialog-overlay" @click.self="handleClose">
-    <div class="dialog-container" :class="{ 'dialog-error': type === 'error', 'dialog-success': type === 'success', 'dialog-warning': type === 'warning' }">
-      <div class="dialog-header">
-        <h3 class="dialog-title">{{ title }}</h3>
-        <button class="dialog-close-btn" @click="handleClose">&times;</button>
-      </div>
-      <div class="dialog-body">
-        <p class="dialog-message">{{ message }}</p>
-        <div v-if="details" class="dialog-details">
-          <pre>{{ details }}</pre>
+  <Teleport to="body">
+    <Transition name="dialog-fade">
+      <div v-if="visible" class="dialog-overlay" @click.self="handleClose">
+        <div class="dialog-container" :class="{ 'dialog-error': type === 'error', 'dialog-success': type === 'success', 'dialog-warning': type === 'warning' }">
+          <div class="dialog-header">
+            <h3 class="dialog-title">{{ title }}</h3>
+            <button class="dialog-close-btn" @click="handleClose">&times;</button>
+          </div>
+          <div class="dialog-body">
+            <p class="dialog-message">{{ message }}</p>
+            <div v-if="details" class="dialog-details">
+              <pre>{{ details }}</pre>
+            </div>
+          </div>
+          <div class="dialog-footer">
+            <button 
+              v-for="button in buttons" 
+              :key="button.text"
+              class="dialog-btn"
+              :class="{ 'btn-primary': button.primary }"
+              @click="() => handleButtonClick(button)"
+            >
+              {{ button.text }}
+            </button>
+          </div>
         </div>
       </div>
-      <div class="dialog-footer">
-        <button 
-          v-for="button in buttons" 
-          :key="button.text"
-          class="dialog-btn"
-          :class="{ 'btn-primary': button.primary }"
-          @click="() => handleButtonClick(button)"
-        >
-          {{ button.text }}
-        </button>
-      </div>
-    </div>
-  </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 
 // 对话框类型
-type DialogType = 'info' | 'success' | 'error' | 'warning';
+export type DialogType = 'info' | 'success' | 'error' | 'warning';
 
 // 按钮配置
-interface DialogButton {
+export interface DialogButton {
   text: string;
   primary?: boolean;
   callback?: () => void | Promise<void>;
@@ -55,9 +59,22 @@ const emit = defineEmits<{
   buttonClick: [button: DialogButton];
 }>();
 
-// 默认属性
-const type = ref<DialogType>(props.type || 'info');
-const buttons = ref<DialogButton[]>(props.buttons || [{ text: '确定', primary: true }]);
+// 默认属性 - 使用本地状态避免响应式丢失
+const type = ref<DialogType>('info');
+const buttons = ref<DialogButton[]>([{ text: '确定', primary: true }]);
+
+// 监听 props 变化，更新本地状态
+watch(() => props.type, (newType) => {
+  if (newType) {
+    type.value = newType;
+  }
+}, { immediate: true });
+
+watch(() => props.buttons, (newButtons) => {
+  if (newButtons && newButtons.length > 0) {
+    buttons.value = newButtons;
+  }
+}, { immediate: true });
 
 // 方法
 const handleClose = () => {
@@ -111,6 +128,22 @@ const handleButtonClick = async (button: DialogButton) => {
 
 .dialog-warning {
   border-left: 4px solid #F59E0B;
+}
+
+/* 过渡动画 */
+.dialog-fade-enter-active,
+.dialog-fade-leave-active {
+  transition: all 0.3s ease;
+}
+
+.dialog-fade-enter-from,
+.dialog-fade-leave-to {
+  opacity: 0;
+}
+
+.dialog-fade-enter-from .dialog-container,
+.dialog-fade-leave-to .dialog-container {
+  transform: translateY(-20px);
 }
 
 /* 淡入动画 */

@@ -138,38 +138,156 @@ export const useEbookStore = defineStore('ebook', () => {
       .slice(0, 10);
   });
 
+  // Blob URL 转 Base64 工具函数
+  const blobToBase64 = (blobUrl: string): Promise<string> => {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const response = await fetch(blobUrl);
+        const blob = await response.blob();
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  };
+
   // 方法
   const loadBooks = async () => {
     try {
+      console.log('开始加载书籍列表...');
       const savedBooks = await localforage.getItem<EbookMetadata[]>('books');
+      
       if (savedBooks) {
+        console.log('成功加载书籍列表，书籍数量:', savedBooks.length);
         books.value = savedBooks;
+        
+        // 为EPUB书籍重新生成封面
+        for (const book of books.value) {
+          // 检查封面是否为失效的 blob 链接
+          if (book.cover && book.cover.startsWith('blob:')) {
+            console.log('清除失效的 blob 封面链接:', book.id);
+            book.cover = ''; // 清除失效链接，触发下方的重新生成逻辑
+          }
+          
+          // 为没有封面的 EPUB 书籍重新生成封面
+          if (book.format === 'epub' && !book.cover) {
+            try {
+              console.log('为书籍重新生成封面:', book.id);
+              const fileContent = await localforage.getItem<ArrayBuffer>(`ebook_content_${book.id}`);
+              if (fileContent) {
+                const epubBook = ePub(fileContent);
+                await new Promise((resolve, reject) => {
+                  epubBook.ready.then(resolve).catch(reject);
+                });
+                const coverUrl = await epubBook.coverUrl();
+                if (coverUrl) {
+                  // 如果是 blob URL，转换为 Base64 持久化存储
+                  if (coverUrl.startsWith('blob:')) {
+                    try {
+                      console.log('将重新生成的封面转换为 Base64');
+                      book.cover = await blobToBase64(coverUrl);
+                      console.log('封面重新生成并转换成功:', book.id);
+                      // 释放 Blob 内存
+                      URL.revokeObjectURL(coverUrl);
+                      // 立即保存更新后的封面
+                      await saveBooks();
+                    } catch (e) {
+                      console.warn('封面转换 Base64 失败:', e);
+                    }
+                  } else {
+                    book.cover = coverUrl;
+                    console.log('封面重新生成成功:', book.id);
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn('封面重新生成失败:', book.id, e);
+            }
+          }
+        }
+        
+        // 验证加载的数据
+        if (books.value.length > 0) {
+          console.log('加载的书籍示例:', {
+            id: books.value[0].id,
+            title: books.value[0].title,
+            author: books.value[0].author,
+            cover: books.value[0].cover,
+            storageType: books.value[0].storageType
+          });
+        }
+      } else {
+        console.log('未找到保存的书籍列表，初始化为空数组');
+        books.value = [];
       }
     } catch (error) {
       console.error('加载电子书列表失败:', error);
+      if (error instanceof Error) {
+        console.error('错误详情:', error.message);
+        console.error('错误堆栈:', error.stack);
+      }
+      // 出错时初始化为空数组
+      books.value = [];
     }
   };
 
   const saveBooks = async () => {
     try {
-      // 保存书籍列表，但不包含blob URL形式的封面
-      const booksWithoutBlobCovers = books.value.map(book => {
-        // 如果封面是blob URL，我们不保存它，因为它无法序列化
-        // 当重新加载时，我们会重新生成封面
-        if (book.cover && typeof book.cover === 'string' && book.cover.startsWith('blob:')) {
-          return { ...book, cover: '' };
-        }
-        return book;
+      // 保存书籍列表，确保数据可序列化
+      const booksToSave = books.value.map(book => {
+        // 创建可序列化的书籍对象
+        const serializableBook: EbookMetadata = {
+          id: book.id,
+          title: book.title,
+          author: book.author,
+          cover: book.cover || '', // 确保封面字段存在，如果是blob URL会在加载时重新生成
+          path: book.path,
+          format: book.format,
+          size: book.size,
+          lastRead: book.lastRead,
+          totalChapters: book.totalChapters,
+          readingProgress: book.readingProgress,
+          storageType: book.storageType,
+          baidupanPath: book.baidupanPath,
+          addedAt: book.addedAt
+        };
+        
+        return serializableBook;
       });
-      await localforage.setItem('books', booksWithoutBlobCovers);
+      
+      console.log('正在保存书籍列表，书籍数量:', booksToSave.length);
+      
+      await localforage.setItem('books', booksToSave);
+      console.log('书籍列表保存成功');
     } catch (error) {
       console.error('保存电子书列表失败:', error);
+      if (error instanceof Error) {
+        console.error('错误详情:', error.message);
+        console.error('错误堆栈:', error.stack);
+      }
     }
   };
 
   const addBook = async (book: EbookMetadata) => {
-    books.value.push(book);
-    await saveBooks();
+    try {
+      console.log('添加书籍到列表:', book.title);
+      books.value.push(book);
+      
+      // 立即保存到持久化存储
+      await saveBooks();
+      
+      console.log('书籍添加并保存成功');
+    } catch (error) {
+      console.error('添加书籍失败:', error);
+      if (error instanceof Error) {
+        console.error('错误详情:', error.message);
+        console.error('错误堆栈:', error.stack);
+      }
+      throw error; // 重新抛出错误，让调用方知道操作失败
+    }
   };
 
   const updateBook = async (bookId: string, updates: Partial<EbookMetadata>) => {
@@ -182,32 +300,21 @@ export const useEbookStore = defineStore('ebook', () => {
 
   const removeBook = async (bookId: string, storageType?: 'local' | 'baidupan') => {
     try {
-      console.log('正在删除书籍:', bookId, '存储类型:', storageType);
+      // 1. 找到索引
+      const index = books.value.findIndex(book => book.id === bookId);
+      if (index === -1) return false;
+
+      const actualStorageType = storageType || books.value[index].storageType;
+
+      // 2. 使用 splice 显式触发 Vue 响应式（更稳健）
+      books.value.splice(index, 1);
       
-      // 1. 找到要删除的书籍，获取其存储类型（如果未提供）
-      const bookToRemove = books.value.find(book => book.id === bookId);
-      const actualStorageType = storageType || bookToRemove?.storageType;
-      
-      console.log('实际存储类型:', actualStorageType);
-      
-      // 2. 过滤掉要删除的书籍，重新赋值触发响应式
-      const initialLength = books.value.length;
-      books.value = books.value.filter(book => book.id !== bookId);
-      
-      if (books.value.length === initialLength) {
-        console.error('未找到要删除的书籍:', bookId);
-        throw new Error('未找到要删除的书籍');
-      }
-      
-      // 3. 同步到本地数据库
-      await saveBooks();
-      
-      // 4. 清理该书籍关联的物理文件
+      // 3. 异步执行持久化清理，不阻塞 UI 响应
+      saveBooks(); 
+
       if (actualStorageType === 'local') {
-        console.log('清理本地存储的书籍文件:', bookId);
-        await localforage.removeItem(`ebook_content_${bookId}`);
-        // 清理封面
-        await localforage.removeItem(`ebook_cover_${bookId}`);
+        localforage.removeItem(`ebook_content_${bookId}`);
+        localforage.removeItem(`ebook_cover_${bookId}`);
       }
       
       console.log('书籍删除成功');
@@ -844,6 +951,8 @@ export const useEbookStore = defineStore('ebook', () => {
   // 导入 EPUB 文件
   const importEpubFile = async (file: File): Promise<EbookMetadata | null> => {
     try {
+      console.log('开始导入 EPUB 文件:', file.name);
+      
       // 生成唯一 ID
       const id = `epub_${uuidv4()}`;
       
@@ -851,35 +960,69 @@ export const useEbookStore = defineStore('ebook', () => {
       const arrayBuffer = await file.arrayBuffer();
       
       // 保存文件内容到 IndexedDB
+      console.log('保存文件内容到 IndexedDB，键名:', `ebook_content_${id}`);
       await localforage.setItem(`ebook_content_${id}`, arrayBuffer);
       
-      // 提取封面
+      // 提取元数据（封面、作者、标题等）
       let coverData = '';
+      let authorData = '未知作者';
+      let titleData = file.name.replace('.epub', '');
+      
       try {
         const book = ePub(arrayBuffer);
         // 等待书籍加载完成
         await new Promise((resolve, reject) => {
           book.ready.then(resolve).catch(reject);
         });
+        
+        // 提取书籍元数据
+        const metadata = await book.loaded.metadata;
+        console.log('EPUB 元数据:', metadata);
+        
+        // 提取作者
+        if (metadata.creator) {
+          if (Array.isArray(metadata.creator)) {
+            authorData = metadata.creator.join(', ');
+          } else {
+            authorData = metadata.creator;
+          }
+        }
+        
+        // 提取标题
+        if (metadata.title) {
+          titleData = metadata.title;
+        }
+        
         // 获取封面 URL
         const coverUrl = await book.coverUrl();
+        console.log('封面 URL:', coverUrl);
         if (coverUrl) {
-          // 如果是相对路径，需要转换为绝对路径或获取原始数据
+          // 如果是 blob URL，转换为 Base64 持久化存储
           if (typeof coverUrl === 'string' && coverUrl.startsWith('blob:')) {
-            coverData = coverUrl;
+            try {
+              console.log('将 Blob URL 转换为 Base64');
+              coverData = await blobToBase64(coverUrl);
+              console.log('封面转换成功，Base64 长度:', coverData.length);
+              // 释放原有的 Blob 内存
+              URL.revokeObjectURL(coverUrl);
+            } catch (e) {
+              console.warn('封面转换 Base64 失败:', e);
+              coverData = '';
+            }
           } else {
+            // 对于相对路径或其他格式，直接使用
             coverData = coverUrl;
           }
         }
       } catch (e) {
-        console.warn('封面提取失败:', e);
+        console.warn('元数据提取失败:', e);
       }
       
       // 创建电子书元数据
       const ebookMetadata: EbookMetadata = {
         id,
-        title: file.name.replace('.epub', ''),
-        author: '未知作者',
+        title: titleData,
+        author: authorData,
         cover: coverData,
         path: id, // 使用 ID 作为路径，后续通过 ID 获取文件内容
         format: 'epub',
@@ -891,12 +1034,25 @@ export const useEbookStore = defineStore('ebook', () => {
         addedAt: Date.now()
       };
       
+      console.log('创建电子书元数据:', {
+        id: ebookMetadata.id,
+        title: ebookMetadata.title,
+        author: ebookMetadata.author,
+        cover: ebookMetadata.cover,
+        storageType: ebookMetadata.storageType
+      });
+      
       // 保存到本地存储
       await addBook(ebookMetadata);
       
+      console.log('EPUB 文件导入成功');
       return ebookMetadata;
     } catch (error) {
       console.error('导入 EPUB 文件失败:', error);
+      if (error instanceof Error) {
+        console.error('错误详情:', error.message);
+        console.error('错误堆栈:', error.stack);
+      }
       return null;
     }
   }
