@@ -1,7 +1,8 @@
 1、运行在8080端口
-2、默认终端是powershell
+2、终端是 PowerShell
 3、默认浏览器是chrome
 4、百度网盘开放平台文档如下
+5、中文对话
 https://pan.baidu.com/union/doc/3ksg0s9ye
 https://pan.baidu.com/union/doc/3ksg0s9r7
 https://pan.baidu.com/union/doc/nksg0s9vi

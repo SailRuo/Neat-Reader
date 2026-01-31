@@ -32,30 +32,39 @@
 
 ```
 neat-reader/
-├── src/
-│   ├── assets/
-│   │   └── styles/
-│   │       └── global.css       # 全局样式
-│   ├── components/
-│   │   └── Dialog/              # 对话框组件
-│   ├── pages/
-│   │   ├── Callback/            # OAuth 回调页面
-│   │   ├── FileManager/         # 文件管理器页面
-│   │   ├── Home/                # 首页
-│   │   ├── Reader/              # 阅读器页面
-│   │   └── Settings/            # 设置页面
-│   ├── stores/
-│   │   ├── dialog.ts            # 对话框状态管理
-│   │   └── ebook.ts             # 电子书状态管理
-│   ├── App.vue                  # 根组件
-│   ├── main.ts                  # 应用入口
-│   └── router.ts                # 路由配置
-├── server/
-│   └── main.go                  # Go 后端服务
-├── package.json                 # 前端依赖配置
-├── package.json.server          # 后端依赖配置
-├── vite.config.ts               # Vite 配置
-└── tsconfig.json                # TypeScript 配置
+├── frontend/
+│   ├── src/
+│   │   ├── assets/
+│   │   │   └── styles/
+│   │   │       └── global.css       # 全局样式
+│   │   ├── components/
+│   │   │   └── Dialog/              # 对话框组件
+│   │   ├── pages/
+│   │   │   ├── Callback/            # OAuth 回调页面
+│   │   │   ├── FileManager/         # 文件管理器页面
+│   │   │   ├── Home/                # 首页
+│   │   │   ├── Reader/              # 阅读器页面
+│   │   │   └── Settings/            # 设置页面
+│   │   ├── stores/
+│   │   │   ├── dialog.ts            # 对话框状态管理
+│   │   │   └── ebook.ts             # 电子书状态管理
+│   │   ├── App.vue                  # 根组件
+│   │   ├── main.ts                  # 应用入口
+│   │   ├── router.ts                # 路由配置
+│   │   └── wails.ts                 # Wails 绑定
+│   ├── wailsjs/                     # Wails 自动生成的绑定文件
+│   ├── index.html                   # HTML 入口文件
+│   ├── package.json                 # 前端依赖配置
+│   ├── package-lock.json            # 前端依赖锁定文件
+│   ├── tsconfig.json                # TypeScript 配置
+│   ├── tsconfig.node.json           # TypeScript Node 配置
+│   └── vite.config.ts               # Vite 配置
+├── app.go                           # Go 后端应用逻辑
+├── wails.go                         # Wails 应用入口
+├── wails.json                       # Wails 配置文件
+├── go.mod                           # Go 模块配置
+├── go.sum                           # Go 依赖锁定文件
+└── README.md                        # 项目说明文档
 ```
 
 ## 快速开始
@@ -63,6 +72,9 @@ neat-reader/
 ### 前端安装与运行
 
 ```bash
+# 进入前端目录
+cd frontend
+
 # 安装依赖
 npm install
 
@@ -79,19 +91,16 @@ npm run typecheck
 npm run preview
 ```
 
-### 后端服务（百度网盘代理）
+### Wails 开发模式
 
-后端服务使用 Go 语言开发，用于处理百度网盘 API 请求。
+使用 Wails CLI 启动完整的开发环境（同时启动前端和后端服务）：
 
 ```bash
-# 安装 Go 依赖
-cd server
-go mod tidy
+# 在项目根目录运行
+wails dev
 
-# 启动后端服务
-go run main.go
-
-# 后端服务默认运行在 http://localhost:3001
+# 开发服务器默认运行在 http://localhost:8080
+# Wails 应用会自动打开
 ```
 
 ## 主要页面
@@ -131,27 +140,31 @@ go run main.go
 
 ### 配置后端服务
 
-编辑 `server/main.go` 文件，配置以下变量：
+百度网盘 API 配置在前端代码中管理，通过前端界面进行设置。首次使用时，您需要：
 
-```go
-var (
-    ClientID     = "your_app_key"                   // 百度网盘 App Key
-    ClientSecret = "your_client_secret"             // 百度网盘 App Secret
-    RedirectURI  = "http://localhost:8080/callback" // 回调地址
-)
-```
+1. 前往[百度开放平台](https://open.baidu.com/)创建应用
+2. 获取 `Client ID` 和 `Client Secret`
+3. 在应用设置中配置回调地址为 `http://localhost:8080/callback`
+4. 在应用的设置页面中输入这些配置信息
+
+后端服务会自动使用这些配置与百度网盘 API 进行交互。
 
 ### API 端点
 
-| 功能 | 端点 | 方法 |
-|------|------|------|
-| 健康检查 | `/health` | GET |
-| 获取 Token | `/api/baidu/oauth/token` | GET |
-| 刷新 Token | `/api/baidu/oauth/refresh` | POST |
-| 文件列表 | `/api/baidu/pan/file` | GET |
-| 搜索文件 | `/api/baidu/pan/search` | GET |
-| 文件上传 | `/api/baidu/pan/upload` | POST |
-| 验证 Token | `/api/baidu/pan/verify` | GET |
+后端服务通过 Wails 绑定提供以下功能，这些功能通过前端直接调用 Go 方法实现，而不是通过 HTTP API 端点：
+
+| 功能 | Go 方法 | 描述 |
+|------|---------|------|
+| 健康检查 | `GetHealth()` | 检查服务状态 |
+| 获取 Token | `GetTokenViaCode(code, clientId, clientSecret, redirectUri)` | 通过授权码获取访问令牌 |
+| 刷新 Token | `RefreshToken(refreshToken, clientId, clientSecret)` | 刷新访问令牌 |
+| 文件列表 | `GetFileList(accessToken, dir, pageNum, pageSize, order, method, recursion)` | 获取文件列表 |
+| 搜索文件 | `SearchFiles(accessToken, key, dir, method, recursion)` | 搜索文件 |
+| 文件上传 | `UploadFile(fileName, fileData, accessToken)` | 上传文件到百度网盘 |
+| 验证 Token | `VerifyToken(accessToken)` | 验证访问令牌有效性 |
+| 打开目录 | `OpenDirectory()` | 打开系统目录选择对话框 |
+| 读取文件 | `ReadFile(path)` | 读取本地文件内容 |
+| 选择文件 | `SelectFile()` | 打开系统文件选择对话框 |
 
 ## 开发说明
 
@@ -163,17 +176,32 @@ var (
 
 ### 开发模式
 
+#### 方式一：使用 Wails CLI（推荐）
+
+```bash
+# 在项目根目录运行
+wails dev
+
+# Wails 会自动启动前端开发服务器和后端服务
+# 应用会自动打开
+# 开发服务器默认运行在 http://localhost:8080
+```
+
+#### 方式二：分别启动前端和后端
+
 1. 启动前端开发服务器：
    ```bash
-   npm run dev
+   cd frontend && npm run dev
    ```
 
-2. 启动后端服务：
+2. 启动 Wails 后端服务（在另一个终端）：
    ```bash
-   cd server && go run main.go
+   wails dev -frontenddevserverurl http://localhost:8080
    ```
 
 3. 访问 `http://localhost:8080` 开始使用
+
+**说明**：使用 `-frontenddevserverurl` 参数可以让 Wails 连接到已经运行的前端开发服务器，而不是使用 `dist` 目录中的静态文件，这样可以实现热更新功能。
 
 ### 代码规范
 
@@ -184,21 +212,24 @@ var (
 
 ## 构建部署
 
-### 前端构建
+### 使用 Wails 构建完整应用
 
 ```bash
+# 在项目根目录运行
+wails build
+
+# 构建产物位于 `build` 目录
+# 可执行文件为 `neat-reader.exe`（Windows）或 `neat-reader`（Linux/Mac）
+```
+
+### 前端构建（仅静态文件）
+
+```bash
+cd frontend
 npm run build
 ```
 
-构建产物位于 `dist` 目录，可部署到任何静态文件服务器。
-
-### 后端部署
-
-```bash
-cd server
-go build -o neat-reader-server main.go
-./neat-reader-server
-```
+构建产物位于 `frontend/dist` 目录，可部署到任何静态文件服务器。
 
 ## 浏览器支持
 

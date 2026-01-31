@@ -13,18 +13,18 @@
             <div class="setting-row">
               <div class="setting-info">
                 <span class="setting-label">授权状态</span>
-                <span class="setting-desc" v-if="authUser">已连接：{{ authUser.baidu_name }}</span>
+                <span class="setting-desc" v-if="baidupanUser">已连接：{{ baidupanUser.baidu_name }}</span>
                 <span class="setting-desc" v-else>配置百度网盘信息以获取access_token</span>
               </div>
               <div class="setting-control">
                 <div class="baidupan-status">
-                  <span v-if="authUser" class="status connected">已授权</span>
+                  <span v-if="baidupanUser" class="status connected">已授权</span>
                   <span v-else class="status disconnected">未授权</span>
                 </div>
               </div>
             </div>
 
-            <div class="setting-row" v-if="!authUser">
+            <div class="setting-row" v-if="!baidupanUser">
               <div class="setting-info" style="width: 100%;">
                 <input 
                   type="text" 
@@ -56,16 +56,23 @@
                 >
                   {{ isLoading ? '获取中...' : '获取access_token' }}
                 </button>
+                <button 
+                  class="btn btn-secondary" 
+                  style="width: 100%; margin-top: 12px;"
+                  @click="getAuthorization"
+                >
+                  获取授权
+                </button>
               </div>
             </div>
 
             <div class="setting-row" v-else>
               <div class="setting-info" style="width: 100%;">
                 <div class="user-info">
-                  <img :src="authUser.avatar_url" class="user-avatar" alt="头像">
+                  <img :src="baidupanUser.avatar_url" class="user-avatar" alt="头像">
                   <div class="user-detail">
-                    <span class="user-name">{{ authUser.baidu_name }}</span>
-                    <span class="user-vip">{{ authUser.vip_type === 2 ? '超级会员' : authUser.vip_type === 1 ? '普通会员' : '普通用户' }}</span>
+                    <span class="user-name">{{ baidupanUser.baidu_name }}</span>
+                    <span class="user-vip">{{ baidupanUser.vip_type === 2 ? '超级会员' : baidupanUser.vip_type === 1 ? '普通会员' : '普通用户' }}</span>
                   </div>
                 </div>
                 <button 
@@ -75,90 +82,6 @@
                 >
                   取消授权
                 </button>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section class="setting-section">
-          <h2 class="section-title">阅读</h2>
-          <div class="setting-card">
-            <div class="setting-row">
-              <div class="setting-info">
-                <span class="setting-label">字体大小</span>
-                <span class="setting-desc">调整阅读时的字体大小 ({{ readerConfig.fontSize }}px)</span>
-              </div>
-              <div class="setting-control">
-                <div class="stepper">
-                  <button class="btn btn-secondary btn-sm" @click="decreaseFontSize">-</button>
-                  <span class="stepper-value">{{ readerConfig.fontSize }}</span>
-                  <button class="btn btn-secondary btn-sm" @click="increaseFontSize">+</button>
-                </div>
-              </div>
-            </div>
-
-            <div class="setting-row">
-              <div class="setting-info">
-                <span class="setting-label">字体</span>
-                <span class="setting-desc">选择阅读时的字体</span>
-              </div>
-              <div class="setting-control">
-                <select class="form-control" :model-value="readerConfig.fontFamily" @change="updateFontFamily">
-                  <option value="system">系统默认</option>
-                  <option value="sans-serif">无衬线体</option>
-                  <option value="serif">衬线体</option>
-                  <option value="monospace">等宽字体</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="setting-row">
-              <div class="setting-info">
-                <span class="setting-label">主题</span>
-                <span class="setting-desc">选择阅读界面的主题</span>
-              </div>
-              <div class="setting-control">
-                <div class="theme-selector">
-                  <button 
-                    class="theme-btn light" 
-                    :class="{ active: readerConfig.theme === 'light' }"
-                    @click="updateTheme('light')"
-                    title="浅色"
-                  ></button>
-                  <button 
-                    class="theme-btn sepia" 
-                    :class="{ active: readerConfig.theme === 'sepia' }"
-                    @click="updateTheme('sepia')"
-                    title="护眼"
-                  ></button>
-                  <button 
-                    class="theme-btn dark" 
-                    :class="{ active: readerConfig.theme === 'dark' }"
-                    @click="updateTheme('dark')"
-                    title="深色"
-                  ></button>
-                </div>
-              </div>
-            </div>
-
-            <div class="setting-row">
-              <div class="setting-info">
-                <span class="setting-label">翻页模式</span>
-                <span class="setting-desc">选择翻页方式</span>
-              </div>
-              <div class="setting-control">
-                <div class="toggle-group">
-                  <button 
-                    class="toggle-btn" 
-                    :class="{ active: readerConfig.pageMode === 'page' }"
-                    @click="updatePageMode('page')"
-                  >单页</button>
-                  <button 
-                    class="toggle-btn" 
-                    :class="{ active: readerConfig.pageMode === 'scroll' }"
-                    @click="updatePageMode('scroll')"
-                  >滚动</button>
-                </div>
               </div>
             </div>
           </div>
@@ -217,15 +140,14 @@ const ebookStore = useEbookStore()
 const dialogStore = useDialogStore()
 
 const storageConfig = computed(() => ebookStore.userConfig.storage)
-const readerConfig = computed(() => ebookStore.userConfig.reader)
 const uiConfig = computed(() => ebookStore.userConfig.ui)
+const baidupanUser = computed(() => ebookStore.baidupanUser)
 
 const baiduClientId = ref('hq9yQ9w9kR4YHj1kyYafLygVocobh7Sf')
 const baiduClientSecret = ref('YH2VpZcFJHYNnV6vLfHQXDBhcE7ZChyE')
 const refreshToken = ref('')
 const inputAccessToken = ref('')
 const isLoading = ref(false)
-const authUser = ref<{baidu_name: string; avatar_url: string; vip_type: number} | null>(null)
 
 const handlePaste = (event: ClipboardEvent) => {
   const text = event.clipboardData?.getData('text')
@@ -233,6 +155,17 @@ const handlePaste = (event: ClipboardEvent) => {
     refreshToken.value = text
     event.preventDefault()
   }
+}
+
+const getAuthorization = () => {
+  const clientId = baiduClientId.value
+  const redirectUri = 'http://localhost:8080/callback'
+  const scope = 'basic,netdisk'
+  const state = Date.now().toString()
+  
+  const authUrl = `https://openapi.baidu.com/oauth/2.0/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${state}`
+  
+  window.open(authUrl, '_blank', 'width=800,height=600')
 }
 
 const refreshAccessToken = async () => {
@@ -269,23 +202,23 @@ const verifyAndConnect = async () => {
     const data = JSON.parse(result)
     
     if (!data.error) {
-      authUser.value = {
-        baidu_name: data.name || '未知用户',
-        avatar_url: data.avatar_url || '',
-        vip_type: data.vip_type || 0
-      }
-      
       await ebookStore.updateUserConfig({
         storage: {
           ...storageConfig.value,
           baidupan: {
             ...storageConfig.value.baidupan,
             accessToken: inputAccessToken.value,
+            refreshToken: refreshToken.value,
             userId: String(data.uk),
-            expiration: Date.now() + 30 * 24 * 60 * 60 * 1000
+            expiration: Date.now() + 30 * 24 * 60 * 60 * 1000,
+            rootPath: storageConfig.value.baidupan?.rootPath || '',
+            namingStrategy: storageConfig.value.baidupan?.namingStrategy || '0'
           }
         }
       })
+      
+      await ebookStore.fetchBaidupanUserInfo(true)
+      
       dialogStore.showSuccessDialog('百度网盘授权成功')
     } else {
       dialogStore.showErrorDialog('验证失败', data.message || '无效的token')
@@ -304,50 +237,18 @@ const disconnect = async () => {
       baidupan: {
         ...storageConfig.value.baidupan,
         accessToken: '',
-        userId: ''
+        refreshToken: '',
+        userId: '',
+        expiration: 0,
+        rootPath: '',
+        namingStrategy: '0'
       }
     }
   })
-  authUser.value = null
   refreshToken.value = ''
   baiduClientId.value = ''
   baiduClientSecret.value = ''
   dialogStore.showSuccessDialog('已取消授权')
-}
-
-const decreaseFontSize = async () => {
-  if (readerConfig.value.fontSize > 12) {
-    await ebookStore.updateUserConfig({
-      reader: { ...readerConfig.value, fontSize: readerConfig.value.fontSize - 1 }
-    })
-  }
-}
-
-const increaseFontSize = async () => {
-  if (readerConfig.value.fontSize < 32) {
-    await ebookStore.updateUserConfig({
-      reader: { ...readerConfig.value, fontSize: readerConfig.value.fontSize + 1 }
-    })
-  }
-}
-
-const updateFontFamily = async (event: Event) => {
-  const target = event.target as HTMLSelectElement
-  await ebookStore.updateUserConfig({
-    reader: { ...readerConfig.value, fontFamily: target.value }
-  })
-}
-
-const updateTheme = async (theme: 'light' | 'sepia' | 'dark') => {
-  await ebookStore.updateUserConfig({
-    reader: { ...readerConfig.value, theme }
-  })
-}
-
-const updatePageMode = async (mode: 'page' | 'scroll') => {
-  await ebookStore.updateUserConfig({
-    reader: { ...readerConfig.value, pageMode: mode }
-  })
 }
 
 const updateViewMode = async (mode: 'grid' | 'list') => {
@@ -367,19 +268,7 @@ onMounted(async () => {
   await ebookStore.initialize()
   
   if (storageConfig.value.baidupan?.accessToken) {
-    try {
-      const result = await wails.verifyToken(storageConfig.value.baidupan.accessToken)
-      const data = JSON.parse(result)
-      if (!data.error) {
-        authUser.value = {
-          baidu_name: data.name || '未知用户',
-          avatar_url: data.avatar_url || '',
-          vip_type: data.vip_type || 0
-        }
-      }
-    } catch {
-      console.warn('验证已保存的token失败')
-    }
+    await ebookStore.fetchBaidupanUserInfo()
   }
 })
 </script>
@@ -502,49 +391,6 @@ onMounted(async () => {
 .status.disconnected {
   background-color: #FEF0F0;
   color: #F56C6C;
-}
-
-.stepper {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.stepper-value {
-  min-width: 40px;
-  text-align: center;
-  font-weight: 500;
-}
-
-.theme-selector {
-  display: flex;
-  gap: 8px;
-}
-
-.theme-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  border: 2px solid transparent;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.theme-btn.light {
-  background: linear-gradient(135deg, #fff 50%, #f5f5f5 50%);
-}
-
-.theme-btn.sepia {
-  background: linear-gradient(135deg, #f4ecd8 50%, #e8dcc8 50%);
-}
-
-.theme-btn.dark {
-  background: linear-gradient(135deg, #2c2c2c 50%, #1a1a1a 50%);
-}
-
-.theme-btn.active {
-  border-color: #4A90E2;
-  transform: scale(1.1);
 }
 
 .toggle-group {

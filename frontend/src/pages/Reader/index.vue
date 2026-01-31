@@ -1,5 +1,5 @@
 <template>
-  <div class="reader-master" :class="[`theme-${theme}`, { 'controls-visible': showControls }]">
+  <div class="reader-master" :class="[`theme-${theme}`, { 'controls-visible': showControls }]" @wheel="handleWheel" @click="handleReaderClick">
     <!-- 全局加载动画 -->
     <transition name="fade">
       <div v-if="loading" class="global-loader">
@@ -31,17 +31,24 @@
         </div>
         <div class="bar-section right">
           <div class="quick-actions-header">
+            <button class="btn-icon" @click="openSidebar('notes')" title="笔记列表">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M14.06 9.02l.92.92L5.92 19H5v-.92l9.06-9.06M17.66 3c-.25 0-.51.1-.7.29l-1.83 1.83 3.75 3.75 1.83-1.83c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.2-.2-.45-.29-.71-.29zm-3.6 3.19L3 17.25V21h3.75L17.81 9.94l-3.75-3.75z"/></svg>
+            </button>
+            <button class="btn-icon" @click="exportNotes" title="导出笔记">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+            </button>
             <button class="btn-icon" @click="toggleBookmark" :title="isBookmarked ? '取消书签' : '添加书签'">
-              <i :class="['icon', isBookmarked ? 'icon-bookmark-filled' : 'icon-bookmark']"></i>
+              <svg v-if="!isBookmarked" viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z"/></svg>
+              <svg v-else viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2zm0 15l-5-2.18L7 18V5h10v13z"/></svg>
             </button>
             <button class="btn-icon" @click="openSidebar('search')" title="搜索">
-              <i class="icon-search"></i>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
             </button>
             <button class="btn-icon" @click="openSidebar('contents')" title="目录">
-              <i class="icon-toc"></i>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
             </button>
             <button class="btn-icon" @click="openSidebar('settings')" title="设置">
-              <i class="icon-settings"></i>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
             </button>
           </div>
         </div>
@@ -65,7 +72,7 @@
             <div class="translation-header">
               <span class="translation-label">翻译</span>
               <button class="btn-icon small" @click="translationMode = false">
-                <i class="icon-close"></i>
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
               </button>
             </div>
             <div class="translation-body">{{ translationText }}</div>
@@ -86,41 +93,34 @@
       <!-- 常驻进度指示器 -->
       <div class="persistent-info">
         <div class="progress-indicator" @click="toggleProgressPopup">
-          <span class="percent">{{ displayProgress }}%</span>
-          <div class="mini-bar">
-            <div class="fill" :style="{ width: displayProgress + '%' }"></div>
-          </div>
-        </div>
-        <div class="page-indicator" v-if="pageMode === 'page'">
-          第 {{ currentPage }} / {{ totalPages }} 页
+          <span class="progress-text">
+            {{ displayProgress }}%
+            <span v-if="pageMode === 'page' && book?.format === 'pdf'">
+              · {{ currentPdfPage }}/{{ totalPdfPages }}
+            </span>
+            <span v-else-if="pageMode === 'page'">
+              · {{ currentPage }}/{{ totalPages }}
+            </span>
+          </span>
         </div>
       </div>
 
       <!-- 交互热区 -->
-      <div class="interaction-layer">
-        <div class="hotspot left" @click="pageMode === 'page' && prevPage()" title="上一页">
-          <div class="nav-hint">←</div>
-        </div>
-        <div class="hotspot center" @click="toggleControls">
-          <div class="tap-hint" v-if="showTapHint">点击显示控制栏</div>
-        </div>
-        <div class="hotspot right" @click="pageMode === 'page' && nextPage()" title="下一页">
-          <div class="nav-hint">→</div>
-        </div>
-      </div>
+      <div class="interaction-layer"></div>
 
-      <!-- 快速操作悬浮按钮 -->
-      <div class="floating-actions" v-show="!showControls">
-        <button class="fab" @click="toggleTranslationMode" :class="{ active: translationMode }" title="翻译">
-          <i class="icon-translate"></i>
-        </button>
-        <button class="fab" @click="addNote" title="笔记">
-          <i class="icon-note"></i>
-        </button>
-        <button class="fab" @click="toggleBookmark" :class="{ active: isBookmarked }" title="书签">
-          <i class="icon-bookmark"></i>
-        </button>
-      </div>
+      <!-- 文本选中悬浮菜单 -->
+      <transition name="fade">
+        <div v-if="showSelectionMenu" class="selection-menu" :style="selectionMenuStyle">
+          <button class="selection-btn" @click.stop="addNote">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M14.06 9.02l.92.92L5.92 19H5v-.92l9.06-9.06M17.66 3c-.25 0-.51.1-.7.29l-1.83 1.83 3.75 3.75 1.83-1.83c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.2-.2-.45-.29-.71-.29zm-3.6 3.19L3 17.25V21h3.75L17.81 9.94l-3.75-3.75z"/></svg>
+            <span>添加笔记</span>
+          </button>
+          <button class="selection-btn" @click.stop="translateSelectedText">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12.87 15.07l-2.54-2.51.03-.03c1.74-1.94 2.98-4.17 3.71-6.53H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/></svg>
+            <span>翻译</span>
+          </button>
+        </div>
+      </transition>
     </main>
 
     <!-- 底部控制栏 -->
@@ -174,11 +174,11 @@
               <div class="section-label">字号</div>
               <div class="font-stepper">
                 <button @click="changeFontSize(-1)" :disabled="fontSize <= 12">
-                  <i class="icon-font-smaller"></i>
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
                 </button>
                 <div class="font-size-display">{{ fontSize }}px</div>
                 <button @click="changeFontSize(1)" :disabled="fontSize >= 30">
-                  <i class="icon-font-larger"></i>
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
                 </button>
               </div>
             </div>
@@ -191,21 +191,21 @@
                   :class="['mode-option', { active: pageMode === 'page' }]"
                   @click="switchPageMode('page')"
                 >
-                  <i class="icon-page-mode"></i>
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14z"/></svg>
                   <span>翻页</span>
                 </button>
                 <button 
                   :class="['mode-option', { active: pageMode === 'scroll' }]"
                   @click="switchPageMode('scroll')"
                 >
-                  <i class="icon-scroll-mode"></i>
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
                   <span>滚动</span>
                 </button>
                 <button 
                   :class="['mode-option', { active: translationMode }]"
                   @click="toggleTranslationMode"
                 >
-                  <i class="icon-translate"></i>
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12.87 15.07l-2.54-2.51.03-.03c1.74-1.94 2.98-4.17 3.71-6.53H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/></svg>
                   <span>翻译</span>
                 </button>
               </div>
@@ -266,7 +266,7 @@
               </div>
               
               <div v-if="hasSearched && searchResults.length === 0" class="empty-tip">
-                <i class="icon-search-empty"></i>
+                <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
                 <p>未找到匹配项</p>
                 <p class="empty-tip-sub">尝试更换关键词或调整搜索设置</p>
               </div>
@@ -301,8 +301,38 @@
                 </div>
                 <div class="toc-node-indicator">
                   <div class="progress-dot" v-if="item.progress > 0 && item.progress < 1"></div>
-                  <i class="icon-check" v-if="item.progress === 1"></i>
+                  <svg v-if="item.progress === 1" viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 笔记列表面板 -->
+          <div v-if="activeSidebar === 'notes'" class="panel-notes">
+            <div class="notes-header">
+              <h4>我的笔记</h4>
+              <span class="notes-count">{{ notes.length }} 条</span>
+            </div>
+            
+            <div v-if="notes.length === 0" class="empty-notes">
+              <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor"><path d="M14.06 9.02l.92.92L5.92 19H5v-.92l9.06-9.06M17.66 3c-.25 0-.51.1-.7.29l-1.83 1.83 3.75 3.75 1.83-1.83c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.2-.2-.45-.29-.71-.29zm-3.6 3.19L3 17.25V21h3.75L17.81 9.94l-3.75-3.75z"/></svg>
+              <p>还没有笔记</p>
+              <p class="empty-tip-sub">选中文本后点击"添加笔记"开始记录</p>
+            </div>
+            
+            <div v-else class="notes-list">
+              <div 
+                v-for="note in notes" 
+                :key="note.id" 
+                class="note-item"
+                @click="jumpToNote(note.cfi)"
+              >
+                <div class="note-item-header">
+                  <span class="note-chapter">{{ note.chapter }}</span>
+                  <span class="note-time">{{ formatNoteTime(note.timestamp) }}</span>
+                </div>
+                <div class="note-item-text">{{ note.text }}</div>
+                <div class="note-item-content">{{ note.content }}</div>
               </div>
             </div>
           </div>
@@ -410,15 +440,46 @@
             <!-- 数据管理 -->
             <div class="settings-group">
               <button class="btn-settings" @click="exportReadingData">
-                <i class="icon-export"></i> 导出阅读数据
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg> 导出阅读数据
               </button>
               <button class="btn-settings" @click="clearCache">
-                <i class="icon-clear"></i> 清除缓存
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg> 清除缓存
               </button>
             </div>
           </div>
         </div>
       </aside>
+    </transition>
+
+    <!-- 笔记对话框 -->
+    <transition name="fade">
+      <div v-if="showNoteDialog" class="note-dialog-overlay" @click="cancelNote">
+        <div class="note-dialog" @click.stop>
+          <div class="note-dialog-header">
+            <h3>添加笔记</h3>
+            <button class="close-x" @click="cancelNote">×</button>
+          </div>
+          <div class="note-dialog-body">
+            <div class="selected-text">
+              <div class="label">选中文本</div>
+              <p>{{ currentNoteText }}</p>
+            </div>
+            <div class="note-content">
+              <div class="label">笔记内容</div>
+              <textarea 
+                v-model="currentNoteContent" 
+                placeholder="输入你的笔记..."
+                rows="4"
+                ref="noteInput"
+              ></textarea>
+            </div>
+          </div>
+          <div class="note-dialog-footer">
+            <button class="btn-secondary" @click="cancelNote">取消</button>
+            <button class="btn-primary" @click="saveNote(currentNoteContent)">保存</button>
+          </div>
+        </div>
+      </div>
     </transition>
 
     <!-- 亮度遮罩层 -->
@@ -446,8 +507,8 @@ const loading = ref(true)
 const showControls = ref(true)
 const isSavingProgress = ref(false)
 const isLocationsReady = ref(false)
-const activeSidebar = ref<'search' | 'contents' | 'settings' | null>(null)
-const theme = ref<'light' | 'sepia' | 'dark'>('light')
+const activeSidebar = ref<'search' | 'contents' | 'settings' | 'notes' | null>(null)
+const theme = ref<'light' | 'sepia' | 'dark' | 'green'>('light')
 const fontSize = ref(18)
 const lineHeight = ref(1.5)
 const brightness = ref(100)
@@ -458,7 +519,6 @@ const autoScroll = ref(false)
 const pageAnimation = ref(true)
 const autoNightMode = ref(false)
 const nightModeTime = ref('22:00')
-const showTapHint = ref(false)
 
 // 书籍相关
 const book = ref<any>(null)
@@ -480,6 +540,18 @@ const translationPending = ref(false)
 // 书签相关
 const isBookmarked = ref(false)
 const bookmarks = ref<any[]>([])
+
+// 笔记相关
+const notes = ref<any[]>([])
+const showNoteDialog = ref(false)
+const currentNoteText = ref('')
+const currentNoteContent = ref('')
+const currentNoteCfi = ref('')
+const currentNoteChapter = ref('')
+const showSelectionMenu = ref(false)
+const selectionMenuStyle = ref({ top: '0px', left: '0px' })
+const isDragging = ref(false)
+const mouseDownPos = ref({ x: 0, y: 0 })
 
 // 搜索相关
 const searchQuery = ref('')
@@ -513,11 +585,16 @@ const prevChapterTrigger = ref<HTMLElement | null>(null)
 let autoScrollTimer: number | null = null
 const AUTO_SCROLL_INTERVAL = 50
 const isChapterSwitching = ref(false)
+let wheelDebounceTimer: number | null = null
+let lastWheelTime = 0
+const WHEEL_DEBOUNCE_DELAY = 150
+const WHEEL_THRESHOLD = 10
 
 // 主题配置
 const themeConfig = {
   light: { name: '明亮', bg: '#ffffff', text: '#2c3e50', icon: '#4a5568' },
   sepia: { name: '护眼', bg: '#f4ecd8', text: '#5b4636', icon: '#7c6f5a' },
+  green: { name: '护眼绿', bg: '#e8f5e9', text: '#2d5a3d', icon: '#4a7c59' },
   dark: { name: '夜晚', bg: '#1a1a1a', text: '#e2e8f0', icon: '#a0aec0' }
 }
 
@@ -525,21 +602,81 @@ const sidebarTitle = computed(() => {
   const titles = { 
     search: '全文搜索', 
     contents: '书籍目录', 
-    settings: '个性化设置' 
+    settings: '个性化设置',
+    notes: '笔记列表'
   }
   return titles[activeSidebar.value || 'search']
 })
 
 // --- 核心交互修复 ---
+
+const handleWheel = (e: WheelEvent) => {
+  if (pageMode.value !== 'page') return
+  
+  // 防抖处理
+  const now = Date.now()
+  if (now - lastWheelTime < WHEEL_DEBOUNCE_DELAY) return
+  
+  // 阈值判断
+  if (Math.abs(e.deltaY) < WHEEL_THRESHOLD) return
+
+  lastWheelTime = now
+  
+  // 执行翻页
+  if (e.deltaY > 0) {
+    nextPage()
+  } else {
+    prevPage()
+  }
+}
+
+const handleReaderClick = (e: MouseEvent) => {
+  const target = e.target as HTMLElement
+  
+  // 修复2: 简化点击逻辑，点击非交互区域时切换控制栏
+  // 检查是否是交互元素
+  const isInteractiveElement = target.closest('.glass-bar') || 
+                              target.closest('.sidebar-system') || 
+                              target.closest('.selection-menu') ||
+                              target.closest('.btn-icon') ||
+                              target.closest('button') ||
+                              target.closest('input') ||
+                              target.closest('textarea') ||
+                              target.closest('select') ||
+                              target.closest('.translation-overlay') ||
+                              target.closest('.note-dialog')
+  
+  // 如果有文本被选中，不切换控制栏
+  const selection = window.getSelection()
+  const hasSelection = selection && selection.toString().trim().length > 0
+  
+  if (isInteractiveElement || hasSelection) {
+    return
+  }
+  
+  // 检查是否是PDF画布（PDF画布点击需要特殊处理）
+  const isPdfCanvas = target.closest('.pdf-canvas')
+  if (isPdfCanvas) {
+    toggleControls()
+    return
+  }
+  
+  // 检查是否是EPUB内容区域
+  const epubContainer = document.getElementById('epub-render-root')
+  const isEpubContent = epubContainer && (epubContainer.contains(target) || epubContainer === target)
+  
+  // 如果是阅读内容区域，点击空白处切换控制栏
+  if (isEpubContent || isPdfCanvas) {
+    toggleControls()
+  }
+}
+
 const toggleControls = () => {
   showControls.value = !showControls.value
+  
+  // 如果显示控制栏，关闭侧边栏
   if (showControls.value) {
     activeSidebar.value = null
-  } else {
-    showTapHint.value = true
-    setTimeout(() => {
-      showTapHint.value = false
-    }, 500)
   }
 }
 
@@ -574,6 +711,16 @@ const toggleTranslationMode = async () => {
       // 如果没有选中文本，获取当前可见区域的文本
       translationText.value = '请先选择要翻译的文本'
     }
+  }
+}
+
+// 新增：翻译选中文本
+const translateSelectedText = async () => {
+  const selectedText = window.getSelection()?.toString()
+  if (selectedText && selectedText.trim()) {
+    translationMode.value = true
+    await translateText(selectedText)
+    showSelectionMenu.value = false
   }
 }
 
@@ -735,6 +882,44 @@ const toggleAutoScroll = () => {
 const applyStyles = () => {
   if (!rendition.value) return
 
+  const isDark = theme.value === 'dark'
+
+  const scrollbarStyles = theme.value === 'dark' 
+    ? {
+        '::-webkit-scrollbar': {
+          'width': '6px !important'
+        },
+        '::-webkit-scrollbar-track': {
+          'background': 'rgba(0,0,0,0.3) !important',
+          'border-radius': '3px !important'
+        },
+        '::-webkit-scrollbar-thumb': {
+          'background': 'rgba(200,200,200,0.3) !important',
+          'border-radius': '3px !important',
+          'transition': 'background 0.3s ease !important'
+        },
+        '::-webkit-scrollbar-thumb:hover': {
+          'background': 'rgba(200,200,200,0.5) !important'
+        }
+      }
+    : {
+        '::-webkit-scrollbar': {
+          'width': '6px !important'
+        },
+        '::-webkit-scrollbar-track': {
+          'background': 'transparent !important',
+          'border-radius': '3px !important'
+        },
+        '::-webkit-scrollbar-thumb': {
+          'background': 'rgba(128,128,128,0.2) !important',
+          'border-radius': '3px !important',
+          'transition': 'background 0.3s ease !important'
+        },
+        '::-webkit-scrollbar-thumb:hover': {
+          'background': 'rgba(128,128,128,0.4) !important'
+        }
+      }
+
   const customTheme = {
     body: {
       'background': `${themeConfig[theme.value].bg} !important`,
@@ -753,7 +938,8 @@ const applyStyles = () => {
       '-webkit-font-smoothing': 'antialiased !important',
       '-moz-osx-font-smoothing': 'grayscale !important',
       'text-rendering': 'optimizeLegibility !important'
-    }
+    },
+    ...scrollbarStyles
   }
 
   rendition.value.themes.register('custom', customTheme)
@@ -768,6 +954,40 @@ const applyStyles = () => {
     prevChapterRendition.value.themes.register('custom', customTheme)
     prevChapterRendition.value.themes.select('custom')
   }
+
+  const scrollbarCss = `
+    html {
+      color-scheme: ${isDark ? 'dark' : 'light'};
+      overflow-y: auto;
+    }
+    
+    html::-webkit-scrollbar {
+      width: 2px !important;
+    }
+    html::-webkit-scrollbar-track {
+      background: ${isDark ? 'rgba(0,0,0,0.2)' : 'transparent'} !important;
+    }
+    html::-webkit-scrollbar-thumb {
+      background: ${isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)'} !important;
+      border-radius: 1px !important;
+    }
+    html::-webkit-scrollbar-thumb:hover {
+      background: ${isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)'} !important;
+    }
+  `
+
+  rendition.value.views().forEach((view: any) => {
+    if (view.pane) {
+      const doc = view.pane.contentDocument
+      let styleEl = doc.getElementById('custom-scrollbar-style')
+      if (!styleEl) {
+        styleEl = doc.createElement('style')
+        styleEl.id = 'custom-scrollbar-style'
+        doc.head.appendChild(styleEl)
+      }
+      styleEl.textContent = scrollbarCss
+    }
+  })
   
   updatePageInfo()
 }
@@ -782,7 +1002,7 @@ const getAlignmentValue = (alignment: string) => {
   return alignments[alignment as keyof typeof alignments] || 'justify'
 }
 
-const setTheme = (key: 'light' | 'sepia' | 'dark') => {
+const setTheme = (key: 'light' | 'sepia' | 'dark' | 'green') => {
   theme.value = key
   applyStyles()
   saveUserConfig()
@@ -945,7 +1165,10 @@ const saveProgressInternal = async (cfi: string) => {
 }
 
 const onSliderInput = () => {
-  // 实时更新进度显示
+  if (book.value?.format === 'pdf') {
+    const pageNum = Math.ceil((displayProgress.value / 100) * totalPdfPages.value)
+    currentChapterTitle.value = `第 ${pageNum} / ${totalPdfPages.value} 页`
+  }
 }
 
 const onSliderChange = async () => {
@@ -1107,14 +1330,83 @@ const initEpub = async () => {
     
     rendition.value = bookInstance.value.renderTo(container, renderOptions)
     
+    // --- 关键修复开始：通过 Hooks 注入 iframe 内部事件 ---
+    rendition.value.hooks.content.register((contents: any) => {
+      const doc = contents.document
+      const win = contents.window
+
+      const isDark = theme.value === 'dark'
+      const style = doc.createElement('style')
+      style.id = 'custom-scrollbar-style'
+      style.textContent = `
+        html { color-scheme: ${isDark ? 'dark' : 'light'}; overflow-y: auto; }
+        html::-webkit-scrollbar { width: 2px; }
+        html::-webkit-scrollbar-track { background: ${isDark ? 'rgba(0,0,0,0.2)' : 'transparent'}; }
+        html::-webkit-scrollbar-thumb { background: ${isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)'}; border-radius: 1px; }
+      `
+      doc.head.appendChild(style)
+
+      doc.addEventListener('wheel', (e: WheelEvent) => {
+        if (pageMode.value === 'page') {
+          e.preventDefault()
+          handleWheel(e)
+        }
+      }, { passive: false })
+
+      doc.addEventListener('click', (e: MouseEvent) => {
+        const selection = win.getSelection()
+        if (!selection || selection.toString().trim().length === 0) {
+          const target = e.target as HTMLElement
+          if (target.tagName !== 'A') {
+            toggleControls()
+          }
+        }
+      })
+      
+      contents.addStylesheetRules({
+        'html': {
+          'color-scheme': `${isDark ? 'dark' : 'light'} !important`,
+          'overflow-y': 'auto !important'
+        },
+        'html::-webkit-scrollbar': {
+          'width': '2px !important'
+        },
+        'html::-webkit-scrollbar-track': {
+          'background': `${isDark ? 'rgba(0,0,0,0.2)' : 'transparent'} !important`
+        },
+        'html::-webkit-scrollbar-thumb': {
+          'background': `${isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)'} !important`,
+          'border-radius': '1px !important'
+        },
+        'html::-webkit-scrollbar-thumb:hover': {
+          'background': `${isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)'} !important`
+        },
+        'body': {
+          'font-family': 'Inter, system-ui, sans-serif !important',
+          'user-select': 'auto !important'
+        }
+      })
+    })
+    // --- 关键修复结束 ---
+    
     // 加载元数据和目录
     const nav = await bookInstance.value.loaded.navigation
-    chapters.value = nav.toc.map((t: any) => ({ 
-      title: t.label, 
-      href: t.href,
-      progress: 0,
-      read: false
-    }))
+    chapters.value = nav.toc.map((t: any) => {
+      let title = t.label || t.title || '未知章节'
+      
+      if (!title || title.trim() === '') {
+        const hrefParts = t.href.split('/')
+        const fileName = hrefParts[hrefParts.length - 1]
+        title = fileName.replace(/\.x?html?$/i, '').replace(/_/g, ' ')
+      }
+      
+      return {
+        title,
+        href: t.href,
+        progress: 0,
+        read: false
+      }
+    })
     
     // 获取保存的进度
     const savedProgress = await ebookStore.loadReadingProgress(book.value.id)
@@ -1182,7 +1474,7 @@ const initEpub = async () => {
 }
 
 // --- 侧边栏管理 ---
-const openSidebar = (type: 'search' | 'contents' | 'settings') => {
+const openSidebar = (type: 'search' | 'contents' | 'settings' | 'notes') => {
   activeSidebar.value = type
   
   // 如果是搜索面板，自动聚焦输入框
@@ -1194,22 +1486,23 @@ const openSidebar = (type: 'search' | 'contents' | 'settings') => {
   
   // 添加外部点击监听
   setTimeout(() => {
-    document.addEventListener('click', handleOutsideClick)
+    document.addEventListener('click', handleOutsideClick, true)
   }, 0)
 }
 
 const handleOutsideClick = (event: MouseEvent) => {
   const sidebar = document.querySelector('.sidebar-system')
-  if (sidebar && activeSidebar.value !== null) {
-    if (!sidebar.contains(event.target as Node)) {
-      closeSidebar()
-    }
+  const isClickInsideSidebar = sidebar?.contains(event.target as Node)
+  const isClickOnTrigger = (event.target as HTMLElement)?.closest('.btn-icon')
+  
+  if (!isClickInsideSidebar && !isClickOnTrigger && activeSidebar.value !== null) {
+    closeSidebar()
   }
 }
 
 const closeSidebar = () => {
   activeSidebar.value = null
-  document.removeEventListener('click', handleOutsideClick)
+  document.removeEventListener('click', handleOutsideClick, true)
 }
 
 const goToChapter = async (href: string, index: number) => {
@@ -1227,35 +1520,36 @@ const goToChapter = async (href: string, index: number) => {
 
 // --- 数据管理 ---
 const saveUserConfig = async () => {
-  const config = {
-    theme: theme.value,
+  const readerConfig = {
     fontSize: fontSize.value,
-    lineHeight: lineHeight.value,
+    fontFamily: ebookStore.userConfig.reader.fontFamily || 'system',
+    theme: theme.value,
     pageMode: pageMode.value,
-    margin: margin.value,
-    alignment: alignment.value,
-    autoScroll: autoScroll.value,
-    pageAnimation: pageAnimation.value,
-    autoNightMode: autoNightMode.value,
-    nightModeTime: nightModeTime.value
+    brightness: brightness.value,
+    lineSpacing: ebookStore.userConfig.reader.lineSpacing || 1.5,
+    lineHeight: lineHeight.value,
+    paragraphSpacing: ebookStore.userConfig.reader.paragraphSpacing || 0,
+    autoSaveInterval: ebookStore.userConfig.reader.autoSaveInterval || 30
   }
   
-  await localforage.setItem('reader_config', config)
+  await ebookStore.updateUserConfig({ reader: readerConfig })
 }
 
 const loadUserConfig = async () => {
-  const config = await localforage.getItem('reader_config') as any
-  if (config) {
-    theme.value = config.theme || 'light'
-    fontSize.value = config.fontSize || 18
-    lineHeight.value = config.lineHeight || 1.5
-    pageMode.value = config.pageMode || 'page'
-    margin.value = config.margin || '中'
-    alignment.value = config.alignment || '两端对齐'
-    autoScroll.value = config.autoScroll || false
-    pageAnimation.value = config.pageAnimation !== false
-    autoNightMode.value = config.autoNightMode || false
-    nightModeTime.value = config.nightModeTime || '22:00'
+  const readerConfig = ebookStore.userConfig.reader
+  
+  if (readerConfig) {
+    theme.value = readerConfig.theme || 'light'
+    fontSize.value = readerConfig.fontSize || 18
+    lineHeight.value = readerConfig.lineHeight || readerConfig.lineSpacing || 1.5
+    pageMode.value = readerConfig.pageMode || 'page'
+    brightness.value = readerConfig.brightness || 100
+    margin.value = '中'
+    alignment.value = '两端对齐'
+    autoScroll.value = false
+    pageAnimation.value = true
+    autoNightMode.value = false
+    nightModeTime.value = '22:00'
   }
 }
 
@@ -1311,7 +1605,7 @@ const goBack = async () => {
     console.warn('保存进度失败:', e)
   }
 
-  if (ebookStore.isBaidupanTokenValid() && book.value) {
+  if (book.value) {
     ebookStore.syncCurrentBookProgress(book.value.id)
   }
   
@@ -1336,7 +1630,6 @@ onMounted(async () => {
   book.value = ebookStore.getBookById(bookId)
   
   if (book.value) {
-    // 根据书籍格式选择初始化函数
     if (book.value.format === 'pdf') {
       await initPdf()
     } else {
@@ -1377,7 +1670,7 @@ onBeforeUnmount(async () => {
     autoScrollTimer = null
   }
   
-  if (ebookStore.isBaidupanTokenValid() && book.value) {
+  if (book.value) {
     ebookStore.syncCurrentBookProgress(book.value.id)
   }
 })
@@ -1591,6 +1884,42 @@ const bindRenditionEvents = () => {
   rendition.value.on('rendered', () => {
     updateChapterTitle()
   })
+  
+  // 修复3：选中事件与坐标修正
+  rendition.value.on('selected', (cfiRange: string, contents: any) => {
+    const selection = contents.window.getSelection()
+    const text = selection.toString().trim()
+    
+    console.log('selected 事件触发', { text, cfiRange })
+    
+    if (text) {
+      currentNoteText.value = text
+      currentNoteCfi.value = cfiRange
+      
+      // 获取 iframe 在整个窗口中的位置偏移
+      const iframe = document.querySelector('#epub-render-root iframe')
+      const iframeRect = iframe ? iframe.getBoundingClientRect() : { left: 0, top: 0 }
+      
+      // 获取选区相对于 iframe 的位置
+      const range = selection.getRangeAt(0)
+      const rect = range.getBoundingClientRect()
+      
+      // 坐标修正 = iframe偏移 + 选区相对坐标
+      let top = iframeRect.top + rect.bottom + 10
+      let left = iframeRect.left + rect.left + (rect.width / 2) - 60
+      
+      // 边界检查
+      if (top > window.innerHeight - 60) top = iframeRect.top + rect.top - 60
+      if (left < 10) left = 10
+      if (left > window.innerWidth - 130) left = window.innerWidth - 130
+      
+      showSelectionMenu.value = true
+      selectionMenuStyle.value = {
+        top: `${top}px`,
+        left: `${left}px`
+      }
+    }
+  })
 }
 
 const updateChapterTitle = (location?: any) => {
@@ -1663,8 +1992,129 @@ const saveProgress = async () => {
   }
 }
 
+// 添加笔记
 const addNote = () => {
-  console.log('添加笔记功能待实现')
+  console.log('addNote 被调用', { currentNoteText: currentNoteText.value })
+  
+  if (!currentNoteText.value || currentNoteText.value.trim().length === 0) {
+    console.warn('没有选中文本，无法添加笔记')
+    return
+  }
+  
+  currentNoteCfi.value = rendition.value?.currentLocation()?.start?.cfi || ''
+  currentNoteChapter.value = currentChapterTitle.value
+  showNoteDialog.value = true
+  showSelectionMenu.value = false
+  
+  // 自动聚焦到输入框
+  nextTick(() => {
+    const noteInput = document.querySelector('.note-content textarea') as HTMLTextAreaElement
+    if (noteInput) {
+      noteInput.focus()
+    }
+  })
+}
+
+const saveNote = (noteContent: string) => {
+  if (!currentNoteText.value.trim()) return
+  
+  const note = {
+    id: Date.now(),
+    text: currentNoteText.value,
+    content: noteContent,
+    cfi: currentNoteCfi.value,
+    chapter: currentNoteChapter.value,
+    timestamp: new Date().toISOString()
+  }
+  
+  notes.value.push(note)
+  showNoteDialog.value = false
+  
+  // 清空当前笔记数据
+  currentNoteText.value = ''
+  currentNoteContent.value = ''
+  currentNoteCfi.value = ''
+  currentNoteChapter.value = ''
+  
+  // 清除 iframe 内部的选区
+  clearIframeSelection()
+}
+
+const cancelNote = () => {
+  showNoteDialog.value = false
+  currentNoteText.value = ''
+  currentNoteContent.value = ''
+  currentNoteCfi.value = ''
+  currentNoteChapter.value = ''
+  
+  // 清除 iframe 内部的选区
+  clearIframeSelection()
+}
+
+// 清除 iframe 内部的选区
+const clearIframeSelection = () => {
+  const iframe = document.querySelector('#epub-render-root iframe') as HTMLIFrameElement
+  if (iframe && iframe.contentWindow) {
+    const selection = iframe.contentWindow.getSelection()
+    if (selection) {
+      selection.removeAllRanges()
+    }
+  }
+}
+
+const exportNotes = () => {
+  if (notes.value.length === 0) {
+    return
+  }
+  
+  let markdown = `# ${book.value?.title || '书籍笔记'}\n\n`
+  markdown += `导出时间: ${new Date().toLocaleString()}\n\n`
+  markdown += `---\n\n`
+  
+  notes.value.forEach((note, index) => {
+    markdown += `## 笔记 ${index + 1}\n\n`
+    markdown += `**章节**: ${note.chapter}\n\n`
+    markdown += `**时间**: ${formatNoteTime(note.timestamp)}\n\n`
+    markdown += `**原文**:\n> ${note.text}\n\n`
+    markdown += `**笔记**:\n${note.content}\n\n`
+    markdown += `---\n\n`
+  })
+  
+  const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${book.value?.title || '笔记'}_笔记.md`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
+const jumpToNote = (cfi: string) => {
+  if (rendition.value && cfi) {
+    rendition.value.display(cfi)
+    activeSidebar.value = null
+    showControls.value = false
+    updatePageInfo()
+  }
+}
+
+const formatNoteTime = (timestamp: string) => {
+  const date = new Date(timestamp)
+  const now = new Date()
+  const diff = now.getTime() - date.getTime()
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+  
+  if (days === 0) {
+    return '今天'
+  } else if (days === 1) {
+    return '昨天'
+  } else if (days < 7) {
+    return `${days}天前`
+  } else {
+    return date.toLocaleDateString()
+  }
 }
 
 </script>
@@ -1685,18 +2135,28 @@ const addNote = () => {
   color: #2c3e50; 
   --glass: rgba(255,255,255,0.92);
   --glass-border: rgba(0,0,0,0.08);
+  color-scheme: light;
 }
 .theme-sepia { 
   background: #f4ecd8; 
   color: #5b4636; 
   --glass: rgba(244,236,216,0.92);
   --glass-border: rgba(91,70,54,0.08);
+  color-scheme: light;
+}
+.theme-green { 
+  background: #e8f5e9; 
+  color: #2d5a3d; 
+  --glass: rgba(232,245,233,0.92);
+  --glass-border: rgba(45,90,61,0.08);
+  color-scheme: light;
 }
 .theme-dark { 
   background: #1a1a1a; 
   color: #e2e8f0; 
   --glass: rgba(26,26,26,0.92);
   --glass-border: rgba(255,255,255,0.08);
+  color-scheme: dark;
 }
 
 /* 毛玻璃工具栏 */
@@ -1708,23 +2168,57 @@ const addNote = () => {
   border: 1px solid var(--glass-border);
   display: flex; align-items: center;
   transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  color: inherit;
 }
 
 .top-bar { 
   top: 0; 
-  height: 70px; 
+  height: 56px; 
   justify-content: space-between; 
-  padding: 0 24px;
-  box-shadow: 0 4px 30px rgba(0,0,0,0.08);
+  padding: 0 20px;
+  box-shadow: 0 2px 20px rgba(0,0,0,0.05);
 }
 
 .bottom-bar { 
   bottom: 0; 
   height: auto; 
-  padding: 24px 30px; 
+  padding: 12px 24px; 
   flex-direction: column; 
-  box-shadow: 0 -4px 30px rgba(0,0,0,0.08);
-  gap: 24px;
+  box-shadow: 0 -2px 20px rgba(0,0,0,0.05);
+  gap: 12px;
+}
+
+/* 底部控制栏图标颜色 - 主题适配 */
+.theme-light .bottom-bar svg {
+  color: #333;
+}
+
+.theme-light .bottom-bar .mode-option.active svg {
+  color: #4a90e2;
+}
+
+.theme-sepia .bottom-bar svg {
+  color: #5b4636;
+}
+
+.theme-sepia .bottom-bar .mode-option.active svg {
+  color: #8b6f47;
+}
+
+.theme-green .bottom-bar svg {
+  color: #2d5a3d;
+}
+
+.theme-green .bottom-bar .mode-option.active svg {
+  color: #4a90e2;
+}
+
+.theme-dark .bottom-bar svg {
+  color: #e2e8f0;
+}
+
+.theme-dark .bottom-bar .mode-option.active svg {
+  color: #5b9bd5;
 }
 
 /* UI 细节 */
@@ -1744,6 +2238,7 @@ const addNote = () => {
   font-weight: 700; 
   font-size: 16px; 
   line-height: 1.2;
+  color: inherit;
 }
 
 .meta-details {
@@ -1752,6 +2247,7 @@ const addNote = () => {
   gap: 12px;
   font-size: 12px;
   opacity: 0.8;
+  color: inherit;
 }
 
 .chapter-badge {
@@ -1797,7 +2293,7 @@ const addNote = () => {
 }
 
 .btn-icon:hover { 
-  background: rgba(128,128,128,0.1); 
+  background: rgba(128,128,128,0.15); 
   transform: scale(1.05);
 }
 
@@ -1825,7 +2321,7 @@ const addNote = () => {
 }
 
 .btn-text:hover { 
-  background: rgba(128,128,128,0.1); 
+  background: rgba(128,128,128,0.15); 
 }
 
 .btn-text.small {
@@ -1980,64 +2476,8 @@ const addNote = () => {
 .interaction-layer {
   position: absolute; 
   inset: 0; 
-  pointer-events: none;
-  display: flex; 
+  pointer-events: none; 
   z-index: 100;
-}
-
-.hotspot { 
-  pointer-events: auto; 
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-}
-
-.hotspot.left { 
-  width: 25%; 
-  cursor: w-resize;
-}
-
-.hotspot.center { 
-  width: 50%; 
-  cursor: pointer;
-}
-
-.hotspot.right { 
-  width: 25%; 
-  cursor: e-resize;
-}
-
-.hotspot:hover {
-  background: transparent;
-}
-
-.nav-hint {
-  opacity: 0;
-  font-size: 32px;
-  font-weight: 300;
-  color: rgba(128,128,128,0.3);
-  transition: opacity 0.2s ease;
-}
-
-.hotspot:hover .nav-hint {
-  opacity: 0.01;
-}
-
-.tap-hint {
-  position: absolute;
-  top: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(0,0,0,0.7);
-  color: white;
-  padding: 8px 16px;
-  border-radius: 20px;
-  font-size: 12px;
-  opacity: 1;
-  transition: opacity 0.3s ease;
-  pointer-events: none;
 }
 
 /* 常驻信息 */
@@ -2073,26 +2513,14 @@ const addNote = () => {
   box-shadow: 0 8px 24px rgba(0,0,0,0.15);
 }
 
-.percent { 
-  font-size: 14px; 
-  font-weight: 700; 
+.progress-text {
+  font-size: 14px;
+  font-weight: 700;
   color: #4a90e2;
-  min-width: 40px;
 }
 
-.mini-bar { 
-  width: 80px; 
-  height: 4px; 
-  background: rgba(128,128,128,0.2); 
-  border-radius: 2px; 
-  overflow: hidden;
-}
-
-.mini-bar .fill { 
-  height: 100%; 
-  background: #4a90e2; 
-  border-radius: 2px; 
-  transition: width 0.3s ease;
+.theme-dark .progress-text {
+  color: #5b9bd5;
 }
 
 .page-indicator {
@@ -2106,49 +2534,6 @@ const addNote = () => {
   align-self: flex-start;
 }
 
-/* 悬浮按钮 */
-.floating-actions {
-  position: fixed;
-  bottom: 100px;
-  right: 24px;
-  z-index: 500;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.fab {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  background: var(--glass);
-  backdrop-filter: blur(10px);
-  border: 1px solid var(--glass-border);
-  color: inherit;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.fab:hover {
-  transform: translateY(-4px) scale(1.1);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
-}
-
-.fab:active {
-  transform: translateY(-2px) scale(1.05);
-}
-
-.fab.active {
-  background: #4a90e2;
-  color: white;
-  border-color: #4a90e2;
-}
-
 /* 底部布局 */
 .bottom-layout { 
   width: 100%; 
@@ -2156,13 +2541,13 @@ const addNote = () => {
   margin: 0 auto; 
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
 }
 
 .progress-slider-wrapper {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
 .progress-labels {
@@ -2219,7 +2604,7 @@ const addNote = () => {
 .quick-actions { 
   display: grid; 
   grid-template-columns: repeat(3, 1fr); 
-  gap: 32px;
+  gap: 20px;
 }
 
 .theme-switcher,
@@ -2227,7 +2612,7 @@ const addNote = () => {
 .mode-switcher {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
 .section-label {
@@ -2299,13 +2684,17 @@ const addNote = () => {
   border: none;
   background: none;
   color: inherit;
-  font-size: 18px;
   cursor: pointer;
   border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: all 0.2s ease;
+}
+
+.font-stepper button svg {
+  width: 16px;
+  height: 16px;
 }
 
 .font-stepper button:hover {
@@ -2586,6 +2975,125 @@ const addNote = () => {
   border-radius: 10px;
 }
 
+/* 笔记列表面板 */
+.panel-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.notes-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(128,128,128,0.1);
+}
+
+.notes-header h4 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.notes-count {
+  font-size: 12px;
+  opacity: 0.6;
+  background: rgba(128,128,128,0.1);
+  padding: 4px 8px;
+  border-radius: 10px;
+}
+
+.empty-notes {
+  text-align: center;
+  padding: 60px 20px;
+  opacity: 0.5;
+}
+
+.empty-notes svg {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.3;
+}
+
+.empty-notes p {
+  margin: 8px 0;
+}
+
+.empty-tip-sub {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.note-item {
+  padding: 16px;
+  border-radius: 12px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+  background: rgba(128,128,128,0.03);
+}
+
+.note-item:hover {
+  background: rgba(128,128,128,0.08);
+  border-color: rgba(128,128,128,0.15);
+  transform: translateX(4px);
+}
+
+.note-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.note-chapter {
+  font-weight: 600;
+  color: #4a90e2;
+}
+
+.theme-dark .note-chapter {
+  color: #5b9bd5;
+}
+
+.note-time {
+  opacity: 0.6;
+}
+
+.note-item-text {
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  background: rgba(74,144,226,0.05);
+  border-left: 2px solid #4a90e2;
+  border-radius: 4px;
+  font-style: italic;
+}
+
+.theme-dark .note-item-text {
+  background: rgba(91,155,213,0.05);
+  border-left-color: #5b9bd5;
+}
+
+.note-item-content {
+  font-size: 14px;
+  line-height: 1.6;
+  color: inherit;
+}
+
 .toc-scroll-container {
   max-height: calc(100vh - 200px);
   overflow-y: auto;
@@ -2711,6 +3219,66 @@ const addNote = () => {
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(74,144,226,0.3);
   border: 3px solid white;
+}
+
+.theme-dark .settings-slider::-webkit-slider-thumb {
+  background: #5b9bd5;
+  box-shadow: 0 2px 8px rgba(91,155,213,0.3);
+}
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.theme-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 8px;
+  background: rgba(128,128,128,0.05);
+  border: 2px solid transparent;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.theme-card:hover {
+  background: rgba(128,128,128,0.1);
+  transform: translateY(-2px);
+}
+
+.theme-card.active {
+  border-color: #4a90e2;
+  background: rgba(74,144,226,0.1);
+}
+
+.theme-dark .theme-card.active {
+  border-color: #5b9bd5;
+  background: rgba(91,155,213,0.1);
+}
+
+.theme-card-preview {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.preview-text {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.theme-card-name {
+  font-size: 12px;
+  color: inherit;
+  font-weight: 500;
 }
 
 .settings-row {
@@ -2892,6 +3460,210 @@ const addNote = () => {
   z-index: 10000; 
 }
 
+/* 笔记对话框 */
+.note-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 6000;
+}
+
+.note-dialog {
+  background: var(--glass);
+  backdrop-filter: blur(30px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  width: 90%;
+  max-width: 500px;
+  max-height: 80vh;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+
+.note-dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid rgba(128,128,128,0.1);
+}
+
+.note-dialog-header h3 {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+  color: inherit;
+}
+
+.note-dialog-body {
+  padding: 24px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.selected-text {
+  margin-bottom: 20px;
+  padding: 16px;
+  background: rgba(128,128,128,0.05);
+  border-radius: 12px;
+  border-left: 3px solid #4a90e2;
+}
+
+.selected-text .label {
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.7;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.selected-text p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: inherit;
+}
+
+.note-content {
+  margin-bottom: 0;
+}
+
+.note-content .label {
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.7;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.note-content textarea {
+  width: 100%;
+  padding: 12px 16px;
+  background: rgba(128,128,128,0.05);
+  border: 1px solid rgba(128,128,128,0.2);
+  border-radius: 12px;
+  color: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+  resize: none;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.note-content textarea:focus {
+  border-color: #4a90e2;
+  background: rgba(74,144,226,0.05);
+}
+
+.note-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 24px;
+  border-top: 1px solid rgba(128,128,128,0.1);
+}
+
+.btn-secondary {
+  padding: 10px 24px;
+  background: rgba(128,128,128,0.1);
+  border: 1px solid rgba(128,128,128,0.2);
+  border-radius: 10px;
+  color: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-secondary:hover {
+  background: rgba(128,128,128,0.15);
+  transform: translateY(-1px);
+}
+
+.btn-primary {
+  padding: 10px 24px;
+  background: #4a90e2;
+  border: 1px solid #4a90e2;
+  border-radius: 10px;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-primary:hover {
+  background: #3a80d2;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(74,144,226,0.3);
+}
+
+.theme-dark .btn-primary {
+  background: #5b9bd5;
+  border-color: #5b9bd5;
+}
+
+.theme-dark .btn-primary:hover {
+  background: #4a8bc5;
+}
+
+/* 文本选中悬浮菜单 */
+.selection-menu {
+  position: fixed;
+  z-index: 10000;
+  background: var(--glass);
+  backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+  min-width: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.selection-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border-radius: 6px;
+  width: 100%;
+  text-align: left;
+}
+
+.selection-btn:hover {
+  background: rgba(74,144,226,0.15);
+}
+
+.selection-btn svg {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+}
+
+.theme-dark .selection-btn {
+  color: #e2e8f0;
+}
+
+.theme-dark .selection-btn:hover {
+  background: rgba(91,155,213,0.2);
+}
+
 /* 响应式设计 */
 @media (max-width: 768px) {
   .top-bar {
@@ -2920,15 +3692,8 @@ const addNote = () => {
     white-space: nowrap;
   }
   
-  .floating-actions {
-    bottom: 80px;
-    right: 16px;
-  }
-  
-  .fab {
-    width: 48px;
-    height: 48px;
-    font-size: 20px;
+  .selection-menu {
+    min-width: 120px;
   }
 }
 
@@ -2950,10 +3715,41 @@ const addNote = () => {
 /* 暗色主题优化 */
 .theme-dark {
   --glass: rgba(26,26,26,0.95);
+  --glass-text: #e2e8f0;
+  --glass-border: rgba(255,255,255,0.1);
+  color-scheme: dark;
+}
+
+.theme-light {
+  --glass-text: #2c3e50;
+  color-scheme: light;
+}
+
+.theme-sepia {
+  --glass-text: #5b4636;
+  color-scheme: light;
+}
+
+.theme-green {
+  --glass-text: #2d5a3d;
+  color-scheme: light;
 }
 
 .theme-dark .glass-bar {
-  border-color: rgba(255,255,255,0.1);
+  border-color: var(--glass-border);
+}
+
+.glass-bar .book-title,
+.glass-bar .meta-details,
+.glass-bar .chapter-badge,
+.glass-bar .stat-item,
+.glass-bar .section-label,
+.glass-bar .theme-name,
+.glass-bar .font-size-display,
+.glass-bar .mode-option span,
+.glass-bar .progress-labels .label,
+.glass-bar .chapter-progress {
+  color: var(--glass-text, inherit);
 }
 
 .theme-dark .settings-group {
@@ -2964,56 +3760,99 @@ const addNote = () => {
   background: rgba(255,255,255,0.1);
 }
 
-/* 滚动条美化 */
+/* 滚动条美化 - 根据主题自动适配 */
+.reader-viewport::-webkit-scrollbar,
 .sidebar-scroll-area::-webkit-scrollbar,
-.toc-scroll-container::-webkit-scrollbar {
+.toc-scroll-container::-webkit-scrollbar,
+.translation-body::-webkit-scrollbar {
   width: 6px;
 }
 
+.reader-viewport::-webkit-scrollbar-track,
 .sidebar-scroll-area::-webkit-scrollbar-track,
-.toc-scroll-container::-webkit-scrollbar-track {
-  background: rgba(128,128,128,0.1);
+.toc-scroll-container::-webkit-scrollbar-track,
+.translation-body::-webkit-scrollbar-track {
+  background: transparent;
   border-radius: 3px;
 }
 
+.reader-viewport::-webkit-scrollbar-thumb,
 .sidebar-scroll-area::-webkit-scrollbar-thumb,
-.toc-scroll-container::-webkit-scrollbar-thumb {
-  background: rgba(128,128,128,0.3);
+.toc-scroll-container::-webkit-scrollbar-thumb,
+.translation-body::-webkit-scrollbar-thumb {
+  background: rgba(128,128,128,0.2);
   border-radius: 3px;
+  transition: background 0.3s ease;
 }
 
+.reader-viewport::-webkit-scrollbar-thumb:hover,
 .sidebar-scroll-area::-webkit-scrollbar-thumb:hover,
-.toc-scroll-container::-webkit-scrollbar-thumb:hover {
-  background: rgba(128,128,128,0.5);
+.toc-scroll-container::-webkit-scrollbar-thumb:hover,
+.translation-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(128,128,128,0.4);
 }
 
-/* 图标字体（示例） */
-.icon {
-  font-family: 'ReaderIcons', sans-serif;
-  font-style: normal;
-  font-weight: normal;
-  font-variant: normal;
-  text-transform: none;
-  line-height: 1;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+/* 主题特定的滚动条样式 */
+.theme-light .reader-viewport::-webkit-scrollbar-thumb,
+.theme-light .sidebar-scroll-area::-webkit-scrollbar-thumb,
+.theme-light .toc-scroll-container::-webkit-scrollbar-thumb,
+.theme-light .translation-body::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.15);
 }
 
-.icon-search::before { content: '🔍'; }
-.icon-toc::before { content: '📑'; }
-.icon-settings::before { content: '⚙️'; }
-.icon-bookmark::before { content: '🔖'; }
-.icon-bookmark-filled::before { content: '📌'; }
-.icon-note::before { content: '📝'; }
-.icon-translate::before { content: '🌐'; }
-.icon-close::before { content: '✕'; }
-.icon-font-smaller::before { content: 'A-'; }
-.icon-font-larger::before { content: 'A+'; }
-.icon-page-mode::before { content: '📄'; }
-.icon-scroll-mode::before { content: '📜'; }
-.icon-search-empty::before { content: '🔍'; }
-.icon-check::before { content: '✓'; }
-.icon-export::before { content: '📤'; }
-.icon-clear::before { content: '🗑️'; }
-.icon-scroll-hint::before { content: '👇'; }
+.theme-light .reader-viewport::-webkit-scrollbar-thumb:hover,
+.theme-light .sidebar-scroll-area::-webkit-scrollbar-thumb:hover,
+.theme-light .toc-scroll-container::-webkit-scrollbar-thumb:hover,
+.theme-light .translation-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(0,0,0,0.3);
+}
+
+.theme-sepia .reader-viewport::-webkit-scrollbar-thumb,
+.theme-sepia .sidebar-scroll-area::-webkit-scrollbar-thumb,
+.theme-sepia .toc-scroll-container::-webkit-scrollbar-thumb,
+.theme-sepia .translation-body::-webkit-scrollbar-thumb {
+  background: rgba(91,70,54,0.15);
+}
+
+.theme-sepia .reader-viewport::-webkit-scrollbar-thumb:hover,
+.theme-sepia .sidebar-scroll-area::-webkit-scrollbar-thumb:hover,
+.theme-sepia .toc-scroll-container::-webkit-scrollbar-thumb:hover,
+.theme-sepia .translation-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(91,70,54,0.3);
+}
+
+.theme-green .reader-viewport::-webkit-scrollbar-thumb,
+.theme-green .sidebar-scroll-area::-webkit-scrollbar-thumb,
+.theme-green .toc-scroll-container::-webkit-scrollbar-thumb,
+.theme-green .translation-body::-webkit-scrollbar-thumb {
+  background: rgba(45,90,61,0.15);
+}
+
+.theme-green .reader-viewport::-webkit-scrollbar-thumb:hover,
+.theme-green .sidebar-scroll-area::-webkit-scrollbar-thumb:hover,
+.theme-green .toc-scroll-container::-webkit-scrollbar-thumb:hover,
+.theme-green .translation-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(45,90,61,0.3);
+}
+
+.theme-dark .reader-viewport::-webkit-scrollbar-track,
+.theme-dark .sidebar-scroll-area::-webkit-scrollbar-track,
+.theme-dark .toc-scroll-container::-webkit-scrollbar-track,
+.theme-dark .translation-body::-webkit-scrollbar-track {
+  background: rgba(0,0,0,0.3);
+}
+
+.theme-dark .reader-viewport::-webkit-scrollbar-thumb,
+.theme-dark .sidebar-scroll-area::-webkit-scrollbar-thumb,
+.theme-dark .toc-scroll-container::-webkit-scrollbar-thumb,
+.theme-dark .translation-body::-webkit-scrollbar-thumb {
+  background: rgba(200,200,200,0.3);
+}
+
+.theme-dark .reader-viewport::-webkit-scrollbar-thumb:hover,
+.theme-dark .sidebar-scroll-area::-webkit-scrollbar-thumb:hover,
+.theme-dark .toc-scroll-container::-webkit-scrollbar-thumb:hover,
+.theme-dark .translation-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(200,200,200,0.5);
+}
 </style>

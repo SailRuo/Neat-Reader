@@ -1,9 +1,17 @@
+interface DownloadResult {
+  success: boolean;
+  data: number[];
+  error?: string;
+}
+
 interface WailsAPI {
   GetHealth(): Promise<string>;
   GetConfig(): Promise<{ Port: number }>;
   UploadFile(fileName: string, fileData: number[], accessToken: string): Promise<string>;
   VerifyToken(accessToken: string): Promise<string>;
   GetFileList(accessToken: string, dir: string, pageNum: number, pageSize: number, order: string, method: string, recursion: number): Promise<string>;
+  GetFileInfo(accessToken: string, fsids: string): Promise<string>;
+  DownloadFile(dlink: string, accessToken: string): Promise<DownloadResult>;
   SearchFiles(accessToken: string, key: string, dir: string, method: string, recursion: number): Promise<string>;
   GetTokenViaCode(code: string, clientId: string, clientSecret: string, redirectUri: string): Promise<string>;
   RefreshToken(refreshToken: string, clientId: string, clientSecret: string): Promise<string>;
@@ -77,6 +85,17 @@ export const wails = {
   },
   getFileList(accessToken: string, dir: string, pageNum: number, pageSize: number, order: string, method: string, recursion: number): Promise<string> {
     return this.call<string>('GetFileList', accessToken, dir, pageNum, pageSize, order, method, recursion);
+  },
+  getFileInfo(accessToken: string, fsids: string): Promise<string> {
+    return this.call<string>('GetFileInfo', accessToken, fsids);
+  },
+  downloadFile(dlink: string, accessToken: string): Promise<Uint8Array> {
+    return this.call<DownloadResult>('DownloadFile', dlink, accessToken).then(result => {
+      if (!result.success) {
+        throw new Error(result.error || '下载失败');
+      }
+      return new Uint8Array(result.data);
+    });
   },
   searchFiles(accessToken: string, key: string, dir: string, method: string, recursion: number): Promise<string> {
     return this.call<string>('SearchFiles', accessToken, key, dir, method, recursion);

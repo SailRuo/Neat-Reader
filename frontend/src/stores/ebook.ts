@@ -27,7 +27,7 @@ export interface EbookMetadata {
   lastRead: number;
   totalChapters: number;
   readingProgress: number;
-  storageType: 'local' | 'baidupan';
+  storageType: 'local' | 'synced' | 'baidupan';
   baidupanPath?: string;
   categoryId?: string;
   addedAt: number;
@@ -60,12 +60,14 @@ export interface UserConfig {
       rootPath: string;
       userId: string;
       namingStrategy: string; // 文件命名策略: 0 不重命名, 1 重命名, 2 条件重命名, 3 覆盖
-    };
+      appKey?: string;
+      secretKey?: string;
+    } | null;
   };
   reader: {
     fontSize: number;
     fontFamily: string;
-    theme: 'light' | 'sepia' | 'dark';
+    theme: 'light' | 'sepia' | 'dark' | 'green';
     pageMode: 'page' | 'scroll';
     brightness: number;
     lineSpacing: number;
@@ -102,20 +104,15 @@ export const useEbookStore = defineStore('ebook', () => {
   const categories = ref<BookCategory[]>([]);
   const currentBook = ref<EbookMetadata | null>(null);
   const readingProgress = ref<ReadingProgress | null>(null);
+  const baidupanUser = ref<{baidu_name: string; avatar_url: string; vip_type: number} | null>(null);
+  const baidupanUserInfoCache = ref<{data: any, timestamp: number} | null>(null);
   const userConfig = ref<UserConfig>({
     storage: {
       default: 'local',
       localPath: '',
       autoSync: true,
       syncInterval: 15,
-      baidupan: {
-        accessToken: '',
-        refreshToken: '',
-        expiration: 0,
-        rootPath: '',
-        userId: '',
-        namingStrategy: '1' // 默认使用重命名策略
-      }
+      baidupan: null
     },
     reader: {
       fontSize: 18,
@@ -207,7 +204,7 @@ export const useEbookStore = defineStore('ebook', () => {
               console.log('为书籍重新生成封面:', book.id);
               const fileContent = await localforage.getItem<ArrayBuffer>(`ebook_content_${book.id}`);
               if (fileContent) {
-                const epubBook = ePub(fileContent);
+                const epubBook = ePub(fileContent as ArrayBuffer);
                 await new Promise((resolve, reject) => {
                   epubBook.ready.then(resolve).catch(reject);
                 });
@@ -563,7 +560,7 @@ export const useEbookStore = defineStore('ebook', () => {
       const tokenValid = await ensureBaidupanToken();
       console.log('百度网盘令牌是否有效:', tokenValid);
       
-      if (tokenValid) {
+      if (tokenValid && userConfig.value.storage.baidupan) {
         const { accessToken, rootPath } = userConfig.value.storage.baidupan;
         const searchDir = rootPath || `/apps/${AppName}`;
         console.log('搜索目录:', searchDir);
@@ -727,10 +724,22 @@ export const useEbookStore = defineStore('ebook', () => {
       const config = await localforage.getItem<UserConfig>('userConfig');
       if (config) {
         // 如果rootPath是'/NeatReader'，则将其重置为空字符串，符合百度网盘API要求
-        if (config.storage.baidupan.rootPath === '/NeatReader') {
+        if (config.storage.baidupan && config.storage.baidupan.rootPath === '/NeatReader') {
           config.storage.baidupan.rootPath = '';
         }
         userConfig.value = config;
+      }
+      
+      // 加载百度网盘用户信息缓存
+      const userInfoCache = await localforage.getItem<{data: any, timestamp: number}>('baidupanUserInfoCache');
+      if (userInfoCache) {
+        const cacheAge = Date.now() - userInfoCache.timestamp;
+        const USER_INFO_CACHE_DURATION = 5 * 60 * 1000; // 5分钟缓存
+        if (cacheAge < USER_INFO_CACHE_DURATION) {
+          console.log('使用缓存的百度网盘用户信息');
+          baidupanUser.value = userInfoCache.data;
+          baidupanUserInfoCache.value = userInfoCache;
+        }
       }
     } catch (error) {
       console.error('加载用户配置失败:', error);
@@ -742,14 +751,31 @@ export const useEbookStore = defineStore('ebook', () => {
       // 深拷贝userConfig，确保所有对象都是可序列化的
       const serializableConfig = JSON.parse(JSON.stringify(userConfig.value));
       await localforage.setItem('userConfig', serializableConfig);
+      await localforage.setItem('userConfigTimestamp', Date.now());
     } catch (error) {
       console.error('保存用户配置失败:', error);
     }
   };
 
-  const updateUserConfig = async (updates: Partial<UserConfig>) => {
+  const updateUserConfig = async (updates: Partial<UserConfig>, skipSync = false) => {
     userConfig.value = { ...userConfig.value, ...updates };
     await saveUserConfig();
+    
+    // 同步到百度网盘
+    if (skipSync) {
+      return;
+    }
+    
+    try {
+      if (await ensureBaidupanToken()) {
+        const configData = JSON.stringify({ config: userConfig.value, timestamp: Date.now() });
+        const configFile = new File([configData], 'config.json', { type: 'application/json' });
+        await uploadToBaidupanNew(configFile, '/sync');
+        console.log('用户配置已同步到百度网盘');
+      }
+    } catch (error) {
+      console.warn('同步用户配置到百度网盘失败:', error);
+    }
   };
 
   // 应用名称，用于百度网盘搜索路径
@@ -765,6 +791,9 @@ export const useEbookStore = defineStore('ebook', () => {
   // 刷新百度网盘访问令牌
   const refreshBaidupanToken = async (): Promise<boolean> => {
     try {
+      if (!userConfig.value.storage.baidupan) {
+        return false;
+      }
       const { refreshToken } = userConfig.value.storage.baidupan;
       if (!refreshToken) {
         return false;
@@ -789,7 +818,7 @@ export const useEbookStore = defineStore('ebook', () => {
         expires_in: data.expires_in
       });
       
-      if (data.access_token) {
+      if (data.access_token && userConfig.value.storage.baidupan) {
         await updateUserConfig({
           storage: {
             ...userConfig.value.storage,
@@ -797,7 +826,10 @@ export const useEbookStore = defineStore('ebook', () => {
               ...userConfig.value.storage.baidupan,
               accessToken: data.access_token,
               refreshToken: data.refresh_token,
-              expiration: Date.now() + (data.expires_in * 1000)
+              expiration: Date.now() + (data.expires_in * 1000),
+              rootPath: userConfig.value.storage.baidupan.rootPath || '',
+              userId: userConfig.value.storage.baidupan.userId || '',
+              namingStrategy: userConfig.value.storage.baidupan.namingStrategy || '1'
             }
           }
         });
@@ -813,9 +845,14 @@ export const useEbookStore = defineStore('ebook', () => {
 
   // 检查百度网盘令牌是否有效
   const isBaidupanTokenValid = (): boolean => {
-    const { accessToken, expiration } = userConfig.value.storage.baidupan;
-    // 确保accessToken存在且未过期
-    return !!accessToken && expiration > Date.now();
+    const baidupan = userConfig.value.storage.baidupan;
+    if (!baidupan) {
+      return false;
+    }
+    const { accessToken, expiration } = baidupan;
+    // 确保accessToken存在且剩余时间大于1小时
+    const oneHourInMs = 60 * 60 * 1000;
+    return !!accessToken && (expiration - Date.now()) > oneHourInMs;
   };
 
   // 确保百度网盘令牌有效
@@ -824,6 +861,58 @@ export const useEbookStore = defineStore('ebook', () => {
       return true;
     }
     return await refreshBaidupanToken();
+  };
+
+  // 获取百度网盘用户信息
+  const fetchBaidupanUserInfo = async (forceRefresh = false) => {
+    if (!userConfig.value.storage.baidupan?.accessToken) {
+      baidupanUser.value = null
+      return
+    }
+
+    const USER_INFO_CACHE_DURATION = 5 * 60 * 1000 // 5分钟缓存
+
+    // 检查缓存
+    if (!forceRefresh && baidupanUserInfoCache.value) {
+      const cacheAge = Date.now() - baidupanUserInfoCache.value.timestamp
+      if (cacheAge < USER_INFO_CACHE_DURATION) {
+        console.log('使用缓存的百度网盘用户信息')
+        baidupanUser.value = baidupanUserInfoCache.value.data
+        return
+      }
+    }
+
+    try {
+      const result = await wails.verifyToken(userConfig.value.storage.baidupan.accessToken)
+      const data = JSON.parse(result)
+      console.log('verifyToken 返回数据:', data)
+      if (data.errno === 0 || !data.error) {
+        const userInfo = {
+          baidu_name: data.baidu_name || data.netdisk_name || data.name || '未知用户',
+          avatar_url: data.avatar_url || '',
+          vip_type: data.vip_type || 0
+        }
+        console.log('设置百度网盘用户信息:', userInfo)
+        baidupanUser.value = userInfo
+        const cacheData = {
+          data: userInfo,
+          timestamp: Date.now()
+        }
+        baidupanUserInfoCache.value = cacheData
+        // 保存缓存到 localforage - 使用 JSON 序列化确保对象可克隆
+        await localforage.setItem('baidupanUserInfoCache', JSON.parse(JSON.stringify(cacheData)))
+      } else {
+        console.log('verifyToken 失败:', data)
+        baidupanUser.value = null
+        baidupanUserInfoCache.value = null
+        await localforage.removeItem('baidupanUserInfoCache')
+      }
+    } catch (error) {
+      console.error('verifyToken 异常:', error)
+      baidupanUser.value = null
+      baidupanUserInfoCache.value = null
+      await localforage.removeItem('baidupanUserInfoCache')
+    }
   };
 
   // 检查文件大小限制
@@ -840,13 +929,17 @@ export const useEbookStore = defineStore('ebook', () => {
 
   const uploadToBaidupanNew = async (file: File, path: string): Promise<boolean> => {
     try {
+      console.log('开始上传到百度网盘:', file.name, '大小:', file.size, '路径:', path);
+      
       // 确保令牌有效
-      if (!await ensureBaidupanToken()) {
+      if (!await ensureBaidupanToken() || !userConfig.value.storage.baidupan) {
+        console.error('百度网盘令牌无效或刷新失败');
         return false;
       }
       
       // 检查文件大小限制
       if (!checkFileSizeLimit(file.size)) {
+        console.error('文件大小超过限制');
         return false;
       }
       
@@ -855,20 +948,34 @@ export const useEbookStore = defineStore('ebook', () => {
       // 构建路径，直接使用相对路径，服务器端会添加/apps/网盘前缀
       const relativePath = path ? path.replace(/^\/+|\/+$/g, '') : '';
 
-      console.log('开始上传到Go服务器:', file.name, '相对路径:', relativePath);
+      console.log('准备上传文件到Go服务器:', {
+        fileName: file.name,
+        relativePath: relativePath,
+        fileSize: file.size,
+        accessToken: accessToken ? '***' : null
+      });
       
       const fileArrayBuffer = await file.arrayBuffer();
       const fileBytes = new Uint8Array(fileArrayBuffer);
       
+      console.log('文件转换为字节数组成功，长度:', fileBytes.length);
+      
       const result = await wails.uploadFile(file.name, fileBytes, accessToken);
+      console.log('Go服务器返回结果:', result);
+      
       const uploadResult = JSON.parse(result);
-      console.log('上传响应:', uploadResult);
+      console.log('解析后的上传结果:', uploadResult);
+      
+      if (uploadResult.error) {
+        console.error('上传失败，错误信息:', uploadResult.error);
+        return false;
+      }
       
       if (uploadResult.path || uploadResult.fs_id) {
-        console.log('文件上传成功:', uploadResult.path);
+        console.log('文件上传成功:', uploadResult.path || uploadResult.fs_id);
         return true;
       } else {
-        console.error('文件上传失败:', uploadResult);
+        console.error('文件上传失败，返回结果中没有路径或文件ID:', uploadResult);
         return false;
       }
       
@@ -885,10 +992,12 @@ export const useEbookStore = defineStore('ebook', () => {
   // 将本地书籍上传到百度网盘
   const uploadLocalBookToBaidupan = async (book: EbookMetadata): Promise<boolean> => {
     try {
+      console.log('开始上传本地书籍到百度网盘:', book.title);
+      
       // 确保令牌有效
       if (!await ensureBaidupanToken()) {
         console.error('百度网盘令牌无效，无法上传');
-        return false;
+        throw new Error('百度网盘令牌无效，请先在设置中授权');
       }
       
       // 从 IndexedDB 获取文件内容
@@ -896,7 +1005,7 @@ export const useEbookStore = defineStore('ebook', () => {
       const fileContent = await localforage.getItem<ArrayBuffer>(`ebook_content_${book.id}`);
       if (!fileContent) {
         console.error('无法获取书籍文件内容');
-        return false;
+        throw new Error('无法获取书籍文件内容，可能文件已损坏');
       }
       console.log('获取文件内容成功，大小:', fileContent.byteLength);
       
@@ -918,73 +1027,111 @@ export const useEbookStore = defineStore('ebook', () => {
       };
       
       const fileName = `${cleanFileName(book.title)}.${book.format}`;
+      console.log('清理后的文件名:', fileName);
+      
       const file = new File([fileContent], fileName, { 
         type: `application/${book.format === 'epub' ? 'epub+zip' : book.format}` 
       });
-      console.log('创建 File 对象成功:', fileName);
+      console.log('创建 File 对象成功:', fileName, '类型:', file.type);
       
       // 上传到百度网盘
-      let uploadPath = userConfig.value.storage.baidupan.rootPath;
+      let uploadPath = '';
+      if (userConfig.value.storage.baidupan) {
+        uploadPath = userConfig.value.storage.baidupan.rootPath || '';
+      }
       // 确保uploadPath是有效的，避免生成//fileName这样的路径
       if (!uploadPath || uploadPath === '/') {
         uploadPath = '';
       }
       console.log('开始上传到百度网盘，路径:', uploadPath ? `${uploadPath}/${fileName}` : fileName);
+      
       const uploadResult = await uploadToBaidupanNew(file, uploadPath);
       
       if (uploadResult) {
         console.log('上传成功，更新书籍存储类型');
-        // 更新书籍的存储类型为百度网盘，确保保留封面信息
+        // 更新书籍的存储类型为已同步，确保保留封面信息
         await updateBook(book.id, {
-          storageType: 'baidupan',
+          storageType: 'synced',
           baidupanPath: `${uploadPath}/${fileName}`,
           cover: book.cover
         });
         
+        console.log('书籍上传到百度网盘成功:', book.title);
         return true;
       }
       
       console.error('上传失败，uploadToBaidupan 返回 false');
-      return false;
+      throw new Error('上传到百度网盘失败，请检查网络连接或重试');
     } catch (error) {
       console.error('上传本地书籍到百度网盘失败:', error);
       if (error instanceof Error) {
         console.error('错误详情:', error.message);
         console.error('错误堆栈:', error.stack);
+        throw error; // 重新抛出错误，让调用方知道失败原因
       }
-      return false;
+      throw new Error('上传失败，未知错误');
     }
   };
 
-  // 从百度网盘下载文件
-  const downloadFromBaidupan = async (path: string): Promise<Blob | null> => {
+  // 从百度网盘下载 Blob（用于同步配置等）
+  const downloadBlobFromBaidupan = async (path: string): Promise<Blob | null> => {
     try {
       // 确保令牌有效
-      if (!await ensureBaidupanToken()) {
+      if (!await ensureBaidupanToken() || !userConfig.value.storage.baidupan) {
         return null;
       }
       
-      const { accessToken } = userConfig.value.storage.baidupan;
+      const { accessToken, rootPath } = userConfig.value.storage.baidupan;
       
+      // 从路径中提取目录和文件名
+      const pathParts = path.split('/').filter(p => p);
+      const fileName = pathParts.pop() || '';
+      const dirPath = pathParts.length > 0 ? `/${pathParts.join('/')}` : (rootPath || `/apps/${AppName}`);
+      
+      console.log('下载文件 - 目录:', dirPath, '文件名:', fileName);
+      
+      // 先获取文件列表
       const result = await wails.getFileList(
         accessToken,
-        path,
+        dirPath,
+        1,
+        1000,
+        'name',
+        'list',
+        1
+      );
+      const fileListData = JSON.parse(result);
+      
+      if (fileListData.error || !fileListData.list) {
+        console.log('获取文件列表失败或为空:', fileListData);
+        return null;
+      }
+      
+      // 查找目标文件
+      const targetFile = fileListData.list.find((file: any) => 
+        file.server_filename === fileName && !file.isdir
+      );
+      
+      if (!targetFile) {
+        console.log('未找到文件:', fileName);
+        return null;
+      }
+      
+      // 获取下载链接
+      const downloadResult = await wails.getFileList(
+        accessToken,
+        dirPath,
         1,
         1,
         'name',
         'download',
         0
       );
-      const downloadUrlData = JSON.parse(result);
+      const downloadUrlData = JSON.parse(downloadResult);
       console.log('获取下载链接响应:', downloadUrlData);
       
-      if (downloadUrlData.error) {
+      if (downloadUrlData.error || !downloadUrlData.dlink) {
         console.error('获取下载链接失败:', downloadUrlData);
-        return null;
-      }
-      
-      if (!downloadUrlData.dlink) {
-        console.error('没有下载链接:', downloadUrlData);
         return null;
       }
       
@@ -1002,11 +1149,287 @@ export const useEbookStore = defineStore('ebook', () => {
     }
   };
 
+  // 从百度网盘下载文件
+  const downloadFromBaidupan = async (path: string): Promise<boolean> => {
+    try {
+      // 确保令牌有效
+      if (!await ensureBaidupanToken() || !userConfig.value.storage.baidupan) {
+        return false;
+      }
+      
+      const { accessToken } = userConfig.value.storage.baidupan;
+      
+      // 从完整路径中提取文件名（去除前导斜杠）
+      const fileName = path.replace(/^.*\//, '').replace(/^\//, '');
+      console.log('下载文件 - 原始路径:', path, '提取的文件名:', fileName);
+      
+      // 固定在 /apps/Neat Reader 目录下搜索
+      const searchDir = `/apps/${AppName}`;
+      console.log('搜索目录:', searchDir);
+      
+      // 阶段1：获取文件列表（获取 fsid）
+      const fileListResult = await wails.getFileList(
+        accessToken,
+        searchDir,
+        1,
+        1000,
+        'name',
+        'list',
+        1
+      );
+      const fileListData = JSON.parse(fileListResult);
+      console.log('获取文件列表响应:', fileListData);
+      
+      if (fileListData.error_code) {
+        console.error('获取文件列表失败:', fileListData);
+        return false;
+      }
+      
+      if (!fileListData.list || fileListData.list.length === 0) {
+        console.error('文件列表为空:', fileListData);
+        return false;
+      }
+      
+      // 在文件列表中查找匹配的文件
+      const targetFile = fileListData.list.find((file: any) => file.server_filename === fileName);
+      if (!targetFile) {
+        console.error('未找到目标文件:', fileName, '文件列表:', fileListData.list);
+        return false;
+      }
+      
+      const fsid = targetFile.fs_id;
+      console.log('获取到 fsid:', fsid);
+      
+      // 阶段2：查询文件信息（获取 dlink）
+      const fileInfoResult = await wails.getFileInfo(accessToken, fsid.toString());
+      const fileInfoData = JSON.parse(fileInfoResult);
+      console.log('获取文件信息响应:', fileInfoData);
+      
+      if (fileInfoData.error_code || fileInfoData.errno) {
+        console.error('获取文件信息失败:', fileInfoData);
+        return false;
+      }
+      
+      // 百度网盘 API 返回的数据结构是 info 数组，不是 list 数组
+      if (!fileInfoData.info || !Array.isArray(fileInfoData.info) || fileInfoData.info.length === 0) {
+        console.error('没有下载链接，完整响应:', JSON.stringify(fileInfoData, null, 2));
+        return false;
+      }
+      
+      const dlink = fileInfoData.info[0].dlink;
+      if (!dlink) {
+        console.error('没有下载链接，完整响应:', JSON.stringify(fileInfoData, null, 2));
+        return false;
+      }
+      
+      console.log('获取到 dlink:', dlink);
+      
+      // 阶段3：下载文件（使用后端下载，避免 CORS 问题）
+      const fileData = await wails.downloadFile(dlink, accessToken);
+      
+      console.log('下载的文件数据类型:', typeof fileData, '长度:', fileData?.length);
+      
+      if (!fileData || fileData.length === 0) {
+        console.error('下载文件失败，文件数据为空');
+        return false;
+      }
+      
+      const arrayBuffer = fileData instanceof ArrayBuffer ? fileData : fileData.buffer.slice(0);
+      
+      // 获取文件名和扩展名
+      const ext = fileName.split('.').pop()?.toLowerCase() || 'epub';
+      const title = fileName.replace(`.${ext}`, '');
+      
+      // 检查是否已经存在相同的云端书籍
+      const existingCloudBook = books.value.find(book => 
+        book.baidupanPath === path || book.title === title
+      );
+      
+      let id;
+      if (existingCloudBook) {
+        // 如果存在，更新现有书籍
+        id = existingCloudBook.id;
+        console.log('更新已存在的云端书籍:', title, 'ID:', id);
+      } else {
+        // 如果不存在，创建新 ID
+        id = `downloaded_${uuidv4()}`;
+        console.log('创建新的云端书籍:', title, 'ID:', id);
+      }
+      
+      // 保存文件内容到 IndexedDB
+      await localforage.setItem(`ebook_content_${id}`, arrayBuffer);
+      
+      // 创建电子书元数据
+      const ebookMetadata: EbookMetadata = {
+        id,
+        title,
+        author: '未知作者',
+        cover: existingCloudBook?.cover || '',
+        path: id,
+        format: ext,
+        size: arrayBuffer.byteLength,
+        lastRead: Date.now(),
+        totalChapters: 0,
+        readingProgress: existingCloudBook?.readingProgress || 0,
+        storageType: 'synced',
+        baidupanPath: path,
+        addedAt: existingCloudBook?.addedAt || Date.now()
+      };
+      
+      if (existingCloudBook) {
+        // 更新现有书籍
+        await updateBook(id, ebookMetadata);
+      } else {
+        // 添加新书籍
+        await addBook(ebookMetadata);
+      }
+      
+      // 如果是 EPUB，尝试生成封面和解析元数据
+      if (ext === 'epub') {
+        try {
+          const epubBook = ePub(arrayBuffer as ArrayBuffer);
+          await new Promise((resolve, reject) => {
+            epubBook.ready.then(resolve).catch(reject);
+          });
+          
+          const coverUrl = await epubBook.coverUrl();
+          if (coverUrl) {
+            if (coverUrl.startsWith('blob:')) {
+              try {
+                ebookMetadata.cover = await blobToBase64(coverUrl);
+                URL.revokeObjectURL(coverUrl);
+              } catch (e) {
+                console.warn('封面转换 Base64 失败:', e);
+              }
+            } else {
+              ebookMetadata.cover = coverUrl;
+            }
+          }
+          
+          const metadata = await epubBook.loaded.metadata;
+          if (metadata) {
+            if (metadata.creator) {
+              ebookMetadata.author = Array.isArray(metadata.creator) 
+                ? metadata.creator.join(', ') 
+                : metadata.creator;
+            }
+            console.log('EPUB 元数据:', metadata);
+          }
+          
+          // 更新封面和作者信息
+          await updateBook(id, { 
+            cover: ebookMetadata.cover,
+            author: ebookMetadata.author
+          });
+        } catch (e) {
+          console.warn('EPUB 元数据解析失败:', e);
+        }
+      }
+      
+      console.log('从百度网盘下载文件成功:', fileName);
+      return true;
+    } catch (error) {
+      console.error('从百度网盘下载文件失败:', error);
+      return false;
+    }
+  };
+
+  // 加载百度网盘书籍列表
+  const loadBaidupanBooks = async () => {
+    try {
+      if (!await ensureBaidupanToken() || !userConfig.value.storage.baidupan) {
+        console.log('百度网盘令牌无效，跳过加载云端书籍');
+        return;
+      }
+      
+      const { accessToken, rootPath } = userConfig.value.storage.baidupan;
+      const searchDir = rootPath || `/apps/${AppName}`;
+      console.log('开始加载百度网盘书籍，目录:', searchDir);
+      
+      const result = await wails.getFileList(
+        accessToken,
+        searchDir,
+        1,
+        1000,
+        'name',
+        'list',
+        1
+      );
+      const data = JSON.parse(result);
+      console.log('百度网盘文件列表:', data);
+      
+      if (data.list && Array.isArray(data.list) && data.list.length > 0) {
+        for (const fileInfo of data.list) {
+          if (fileInfo.isdir) continue;
+          if (!fileInfo.server_filename) continue;
+          
+          const ext = fileInfo.server_filename.split('.').pop()?.toLowerCase();
+          if (!['epub', 'pdf', 'txt'].includes(ext || '')) continue;
+          
+          const title = fileInfo.server_filename.replace(`.${ext}`, '');
+          const cloudPath = fileInfo.path || '';
+          
+          const normalizeTitle = (t: string): string => {
+            return t.toLowerCase()
+              .replace(/[_\s\-]+/g, '') // 移除下划线、空格、连字符
+              .replace(/[^\w\u4e00-\u9fa5]/g, '') // 移除特殊字符，保留中文和英文
+              .trim();
+          };
+          
+          const normalizedTitle = normalizeTitle(title);
+          
+          // 优先基于 baidupanPath 去重
+          const existingByPath = books.value.find(book => 
+            book.baidupanPath === cloudPath
+          );
+          
+          // 如果没有找到相同路径，检查是否有相同书名的已下载书籍（synced 或 local）
+          let existingBook = existingByPath;
+          if (!existingBook) {
+            existingBook = books.value.find(book => 
+              normalizeTitle(book.title) === normalizedTitle && 
+              (book.storageType === 'synced' || book.storageType === 'local')
+            );
+          }
+          
+          if (!existingBook) {
+            // 没有找到相同的书，创建新的云端书籍
+            const newBook: EbookMetadata = {
+              id: `baidupan_${fileInfo.fs_id || Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              title: fileInfo.server_filename.replace(`.${ext}`, ''),
+              author: '未知作者',
+              cover: '',
+              path: fileInfo.path || '',
+              format: ext || 'txt',
+              size: fileInfo.size || 0,
+              lastRead: Date.now(),
+              totalChapters: 0,
+              readingProgress: 0,
+              storageType: 'baidupan',
+              baidupanPath: fileInfo.path || '',
+              addedAt: Date.now()
+            };
+            
+            books.value.push(newBook);
+            console.log('添加云端书籍:', newBook.title);
+          } else {
+            console.log('跳过已存在的书籍:', title, '存储类型:', existingBook.storageType);
+          }
+        }
+        
+        await saveBooks();
+        console.log('百度网盘书籍加载完成，总数:', books.value.length);
+      }
+    } catch (error) {
+      console.error('加载百度网盘书籍失败:', error);
+    }
+  };
+
   // 列出百度网盘文件
   const listBaidupanFiles = async (path: string): Promise<any[]> => {
     try {
       // 确保令牌有效
-      if (!await ensureBaidupanToken()) {
+      if (!await ensureBaidupanToken() || !userConfig.value.storage.baidupan) {
         return [];
       }
       
@@ -1100,10 +1523,6 @@ export const useEbookStore = defineStore('ebook', () => {
 
   // 只同步当前书籍的阅读进度到百度网盘（异步，不等待响应）
   const syncCurrentBookProgress = (ebookId: string) => {
-    if (!isBaidupanTokenValid()) {
-      return;
-    }
-    
     console.log('异步同步当前书籍进度到百度网盘:', ebookId);
     
     // 异步执行，不等待响应
@@ -1133,7 +1552,7 @@ export const useEbookStore = defineStore('ebook', () => {
       console.log('开始从百度网盘同步阅读进度');
       
       // 1. 下载书籍列表
-      const booksBlob = await downloadFromBaidupan('/sync/books.json');
+      const booksBlob = await downloadBlobFromBaidupan('/sync/books.json');
       if (booksBlob) {
         const booksText = await booksBlob.text();
         const booksData = JSON.parse(booksText);
@@ -1145,7 +1564,7 @@ export const useEbookStore = defineStore('ebook', () => {
       }
       
       // 2. 下载分类列表
-      const categoriesBlob = await downloadFromBaidupan('/sync/categories.json');
+      const categoriesBlob = await downloadBlobFromBaidupan('/sync/categories.json');
       if (categoriesBlob) {
         const categoriesText = await categoriesBlob.text();
         const categoriesData = JSON.parse(categoriesText);
@@ -1161,7 +1580,7 @@ export const useEbookStore = defineStore('ebook', () => {
       
       for (const book of books.value) {
         try {
-          const progressBlob = await downloadFromBaidupan(`/sync/progress/${book.id}.json`);
+          const progressBlob = await downloadBlobFromBaidupan(`/sync/progress/${book.id}.json`);
           if (progressBlob) {
             const progressText = await progressBlob.text();
             const progress = JSON.parse(progressText);
@@ -1206,7 +1625,7 @@ export const useEbookStore = defineStore('ebook', () => {
       let titleData = file.name.replace('.epub', '');
       
       try {
-        const book = ePub(arrayBuffer);
+        const book = ePub(arrayBuffer as ArrayBuffer);
         // 等待书籍加载完成
         await new Promise((resolve, reject) => {
           book.ready.then(resolve).catch(reject);
@@ -1408,6 +1827,39 @@ export const useEbookStore = defineStore('ebook', () => {
       loadUserConfig(),
       loadCategories()
     ]);
+    
+    // 尝试从百度网盘同步配置和书籍
+    try {
+      if (await ensureBaidupanToken()) {
+        // 1. 同步配置
+        const configBlob = await downloadBlobFromBaidupan('/sync/config.json');
+        if (configBlob) {
+          try {
+            const configText = await configBlob.text();
+            const configData = JSON.parse(configText);
+            if (configData.config && configData.timestamp) {
+              // 检查云端配置是否比本地新
+              const localConfig = await localforage.getItem<UserConfig>('userConfig');
+              const localTimestamp = localConfig ? await localforage.getItem<number>('userConfigTimestamp') || 0 : 0;
+              
+              if (configData.timestamp > localTimestamp) {
+                console.log('从百度网盘同步用户配置');
+                userConfig.value = { ...userConfig.value, ...configData.config };
+                await saveUserConfig();
+                await localforage.setItem('userConfigTimestamp', configData.timestamp);
+              }
+            }
+          } catch (error) {
+            console.warn('解析云端配置失败:', error);
+          }
+        }
+        
+        // 2. 加载云端书籍
+        await loadBaidupanBooks();
+      }
+    } catch (error) {
+      console.warn('从百度网盘同步用户配置失败:', error);
+    }
   };
 
   return {
@@ -1418,6 +1870,7 @@ export const useEbookStore = defineStore('ebook', () => {
     readingProgress,
     userConfig,
     deviceInfo,
+    baidupanUser,
     
     // 计算属性
     localBooks,
@@ -1454,10 +1907,13 @@ export const useEbookStore = defineStore('ebook', () => {
     importTxtFile,
     importEbookFile,
     uploadLocalBookToBaidupan,
+    downloadBlobFromBaidupan,
     downloadFromBaidupan,
     listBaidupanFiles,
     isBaidupanTokenValid,
     syncCurrentBookProgress,
+    loadBaidupanBooks,
+    fetchBaidupanUserInfo,
     initialize
   };
 });

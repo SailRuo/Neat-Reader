@@ -11,7 +11,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 )
 
-//go:embed dist
+//go:embed frontend/dist
 var assets embed.FS
 
 func main() {
@@ -22,14 +22,14 @@ func main() {
 
 	err := wails.Run(&options.App{
 		Title:     "Neat Reader",
-		Width:     1280,
-		Height:    800,
+		Width:     1440,
+		Height:    900,
 		MinWidth:  1024,
 		MinHeight: 768,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		BackgroundColour: &options.RGBA{R: 255, G: 255, B: 255, A: 1},
+		BackgroundColour: &options.RGBA{R: 245, G: 247, B: 250, A: 1},
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
 		Bind: []interface{}{

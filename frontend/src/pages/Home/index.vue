@@ -1,39 +1,17 @@
 <template>
   <div class="home">
-    <!-- 顶部导航栏 -->
-    <header class="header">
-      <div class="header-left">
-        <div class="logo">
-          <span class="logo-icon">📚</span>
-          <h1 class="logo-text">Neat Reader</h1>
-        </div>
-      </div>
-      <div class="header-center">
-        <!-- 搜索框 -->
-        <div class="search-container">
-          <div class="search-box">
-            <input 
-              type="text" 
-              v-model="searchKeyword" 
-              placeholder="输入书名、作者" 
-              class="search-input"
-              @keyup.enter="performSearch"
-            />
-            <button class="search-btn" @click="performSearch">
-              <Icons.Search :size="18" />
-            </button>
-          </div>
-        </div>
-      </div>
-      <div class="header-right">
-      </div>
-    </header>
-
     <!-- 主要内容区 -->
     <main class="main">
       <div class="content-wrapper">
         <!-- 左侧边栏：分类导航 -->
         <aside class="sidebar">
+          <div class="sidebar-header">
+            <div class="logo">
+              <img src="/src/assets/icons/appicon.png" alt="Logo" class="logo-icon" style="width: 48px; height: 48px;" />
+              <h1 class="logo-text">Drive Reader</h1>
+            </div>
+          </div>
+
           <div class="sidebar-section">
             <h3 class="sidebar-title">书架</h3>
             <div class="category-list">
@@ -70,54 +48,41 @@
               </button>
             </div>
           </div>
-          
-          <div class="sidebar-section">
-            <h3 class="sidebar-title">快捷操作</h3>
-            <div class="quick-actions">
-              <button class="quick-action-btn" @click="triggerFileImport">
-                <Icons.FolderPlus :size="20" class="quick-action-icon" />
-                <span class="quick-action-text">添加书籍</span>
-              </button>
-              <button class="quick-action-btn" @click="performSearch">
-                <Icons.Search :size="20" class="quick-action-icon" />
-                <span class="quick-action-text">搜索书籍</span>
-              </button>
-            </div>
-          </div>
 
-          <!-- 设置和账户部分 -->
-          <div class="sidebar-section settings-section">
-            <div class="account-info" v-if="isBaidupanAuthorized">
-              <div class="account-avatar">
-                <Icons.UserCheck :size="32" />
+          <div class="sidebar-bottom">
+            <div class="sidebar-section">
+              <div class="baidupan-status" v-if="isBaidupanAuthorized && ebookStore.baidupanUser" @click="selectedCategory = 'settings'">
+                <img :src="ebookStore.baidupanUser.avatar_url" class="baidupan-avatar" alt="头像" />
+                <div class="baidupan-info">
+                  <span class="baidupan-name">{{ ebookStore.baidupanUser.baidu_name }}</span>
+                  <span class="baidupan-vip">{{ ebookStore.baidupanUser.vip_type === 2 ? '超级会员' : ebookStore.baidupanUser.vip_type === 1 ? '普通会员' : '普通用户' }}</span>
+                </div>
               </div>
-              <div class="account-details">
-                <div class="account-name">百度网盘已授权</div>
-                <div class="account-status">已连接</div>
-              </div>
-            </div>
-            <div class="account-info" v-else>
-              <div class="account-avatar">
-                <Icons.UserX :size="32" />
-              </div>
-              <div class="account-details">
-                <div class="account-name">未授权</div>
-                <div class="account-status">点击设置授权</div>
+              <div class="baidupan-status unauthorized" v-else-if="!isBaidupanAuthorized" @click="selectedCategory = 'settings'">
+                <Icons.UserX :size="20" />
+                <span class="baidupan-text">未授权</span>
               </div>
             </div>
-            <button class="settings-btn" @click="goToSettings">
-              <span class="settings-icon">
-                <Icons.Settings :size="16" />
-              </span>
-              <span class="settings-text">设置</span>
-            </button>
+
+            <div class="sidebar-section">
+              <button 
+                class="category-item"
+                :class="{ 'active': selectedCategory === 'settings' }"
+                @click="selectedCategory = 'settings'"
+              >
+                <span class="category-icon">
+                  <Icons.Settings :size="20" />
+                </span>
+                <span class="category-name">设置</span>
+              </button>
+            </div>
           </div>
         </aside>
 
         <!-- 右侧内容区：书籍列表 -->
         <section class="content">
           <!-- 内容头部 -->
-          <div class="content-header">
+          <div class="content-header" v-if="selectedCategory !== 'settings'">
             <div class="section-info">
               <h2 class="section-title">
                 {{ selectedCategory === 'all' ? '我的书架' : getCategoryName(selectedCategory) }}
@@ -126,33 +91,49 @@
                 {{ selectedCategory === 'all' ? `共 ${books.length} 本书籍` : `共 ${getBooksByCategory(selectedCategory).length} 本` }}
               </p>
             </div>
-            <div class="view-controls">
-              <button 
-                class="view-btn" 
-                :class="{ 'active': viewMode === 'grid' }"
-                @click="viewMode = 'grid'"
-              >
-                <Icons.LayoutGrid :size="16" />
-                网格
-              </button>
-              <button 
-                class="view-btn" 
-                :class="{ 'active': viewMode === 'list' }"
-                @click="viewMode = 'list'"
-              >
-                <Icons.List :size="16" />
-                列表
-              </button>
+            <div class="header-controls">
+              <div class="search-container">
+                <div class="search-box">
+                  <input 
+                    type="text" 
+                    v-model="searchKeyword" 
+                    placeholder="输入书名、作者" 
+                    class="search-input"
+                    @keyup.enter="performSearch"
+                  />
+                  <button class="search-btn" @click="performSearch">
+                    <Icons.Search :size="18" />
+                  </button>
+                </div>
+              </div>
+              <div class="view-controls">
+                <button 
+                  class="view-btn" 
+                  :class="{ 'active': viewMode === 'grid' }"
+                  @click="viewMode = 'grid'"
+                >
+                  <Icons.LayoutGrid :size="16" />
+                  网格
+                </button>
+                <button 
+                  class="view-btn" 
+                  :class="{ 'active': viewMode === 'list' }"
+                  @click="viewMode = 'list'"
+                >
+                  <Icons.List :size="16" />
+                  列表
+                </button>
+              </div>
             </div>
           </div>
 
           <!-- 搜索结果提示 -->
-          <div v-if="isSearching" class="search-loading">
+          <div v-if="isSearching && selectedCategory !== 'settings'" class="search-loading">
             <div class="loading-spinner"></div>
             <p>正在搜索...</p>
           </div>
 
-          <div v-else-if="searchResults.length > 0 && searchKeyword" class="search-results-info">
+          <div v-else-if="searchResults.length > 0 && searchKeyword && selectedCategory !== 'settings'" class="search-results-info">
             <div class="search-info-content">
               <Icons.SearchCheck :size="24" class="search-info-icon" />
               <div class="search-info-text">
@@ -166,90 +147,103 @@
           </div>
 
           <!-- 电子书列表 -->
-          <div :class="viewMode === 'grid' ? 'books-grid' : 'books-list'">
-            <div 
-              v-for="book in displayBooks" 
-              :key="book.id" 
-              class="book-card"
-              :class="{ 'has-progress': book.readingProgress > 0 }"
-              @click="goToReader(book.id)"
-              @contextmenu.prevent="showContextMenu($event, book)"
-            >
-              <!-- 书籍封面 -->
-              <div class="book-cover-container">
-                <div class="book-cover" :style="{ backgroundImage: book.cover ? `url(${book.cover})` : 'none' }">
-                  <div v-if="!book.cover" class="book-cover-placeholder">
-                    <span class="placeholder-icon">📚</span>
-                    <span class="placeholder-text">{{ book.title.charAt(0) }}</span>
-                  </div>
-                  <div class="book-cover-overlay">
-                    <div class="book-actions">
-                      <button class="book-action-btn" @click.stop="handleUploadToBaidupan(book)">
-                        <Icons.UploadCloud :size="16" />
-                      </button>
-                      <button class="book-action-btn" @click.stop="handleRemoveBook(book)">
-                        <Icons.Trash2 :size="16" />
-                      </button>
+          <div v-if="selectedCategory !== 'settings'">
+            <div :class="viewMode === 'grid' ? 'books-grid' : 'books-list'">
+              <div 
+                v-for="book in displayBooks" 
+                :key="book.id" 
+                class="book-card"
+                :class="{ 'has-progress': book.readingProgress > 0 }"
+                @click="goToReader(book.id)"
+                @contextmenu.prevent="showContextMenu($event, book)"
+              >
+                <!-- 书籍封面 -->
+                <div class="book-cover-container">
+                  <div class="book-cover" :style="{ backgroundImage: book.cover ? `url(${book.cover})` : 'none' }">
+                    <div v-if="!book.cover" class="book-cover-placeholder">
+                      <span class="placeholder-icon">📚</span>
+                      <span class="placeholder-text">{{ book.title.charAt(0) }}</span>
+                    </div>
+                    <div class="book-format-badge">{{ book.format.toUpperCase() }}</div>
+                    <div 
+                      class="book-storage-badge" 
+                      :class="{ 
+                        'local': book.storageType === 'local',
+                        'synced': book.storageType === 'synced',
+                        'baidupan': book.storageType === 'baidupan'
+                      }"
+                      @click.stop="handleStorageBadgeClick(book)"
+                      :title="getStorageBadgeTitle(book.storageType)"
+                    >
+                      <Icons.HardDrive v-if="book.storageType === 'local'" :size="14" />
+                      <Icons.Cloud v-else-if="book.storageType === 'synced'" :size="14" />
+                      <Icons.Download v-else-if="book.storageType === 'baidupan'" :size="14" />
                     </div>
                   </div>
-                  <div class="book-format-badge">{{ book.format.toUpperCase() }}</div>
-                  <div class="book-storage-badge">
-                    {{ book.storageType === 'local' ? '💻' : '☁️' }}
-                  </div>
-                </div>
-              </div>
-              
-              <!-- 书籍信息 -->
-              <div class="book-info">
-                <h3 class="book-title">{{ book.title }}</h3>
-                <p class="book-author">{{ book.author || '未知作者' }}</p>
-                
-                <!-- 阅读进度 -->
-                <div v-if="book.readingProgress > 0" class="book-progress">
-                  <div class="progress-bar-container">
-                    <div class="progress-bar" :style="{ width: `${book.readingProgress}%` }"></div>
-                  </div>
-                  <span class="progress-text">{{ book.readingProgress }}%</span>
                 </div>
                 
-                <!-- 其他信息 -->
-                <div class="book-meta">
-                  <span class="book-last-read">{{ formatDate(book.lastRead) }}</span>
-                  <span v-if="book.categoryId" class="book-category" :style="{ backgroundColor: getCategoryColor(book.categoryId) + '20', color: getCategoryColor(book.categoryId) }">
-                    {{ getCategoryName(book.categoryId) }}
-                  </span>
+                <!-- 书籍信息 -->
+                <div class="book-info">
+                  <h3 class="book-title">{{ book.title }}</h3>
+                  <p class="book-author">{{ book.author || '未知作者' }}</p>
+                  
+                  <!-- 阅读进度 -->
+                  <div v-if="book.readingProgress > 0" class="book-progress">
+                    <div class="progress-bar-container">
+                      <div class="progress-bar" :style="{ width: `${book.readingProgress}%` }"></div>
+                    </div>
+                    <span class="progress-text">{{ book.readingProgress }}%</span>
+                  </div>
+                  
+                  <!-- 其他信息 -->
+                  <div class="book-meta">
+                    <span class="book-last-read">{{ formatDate(book.lastRead) }}</span>
+                    <span v-if="book.categoryId" class="book-category" :style="{ backgroundColor: getCategoryColor(book.categoryId) + '20', color: getCategoryColor(book.categoryId) }">
+                      {{ getCategoryName(book.categoryId) }}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
+
+            <!-- 空状态 -->
+            <div v-if="displayBooks.length === 0 && !isSearching && selectedCategory !== 'settings'" class="empty-state">
+              <Icons.BookOpen :size="64" class="empty-icon" />
+              <h3>{{ selectedCategory === 'all' ? '书架是空的' : '该分类下没有书籍' }}</h3>
+              <p>{{ selectedCategory === 'all' ? '添加一些电子书开始阅读吧' : '点击左侧添加书籍' }}</p>
+              <button class="btn btn-primary add-books-btn" @click="triggerFileImport">
+                <Icons.Upload :size="16" />
+                添加书籍
+              </button>
+            </div>
+
+            <!-- 搜索无结果状态 -->
+            <div v-if="searchResults.length === 0 && searchKeyword && !isSearching && selectedCategory !== 'settings'" class="empty-state">
+              <Icons.SearchX :size="64" class="empty-icon" />
+              <h3>没有找到匹配的书籍</h3>
+              <p>尝试其他关键词或检查拼写</p>
+              <button class="btn btn-secondary" @click="clearSearch">
+                <Icons.X :size="16" />
+                清除搜索
+              </button>
+            </div>
           </div>
 
-          <!-- 空状态 -->
-          <div v-if="displayBooks.length === 0 && !isSearching" class="empty-state">
-            <Icons.BookOpen :size="64" class="empty-icon" />
-            <h3>{{ selectedCategory === 'all' ? '书架是空的' : '该分类下没有书籍' }}</h3>
-            <p>{{ selectedCategory === 'all' ? '添加一些电子书开始阅读吧' : '点击左侧添加书籍' }}</p>
-            <button class="btn btn-primary add-books-btn" @click="triggerFileImport">
-              <Icons.Upload :size="16" />
-              添加书籍
-            </button>
-          </div>
-
-          <!-- 搜索无结果状态 -->
-          <div v-if="searchResults.length === 0 && searchKeyword && !isSearching" class="empty-state">
-            <Icons.SearchX :size="64" class="empty-icon" />
-            <h3>没有找到匹配的书籍</h3>
-            <p>尝试其他关键词或检查拼写</p>
-            <button class="btn btn-secondary" @click="clearSearch">
-              <Icons.X :size="16" />
-              清除搜索
-            </button>
-          </div>
+          <!-- 设置面板 -->
+          <SettingsPanel 
+            v-else-if="selectedCategory === 'settings'"
+            :baidupan-user="ebookStore.baidupanUser"
+            :view-mode="viewMode"
+            @cancel-baidupan-auth="cancelBaidupanAuth"
+            @show-baidupan-auth-dialog="showBaidupanAuthDialog"
+            @update-view-mode="updateViewMode"
+          />
         </section>
       </div>
     </main>
 
     <!-- 底部添加按钮 -->
-    <button class="floating-add-btn" @click="triggerFileImport">
+    <button v-if="selectedCategory !== 'settings'" class="floating-add-btn" @click="triggerFileImport">
       <Icons.Plus :size="24" />
     </button>
     
@@ -273,7 +267,7 @@
         <Icons.UploadCloud :size="18" class="menu-icon" />
         <span class="menu-text">上传到百度网盘</span>
       </div>
-      <div class="menu-item" @click="openCategoryMenu">
+      <div class="menu-item" @click="showCategoryManageDialog">
         <Icons.Folder :size="18" class="menu-icon" />
         <span class="menu-text">分类管理</span>
       </div>
@@ -283,30 +277,41 @@
       </div>
     </div>
 
-    <!-- 分类管理子菜单 -->
-    <div 
-      v-if="isCategoryMenuVisible"
-      class="context-menu category-submenu"
-      :style="{ left: subMenuX + 'px', top: subMenuY + 'px' }"
-      @click.stop
-      @contextmenu.prevent
-    >
-      <div 
-        v-for="category in categories" 
-        :key="category.id"
-        class="menu-item"
-        @click="handleMoveToCategory(category.id)"
-      >
-        <span class="menu-icon" :style="{ color: category.color }">
-          <component :is="getCategoryEmoji(category.name)" :size="18" />
-        </span>
-        <span class="menu-text">{{ category.name }}</span>
-      </div>
-      <div class="menu-item add-category" @click.stop="showAddCategoryDialog">
-        <span class="menu-icon">
-          <Icons.Plus :size="18" />
-        </span>
-        <span class="menu-text">新建分类</span>
+    <!-- 分类管理对话框 -->
+    <div v-if="showCategoryManage" class="dialog-overlay" @click="closeCategoryManageDialog">
+      <div class="dialog-content" @click.stop>
+        <div class="dialog-header">
+          <h3 class="dialog-title">分类管理</h3>
+          <button class="dialog-close" @click="closeCategoryManageDialog">
+            <Icons.X :size="20" />
+          </button>
+        </div>
+        <div class="dialog-body">
+          <div class="category-manage-list">
+            <div 
+              v-for="category in categories" 
+              :key="category.id"
+              class="category-manage-item"
+              :class="{ 'selected': selectedCategoryId === category.id }"
+              @click="selectedCategoryId = category.id"
+            >
+              <span class="category-manage-icon" :style="{ backgroundColor: category.color + '20', color: category.color }">
+                <component :is="getCategoryEmoji(category.name)" :size="18" />
+              </span>
+              <span class="category-manage-name">{{ category.name }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <button class="btn btn-secondary" @click="closeCategoryManageDialog">取消</button>
+          <button 
+            class="btn btn-primary" 
+            @click="confirmMoveToCategory"
+            :disabled="!selectedCategoryId"
+          >
+            确定
+          </button>
+        </div>
       </div>
     </div>
 
@@ -349,6 +354,51 @@
         </div>
       </div>
     </div>
+
+    <!-- 百度网盘授权对话框 -->
+    <div v-if="showBaidupanAuth" class="dialog-overlay" @click="closeBaidupanAuthDialog">
+      <div class="dialog-content" @click.stop>
+        <div class="dialog-header">
+          <h3 class="dialog-title">百度网盘授权</h3>
+          <button class="dialog-close" @click="closeBaidupanAuthDialog">
+            <Icons.X :size="20" />
+          </button>
+        </div>
+        <div class="dialog-body">
+          <div class="form-group">
+            <label class="form-label">App Key</label>
+            <input 
+              type="text" 
+              v-model="baidupanForm.appKey" 
+              placeholder="输入百度网盘 App Key"
+              class="form-input"
+            />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Secret Key</label>
+            <input 
+              type="password" 
+              v-model="baidupanForm.secretKey" 
+              placeholder="输入百度网盘 Secret Key"
+              class="form-input"
+            />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Refresh Token</label>
+            <input 
+              type="password" 
+              v-model="baidupanForm.refreshToken" 
+              placeholder="输入百度网盘 Refresh Token"
+              class="form-input"
+            />
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <button class="btn btn-secondary" @click="closeBaidupanAuthDialog">取消</button>
+          <button class="btn btn-primary" @click="saveBaidupanAuth">保存</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -358,7 +408,9 @@ import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import { useEbookStore } from '../../stores/ebook'
 import { useDialogStore } from '../../stores/dialog'
+import SettingsPanel from '../../components/SettingsPanel/index.vue'
 import * as Icons from 'lucide-vue-next'
+import { wails } from '../../wails'
 
 // 初始化路由和状态管理
 const router = useRouter()
@@ -373,17 +425,24 @@ const selectedCategory = ref('all')
 
 // 右键菜单相关
 const showMenu = ref(false)
-const isCategoryMenuVisible = ref(false)
 const menuX = ref(0)
 const menuY = ref(0)
-const subMenuX = ref(0)
-const subMenuY = ref(0)
 const selectedBook = ref<any>(null)
 
 // 分类对话框相关
 const showAddCategory = ref(false)
 const newCategoryName = ref('')
 const newCategoryColor = ref('#4A90E2')
+const showCategoryManage = ref(false)
+const selectedCategoryId = ref<string>('')
+
+// 百度网盘授权对话框相关
+const showBaidupanAuth = ref(false)
+const baidupanForm = ref({
+  appKey: '',
+  secretKey: '',
+  refreshToken: ''
+})
 
 // 搜索相关
 const searchResults = ref<any[]>([])
@@ -394,9 +453,91 @@ const isBaidupanAuthorized = computed(() => {
   return ebookStore.isBaidupanTokenValid()
 })
 
-// 跳转到设置页面
-const goToSettings = () => {
-  router.push('/settings')
+// 显示百度网盘授权弹窗
+const showBaidupanAuthDialog = () => {
+  if (ebookStore.userConfig.storage.baidupan) {
+    baidupanForm.value = {
+      appKey: ebookStore.userConfig.storage.baidupan.appKey || '',
+      secretKey: ebookStore.userConfig.storage.baidupan.secretKey || '',
+      refreshToken: ebookStore.userConfig.storage.baidupan.refreshToken || ''
+    }
+  }
+  showBaidupanAuth.value = true
+}
+
+// 关闭百度网盘授权弹窗
+const closeBaidupanAuthDialog = () => {
+  showBaidupanAuth.value = false
+}
+
+// 保存百度网盘授权信息
+const saveBaidupanAuth = async () => {
+  try {
+    await ebookStore.updateUserConfig({
+      storage: {
+        ...ebookStore.userConfig.storage,
+        baidupan: {
+          appKey: baidupanForm.value.appKey,
+          secretKey: baidupanForm.value.secretKey,
+          refreshToken: baidupanForm.value.refreshToken,
+          accessToken: '',
+          expiration: 0,
+          rootPath: '',
+          userId: '',
+          namingStrategy: '1'
+        }
+      }
+    }, true)
+    
+    if (baidupanForm.value.refreshToken && baidupanForm.value.appKey && baidupanForm.value.secretKey) {
+      const result = await wails.refreshToken(baidupanForm.value.refreshToken, baidupanForm.value.appKey, baidupanForm.value.secretKey)
+      const data = JSON.parse(result)
+      if (!data.error && data.access_token) {
+        await ebookStore.updateUserConfig({
+          storage: {
+            ...ebookStore.userConfig.storage,
+            baidupan: {
+              appKey: baidupanForm.value.appKey,
+              secretKey: baidupanForm.value.secretKey,
+              refreshToken: baidupanForm.value.refreshToken,
+              accessToken: data.access_token,
+              expiration: Date.now() + (data.expires_in * 1000),
+              rootPath: '',
+              userId: '',
+              namingStrategy: '1'
+            }
+          }
+        }, true)
+        await ebookStore.fetchBaidupanUserInfo(true)
+      }
+    }
+    
+    closeBaidupanAuthDialog()
+  } catch (error) {
+    console.error('保存百度网盘授权信息失败:', error)
+  }
+}
+
+// 取消百度网盘授权
+const cancelBaidupanAuth = async () => {
+  try {
+    await ebookStore.updateUserConfig({
+      storage: {
+        ...ebookStore.userConfig.storage,
+        baidupan: null
+      }
+    })
+  } catch (error) {
+    console.error('取消百度网盘授权失败:', error)
+  }
+}
+
+// 获取字体名称
+const updateViewMode = async (mode: 'grid' | 'list') => {
+  viewMode.value = mode
+  await ebookStore.updateUserConfig({
+    ui: { ...ebookStore.userConfig.ui, viewMode: mode }
+  })
 }
 
 // 计算属性：显示所有书籍（本地和百度网盘）
@@ -406,7 +547,7 @@ const books = computed(() => {
 
 // 计算属性：分类列表
 const categories = computed(() => {
-  return ebookStore.categories || []
+  return (ebookStore.categories || []).filter(cat => cat.name !== '未分类')
 })
 
 // 计算属性：根据分类筛选书籍
@@ -504,21 +645,26 @@ const formatDate = (timestamp: number) => {
 const showContextMenu = (event: MouseEvent, book: any) => {
   event.preventDefault()
   showMenu.value = true
-  isCategoryMenuVisible.value = false
   menuX.value = event.clientX
   menuY.value = event.clientY
   selectedBook.value = book
   
   // 点击其他区域关闭菜单
-  document.addEventListener('click', closeContextMenu)
+  document.addEventListener('click', closeContextMenuHandler)
 }
 
 // 关闭右键菜单
-const closeContextMenu = () => {
+const closeContextMenu = (clearSelectedBook = true) => {
   showMenu.value = false
-  isCategoryMenuVisible.value = false
-  selectedBook.value = null
-  document.removeEventListener('click', closeContextMenu)
+  if (clearSelectedBook) {
+    selectedBook.value = null
+  }
+}
+
+// 事件监听器包装函数
+const closeContextMenuHandler = (event: Event) => {
+  closeContextMenu()
+  document.removeEventListener('click', closeContextMenuHandler)
 }
 
 // 处理上传到百度网盘
@@ -542,17 +688,86 @@ const uploadToBaidupan = async (book: any) => {
   if (!book) return
   
   try {
+    // 显示上传进度对话框
+    dialogStore.showDialog({
+      title: '正在上传',
+      message: `正在将《${book.title}》上传到百度网盘...`,
+      type: 'info',
+      buttons: []
+    })
+    
     const result = await ebookStore.uploadLocalBookToBaidupan(book)
+    
+    dialogStore.closeDialog()
+    
     if (result) {
       dialogStore.showSuccessDialog('上传到百度网盘成功')
     } else {
       dialogStore.showErrorDialog('上传到百度网盘失败', '请检查网络连接或授权状态')
     }
   } catch (error) {
+    dialogStore.closeDialog()
     console.error('上传到百度网盘失败:', error)
-    dialogStore.showErrorDialog('上传到百度网盘失败', error instanceof Error ? error.message : String(error))
+    const errorMessage = error instanceof Error ? error.message : '上传失败，请重试'
+    dialogStore.showErrorDialog('上传到百度网盘失败', errorMessage)
   } finally {
     closeContextMenu()
+  }
+}
+
+// 从百度网盘下载
+const handleDownloadFromBaidupan = async (book: any) => {
+  if (!book || !book.baidupanPath) return
+  
+  try {
+    dialogStore.showDialog({
+      title: '正在下载',
+      message: `正在从百度网盘下载《${book.title}》...`,
+      type: 'info',
+      buttons: []
+    })
+    
+    const result = await ebookStore.downloadFromBaidupan(book.baidupanPath)
+    
+    dialogStore.closeDialog()
+    
+    if (result) {
+      dialogStore.showSuccessDialog('下载成功')
+      // 刷新书籍列表
+      await ebookStore.loadBooks()
+    } else {
+      dialogStore.showErrorDialog('下载失败', '请检查网络连接或授权状态')
+    }
+  } catch (error) {
+    dialogStore.closeDialog()
+    console.error('从百度网盘下载失败:', error)
+    const errorMessage = error instanceof Error ? error.message : '下载失败，请重试'
+    dialogStore.showErrorDialog('下载失败', errorMessage)
+  }
+}
+
+// 处理存储徽章点击
+const handleStorageBadgeClick = async (book: any) => {
+  if (!book) return
+  
+  if (book.storageType === 'local') {
+    await handleUploadToBaidupan(book)
+  } else if (book.storageType === 'baidupan') {
+    await handleDownloadFromBaidupan(book)
+  }
+}
+
+// 获取存储徽章标题
+const getStorageBadgeTitle = (storageType: string) => {
+  switch (storageType) {
+    case 'local':
+      return '未上传到百度网盘，点击上传'
+    case 'synced':
+      return '已上传到百度网盘'
+    case 'baidupan':
+      return '仅在百度网盘，点击下载到本地'
+    default:
+      return ''
   }
 }
 
@@ -595,57 +810,15 @@ const removeBook = async (book: any) => {
   closeContextMenu(); // 这里虽然清空了 selectedBook，但上面的局部变量已锁定数据
 }
 
-// 显示分类管理菜单
-const openCategoryMenu = () => {
-  console.log('打开分类管理菜单')
-  console.log('主菜单位置:', menuX.value, menuY.value)
-  
-  // 设置子菜单位置在主菜单右侧
-  subMenuX.value = menuX.value + 180 // 180 是菜单宽度
-  subMenuY.value = menuY.value
-  
-  // 检查是否超出屏幕右侧
-  if (subMenuX.value + 180 > window.innerWidth) {
-    // 如果右侧空间不足，显示在主菜单左侧
-    subMenuX.value = menuX.value - 180
-  }
-  
-  console.log('子菜单位置:', subMenuX.value, subMenuY.value)
-  
-  // 关闭主菜单，显示子菜单
-  showMenu.value = false
-  
-  // 移除点击外部关闭菜单的监听器，因为子菜单需要单独处理
-  document.removeEventListener('click', closeContextMenu)
-  
-  // 使用 setTimeout 避免事件冲突
-  setTimeout(() => {
-    isCategoryMenuVisible.value = true
-    console.log('子菜单已显示')
-    
-    // 为子菜单添加点击外部关闭的监听器
-    setTimeout(() => {
-      document.addEventListener('click', closeSubMenuContextMenu)
-    }, 100)
-  }, 50)
-}
-
-// 关闭子菜单的上下文菜单
-const closeSubMenuContextMenu = (event: MouseEvent) => {
-  const subMenu = document.querySelector('.category-submenu')
-  if (subMenu && !subMenu.contains(event.target as Node)) {
-    closeContextMenu()
-  }
-}
-
 // 移动书籍到分类
-const handleMoveToCategory = async (categoryId: string) => {
-  if (!selectedBook.value) {
-    console.error('selectedBook 为 null，无法移动书籍')
+const confirmMoveToCategory = async () => {
+  if (!selectedBook.value || !selectedCategoryId.value) {
+    console.error('selectedBook 或 selectedCategoryId 为 null，无法移动书籍')
     return
   }
   
   const book = selectedBook.value
+  const categoryId = selectedCategoryId.value
   console.log('移动书籍到分类:', book.title, '->', categoryId)
   console.log('selectedBook:', selectedBook.value)
   
@@ -656,17 +829,16 @@ const handleMoveToCategory = async (categoryId: string) => {
     
     if (result) {
       dialogStore.showSuccessDialog('书籍分类更新成功')
-      closeContextMenu()
-      console.log('书籍分类更新成功，菜单已关闭')
+      closeCategoryManageDialog()
+      console.log('书籍分类更新成功，对话框已关闭')
     } else {
       dialogStore.showErrorDialog('分类更新失败', '无法找到指定书籍或分类')
-      closeContextMenu()
-      console.log('书籍分类更新失败，菜单已关闭')
+      console.log('书籍分类更新失败，对话框已关闭')
     }
   } catch (error) {
     console.error('移动书籍到分类失败:', error)
     dialogStore.showErrorDialog('分类更新失败', error instanceof Error ? error.message : String(error))
-    closeContextMenu()
+    closeCategoryManageDialog()
   }
 }
 
@@ -682,6 +854,20 @@ const showAddCategoryDialog = () => {
 const closeAddCategoryDialog = () => {
   showAddCategory.value = false
   newCategoryName.value = ''
+}
+
+// 显示分类管理对话框
+const showCategoryManageDialog = () => {
+  showCategoryManage.value = true
+  closeContextMenu(false)
+}
+
+// 关闭分类管理对话框
+const closeCategoryManageDialog = () => {
+  showCategoryManage.value = false
+  selectedCategoryId.value = ''
+  selectedBook.value = null
+  closeContextMenu()
 }
 
 // 添加分类
@@ -855,6 +1041,11 @@ onMounted(async () => {
     console.log('当前书籍数量:', ebookStore.books.length);
     console.log('当前分类数量:', ebookStore.categories.length);
     
+    // 获取百度网盘用户信息（仅在 token 有效且没有缓存时）
+    if (isBaidupanAuthorized.value && !ebookStore.baidupanUser) {
+      await ebookStore.fetchBaidupanUserInfo();
+    }
+    
     // 初始化深色模式
     initDarkMode();
   } catch (error) {
@@ -921,15 +1112,15 @@ watch(
 
 /* 深色模式 */
 .theme-dark {
-  --background-color: #1F2937;
-  --card-background: #374151;
-  --text-primary: #F3F4F6;
-  --text-secondary: #9CA3AF;
-  --border-color: #4B5563;
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.4);
-  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.6), 0 10px 10px -5px rgba(0, 0, 0, 0.5);
+  --background-color: #0F172A;
+  --card-background: #1E293B;
+  --text-primary: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --border-color: #334155;
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -1px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -2px rgba(0, 0, 0, 0.5);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.7), 0 10px 10px -5px rgba(0, 0, 0, 0.6);
 }
 
 body {
@@ -948,99 +1139,6 @@ body {
   background-color: var(--background-color);
 }
 
-/* 顶部导航栏 */
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 1rem 2rem;
-  background-color: var(--card-background);
-  border-bottom: 1px solid var(--border-color);
-  box-shadow: var(--shadow-sm);
-  z-index: 100;
-  height: 72px;
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-}
-
-.logo {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.logo-icon {
-  font-size: 1.75rem;
-}
-
-.logo-text {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--primary-color);
-  margin: 0;
-}
-
-.header-center {
-  flex: 1;
-  max-width: 500px;
-  margin: 0 2rem;
-}
-
-.search-container {
-  position: relative;
-}
-
-.search-box {
-  display: flex;
-  align-items: center;
-  background-color: var(--background-color);
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-full);
-  padding: 0.5rem 1rem;
-  transition: all var(--transition-fast);
-}
-
-.search-box:focus-within {
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
-}
-
-.search-input {
-  flex: 1;
-  border: none;
-  background: transparent;
-  outline: none;
-  padding: 0.5rem;
-  font-size: 0.875rem;
-  color: var(--text-primary);
-}
-
-.search-input::placeholder {
-  color: var(--text-secondary);
-}
-
-.search-btn {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 0.25rem;
-  color: var(--text-secondary);
-  transition: color var(--transition-fast);
-}
-
-.search-btn:hover {
-  color: var(--primary-color);
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
 /* 主要内容区 */
 .main {
   flex: 1;
@@ -1057,27 +1155,68 @@ body {
 
 /* 左侧边栏 */
 .sidebar {
-  width: 280px;
-  background-color: var(--card-background);
-  border-right: 1px solid var(--border-color);
-  padding: 1.5rem;
+  width: 260px;
+  background: linear-gradient(180deg, #F8FAFC 0%, #FFFFFF 100%);
+  border-right: 1px solid rgba(203, 213, 225, 0.5);
+  padding: 1.5rem 1.25rem;
   overflow-y: auto;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.03);
+  position: relative;
+}
+
+.sidebar-header {
+  margin-bottom: 2rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid rgba(203, 213, 225, 0.5);
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.logo-icon {
+  font-size: 1.75rem;
+}
+
+.logo-text {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #1E293B;
+  margin: 0;
 }
 
 .sidebar-section {
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
+}
+
+.sidebar-section:last-child {
+  margin-top: auto;
+  margin-bottom: 0;
+}
+
+.sidebar-bottom {
+  margin-top: auto;
+}
+
+.sidebar-bottom .sidebar-section {
+  margin-bottom: 0.5rem;
 }
 
 .sidebar-title {
   font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-secondary);
+  font-weight: 700;
+  color: #64748B;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 1rem;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.875rem;
+  padding-left: 0.5rem;
+  border-left: 3px solid #4A90E2;
+  opacity: 0.8;
 }
 
 .category-list {
@@ -1089,50 +1228,37 @@ body {
 .category-item {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 1rem;
-  border-radius: var(--border-radius-md);
+  gap: 0.625rem;
+  padding: 0.625rem 0.875rem;
+  border-radius: 0.5rem;
   border: 1px solid transparent;
-  background-color: transparent;
+  background: transparent;
   cursor: pointer;
-  transition: all var(--transition-normal);
+  transition: all 0.2s ease;
   text-align: left;
   font-size: 0.875rem;
-  color: var(--text-primary);
+  color: #475569;
   position: relative;
   overflow: hidden;
-}
-
-.category-item::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(74, 144, 226, 0.1), transparent);
-  transition: left var(--transition-slow);
-}
-
-.category-item:hover::before {
-  left: 100%;
+  min-width: 100%;
 }
 
 .category-item:hover {
-  background-color: var(--background-color);
-  border-color: var(--border-color);
-  transform: translateX(4px);
+  background: linear-gradient(135deg, rgba(74, 144, 226, 0.05), rgba(74, 144, 226, 0.02));
+  border-color: rgba(74, 144, 226, 0.2);
+  transform: translateX(0);
 }
 
 .category-item.active {
-  background-color: rgba(74, 144, 226, 0.1);
-  border-color: var(--primary-color);
-  color: var(--primary-color);
-  transform: translateX(4px);
+  background: linear-gradient(135deg, rgba(74, 144, 226, 0.1), rgba(74, 144, 226, 0.05));
+  border-color: #4A90E2;
+  color: #4A90E2;
+  transform: translateX(0);
+  font-weight: 600;
 }
 
 .category-item:active {
-  transform: translateX(2px) scale(0.98);
+  transform: translateX(4px) scale(0.98);
   transition: all var(--transition-fast);
 }
 
@@ -1140,11 +1266,20 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  border-radius: var(--border-radius-sm);
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.375rem;
   font-size: 1rem;
   flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.category-item:hover .category-icon {
+  transform: scale(1.05);
+}
+
+.category-item.active .category-icon {
+  transform: scale(1.05);
 }
 
 .category-icon svg {
@@ -1155,178 +1290,112 @@ body {
 .category-name {
   flex: 1;
   font-weight: 500;
+  letter-spacing: -0.01em;
+  min-width: 60px;
 }
 
 .category-count {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  background-color: var(--background-color);
-  padding: 0.125rem 0.5rem;
-  border-radius: var(--border-radius-full);
+  font-size: 0.7rem;
+  color: #9CA3AF;
+  background: linear-gradient(135deg, #F3F4F6, #FFFFFF);
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
   min-width: 1.5rem;
   text-align: center;
+  font-weight: 500;
+  border: 1px solid rgba(203, 213, 225, 0.5);
 }
 
 .category-item.active .category-count {
-  background-color: rgba(74, 144, 226, 0.2);
-  color: var(--primary-color);
+  background: linear-gradient(135deg, rgba(74, 144, 226, 0.15), rgba(74, 144, 226, 0.08));
+  color: #4A90E2;
+  border-color: rgba(74, 144, 226, 0.3);
 }
 
 .category-item.add-category {
-  border: 1px dashed var(--border-color);
-  color: var(--text-secondary);
+  border: 1px solid transparent;
+  color: #64748B;
+  background: rgba(74, 144, 226, 0.05);
 }
 
 .category-item.add-category:hover {
-  border-color: var(--primary-color);
-  color: var(--primary-color);
-  background-color: rgba(74, 144, 226, 0.05);
+  border-color: rgba(74, 144, 226, 0.3);
+  color: #4A90E2;
+  background: rgba(74, 144, 226, 0.1);
+  transform: translateX(6px) scale(1.02);
 }
 
 .add-icon {
-  background-color: var(--background-color);
-  color: var(--text-secondary);
+  background: linear-gradient(135deg, #FFFFFF, #F8FAFC);
+  color: #64748B;
   font-weight: bold;
   font-size: 1.25rem;
 }
 
 .category-item.add-category:hover .add-icon {
-  background-color: rgba(74, 144, 226, 0.2);
-  color: var(--primary-color);
+  background: linear-gradient(135deg, rgba(74, 144, 226, 0.2), rgba(99, 102, 241, 0.15));
+  color: #4A90E2;
 }
 
-/* 快捷操作 */
-.quick-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.quick-action-btn {
+.baidupan-status {
   display: flex;
   align-items: center;
   gap: 0.75rem;
   padding: 0.75rem 1rem;
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-md);
-  background-color: var(--card-background);
+  background: #FFFFFF;
+  border: 1px solid rgba(203, 213, 225, 0.5);
+  border-radius: 0.5rem;
   cursor: pointer;
-  transition: all var(--transition-fast);
-  text-align: left;
-  font-size: 0.875rem;
-  color: var(--text-primary);
+  transition: all 0.2s ease;
+  margin-bottom: 0.75rem;
 }
 
-.quick-action-btn:hover {
-  border-color: var(--primary-color);
-  background-color: rgba(74, 144, 226, 0.05);
-  color: var(--primary-color);
+.baidupan-status:hover {
+  border-color: rgba(74, 144, 226, 0.3);
+  background: #F8FAFC;
 }
 
-.quick-action-icon {
-  font-size: 1rem;
-  flex-shrink: 0;
-}
-
-.quick-action-icon svg {
-  width: 20px;
-  height: 20px;
-}
-
-/* 设置和账户部分 */
-.settings-section {
-  margin-top: auto;
-  border-top: 1px solid var(--border-color);
-  padding-top: 1.5rem;
-}
-
-.account-info {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  margin-bottom: 1rem;
-  padding: 1rem;
-  background-color: var(--background-color);
-  border-radius: var(--border-radius-md);
-  transition: all var(--transition-fast);
-}
-
-.account-info:hover {
-  background-color: rgba(74, 144, 226, 0.05);
-}
-
-.account-avatar {
-  width: 3rem;
-  height: 3rem;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--primary-color), #6366f1);
-  color: white;
-  display: flex;
-  align-items: center;
+.baidupan-status.unauthorized {
   justify-content: center;
+  gap: 0.5rem;
+  color: #64748B;
+  background: #F8FAFC;
+}
+
+.baidupan-avatar {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid rgba(74, 144, 226, 0.3);
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(74, 144, 226, 0.3);
 }
 
-.account-avatar svg {
-  width: 24px;
-  height: 24px;
-  stroke-width: 2;
-}
-
-.account-details {
+.baidupan-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
   flex: 1;
   min-width: 0;
 }
 
-.account-name {
+.baidupan-name {
   font-size: 0.875rem;
   font-weight: 600;
-  color: var(--text-primary);
-  margin-bottom: 0.25rem;
+  color: #1E293B;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.account-status {
+.baidupan-vip {
   font-size: 0.75rem;
-  color: var(--text-secondary);
+  color: #64748B;
 }
 
-.settings-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-md);
-  background-color: var(--card-background);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  text-align: left;
+.baidupan-text {
   font-size: 0.875rem;
-  color: var(--text-primary);
-  width: 100%;
-}
-
-.settings-btn:hover {
-  border-color: var(--primary-color);
-  background-color: rgba(74, 144, 226, 0.05);
-  color: var(--primary-color);
-}
-
-.settings-icon {
-  flex-shrink: 0;
-}
-
-.settings-icon svg {
-  width: 16px;
-  height: 16px;
-}
-
-.settings-text {
-  flex: 1;
+  font-weight: 500;
 }
 
 /* 右侧内容区 */
@@ -1334,7 +1403,7 @@ body {
   flex: 1;
   padding: 2rem;
   overflow-y: auto;
-  background-color: var(--background-color);
+  background: linear-gradient(135deg, #FFFFFF, #F8FAFC);
 }
 
 .content-header {
@@ -1343,7 +1412,7 @@ body {
   justify-content: space-between;
   margin-bottom: 2rem;
   padding-bottom: 1rem;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid rgba(203, 213, 225, 0.5);
 }
 
 .section-info {
@@ -1355,24 +1424,74 @@ body {
 .section-title {
   font-size: 1.5rem;
   font-weight: 700;
-  color: var(--text-primary);
+  color: #1E293B;
   margin: 0;
 }
 
 .section-subtitle {
   font-size: 0.875rem;
-  color: var(--text-secondary);
+  color: #64748B;
   margin: 0;
+}
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.search-container {
+  position: relative;
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  background: #F8FAFC;
+  border: 1px solid rgba(203, 213, 225, 0.5);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  transition: all 0.2s ease;
+}
+
+.search-box:focus-within {
+  border-color: #4A90E2;
+  background: #FFFFFF;
+}
+
+.search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 0.875rem;
+  color: #1E293B;
+  outline: none;
+  min-width: 200px;
+}
+
+.search-input::placeholder {
+  color: #94A3B8;
+}
+
+.search-btn {
+  background: transparent;
+  border: none;
+  color: #64748B;
+  cursor: pointer;
+  padding: 0.25rem;
+  display: flex;
+  align-items: center;
+  transition: color 0.2s ease;
+}
+
+.search-btn:hover {
+  color: #4A90E2;
 }
 
 .view-controls {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  background-color: var(--card-background);
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-md);
-  padding: 0.25rem;
 }
 
 .view-btn {
@@ -1382,21 +1501,21 @@ body {
   padding: 0.5rem 1rem;
   border: none;
   background: transparent;
-  border-radius: var(--border-radius-sm);
+  border-radius: 0.375rem;
   cursor: pointer;
   font-size: 0.75rem;
-  font-weight: 500;
-  color: var(--text-secondary);
-  transition: all var(--transition-fast);
+  font-weight: 600;
+  color: #64748B;
+  transition: all 0.2s ease;
 }
 
 .view-btn:hover {
-  color: var(--text-primary);
-  background-color: var(--background-color);
+  color: #1E293B;
+  background-color: rgba(74, 144, 226, 0.05);
 }
 
 .view-btn.active {
-  color: var(--primary-color);
+  color: #4A90E2;
   background-color: rgba(74, 144, 226, 0.1);
 }
 
@@ -1411,7 +1530,7 @@ body {
   gap: 1rem;
   background-color: rgba(74, 144, 226, 0.1);
   border: 1px solid rgba(74, 144, 226, 0.2);
-  border-radius: var(--border-radius-lg);
+  border-radius: 0.75rem;
   padding: 1rem 1.5rem;
 }
 
@@ -1427,30 +1546,30 @@ body {
 .search-info-text h3 {
   font-size: 1rem;
   font-weight: 600;
-  color: var(--text-primary);
+  color: #1E293B;
   margin: 0 0 0.25rem 0;
 }
 
 .search-info-text p {
   font-size: 0.875rem;
-  color: var(--text-secondary);
+  color: #64748B;
   margin: 0;
 }
 
 .clear-search-btn {
   background: transparent;
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-full);
+  border: 1px solid rgba(203, 213, 225, 0.5);
+  border-radius: 9999px;
   padding: 0.5rem;
   cursor: pointer;
-  color: var(--text-secondary);
-  transition: all var(--transition-fast);
+  color: #64748B;
+  transition: all 0.2s ease;
   flex-shrink: 0;
 }
 
 .clear-search-btn:hover {
-  border-color: var(--primary-color);
-  color: var(--primary-color);
+  border-color: #4A90E2;
+  color: #4A90E2;
   background-color: rgba(74, 144, 226, 0.1);
 }
 
@@ -1461,14 +1580,14 @@ body {
   align-items: center;
   justify-content: center;
   padding: 4rem 2rem;
-  color: var(--text-secondary);
+  color: #64748B;
 }
 
 .loading-spinner {
   width: 2rem;
   height: 2rem;
-  border: 2px solid var(--border-color);
-  border-top: 2px solid var(--primary-color);
+  border: 2px solid rgba(203, 213, 225, 0.5);
+  border-top: 2px solid #4A90E2;
   border-radius: 50%;
   animation: spin 1s linear infinite;
   margin-bottom: 1rem;
@@ -1482,8 +1601,8 @@ body {
 /* 书籍网格 */
 .books-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 1rem;
   margin-bottom: 2rem;
 }
 
@@ -1491,42 +1610,38 @@ body {
 .books-list {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.25rem;
   margin-bottom: 2rem;
 }
 
 /* 书籍卡片 */
 .book-card {
-  background-color: var(--card-background);
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-lg);
+  background: #FFFFFF;
+  border: 1px solid rgba(203, 213, 225, 0.5);
+  border-radius: 0.5rem;
   overflow: hidden;
-  transition: all var(--transition-normal);
+  transition: all 0.2s ease;
   cursor: pointer;
   display: flex;
   flex-direction: column;
   height: 100%;
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   position: relative;
 }
 
 .book-card:hover {
-  transform: translateY(-2px) scale(var(--hover-scale));
-  box-shadow: var(--shadow-lg);
-  border-color: var(--primary-color);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  border-color: rgba(74, 144, 226, 0.3);
   z-index: 10;
-}
-
-.book-card:active {
-  transform: translateY(0) scale(0.98);
-  transition: all var(--transition-fast);
 }
 
 .books-list .book-card {
   flex-direction: row;
   align-items: center;
-  padding: 1rem;
+  padding: 0.75rem;
   gap: 1rem;
+  border-radius: 0.5rem;
 }
 
 .book-cover-container {
@@ -1536,12 +1651,12 @@ body {
 
 .books-grid .book-cover-container {
   width: 100%;
-  aspect-ratio: 2/3;
+  aspect-ratio: 3/4;
 }
 
 .books-list .book-cover-container {
-  width: 80px;
-  height: 120px;
+  width: 60px;
+  height: 84px;
 }
 
 .book-cover {
@@ -1549,13 +1664,19 @@ body {
   height: 100%;
   background-size: cover;
   background-position: center;
-  background-color: var(--background-color);
-  border-radius: var(--border-radius-md);
+  background-color: #FFFFFF;
+  border-radius: 0.5rem;
   position: relative;
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transition: transform 0.2s ease;
+}
+
+.book-card:hover .book-cover {
+  transform: scale(1.02);
 }
 
 .book-cover-placeholder {
@@ -1565,102 +1686,102 @@ body {
   justify-content: center;
   width: 100%;
   height: 100%;
-  background: linear-gradient(135deg, var(--primary-color)20%, var(--secondary-color)100%);
+  background: linear-gradient(135deg, #4A90E2, #6366F1);
   color: white;
   text-align: center;
+  border-radius: 0.5rem;
 }
 
 .placeholder-icon {
-  font-size: 2rem;
-  margin-bottom: 0.5rem;
+  font-size: 1.5rem;
+  margin-bottom: 0.25rem;
 }
 
 .placeholder-text {
-  font-size: 3rem;
-  font-weight: bold;
-  opacity: 0.8;
-}
-
-.book-cover-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity var(--transition-fast);
-}
-
-.book-card:hover .book-cover-overlay {
-  opacity: 1;
-}
-
-.book-actions {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.book-action-btn {
-  background-color: rgba(255, 255, 255, 0.9);
-  border: none;
-  border-radius: var(--border-radius-full);
-  padding: 0.5rem;
-  cursor: pointer;
-  color: var(--text-primary);
-  transition: all var(--transition-fast);
-}
-
-.book-action-btn:hover {
-  background-color: var(--primary-color);
-  color: white;
-  transform: scale(1.1);
+  font-size: 2rem;
+  font-weight: 700;
+  opacity: 0.9;
 }
 
 .book-format-badge {
   position: absolute;
   top: 0.5rem;
   right: 0.5rem;
-  background-color: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.7);
   color: white;
-  font-size: 0.625rem;
+  font-size: 0.65rem;
   font-weight: 600;
   padding: 0.25rem 0.5rem;
-  border-radius: var(--border-radius-sm);
+  border-radius: 9999px;
   text-transform: uppercase;
+  backdrop-filter: blur(10px);
 }
 
 .book-storage-badge {
   position: absolute;
   bottom: 0.5rem;
   left: 0.5rem;
-  background-color: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.7);
   color: white;
-  font-size: 0.875rem;
+  font-size: 0.7rem;
+  font-weight: 600;
   padding: 0.25rem 0.5rem;
-  border-radius: var(--border-radius-sm);
+  border-radius: 9999px;
+  backdrop-filter: blur(10px);
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.book-storage-badge:hover {
+  transform: scale(1.1);
+}
+
+.book-storage-badge.local {
+  background: rgba(100, 116, 139, 0.9);
+}
+
+.book-storage-badge.local:hover {
+  background: #64748B;
+}
+
+.book-storage-badge.synced {
+  background: rgba(74, 144, 226, 0.9);
+}
+
+.book-storage-badge.synced:hover {
+  background: #4A90E2;
+}
+
+.book-storage-badge.baidupan {
+  background: rgba(16, 185, 129, 0.9);
+}
+
+.book-storage-badge.baidupan:hover {
+  background: #10B981;
 }
 
 .book-info {
-  padding: 1rem;
+  padding: 0.5rem;
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.35rem;
 }
 
 .books-list .book-info {
   flex: 1;
   min-width: 0;
+  padding: 0;
+  gap: 0.25rem;
 }
 
 .book-title {
   font-size: 0.875rem;
   font-weight: 600;
-  color: var(--text-primary);
+  color: #1E293B;
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1669,21 +1790,23 @@ body {
   line-clamp: 2;
   -webkit-box-orient: vertical;
   box-orient: vertical;
+  line-height: 1.3;
 }
 
 .books-list .book-title {
-  font-size: 1rem;
+  font-size: 0.9375rem;
   -webkit-line-clamp: 1;
   line-clamp: 1;
 }
 
 .book-author {
   font-size: 0.75rem;
-  color: var(--text-secondary);
+  color: #64748B;
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 400;
 }
 
 .book-progress {
@@ -1696,22 +1819,22 @@ body {
 .progress-bar-container {
   flex: 1;
   height: 4px;
-  background-color: var(--background-color);
-  border-radius: var(--border-radius-full);
+  background: #F1F5F9;
+  border-radius: 9999px;
   overflow: hidden;
 }
 
 .progress-bar {
   height: 100%;
-  background-color: var(--primary-color);
-  border-radius: var(--border-radius-full);
-  transition: width var(--transition-normal);
+  background: #4A90E2;
+  border-radius: 9999px;
+  transition: width 0.2s ease;
 }
 
 .progress-text {
-  font-size: 0.625rem;
+  font-size: 0.6875rem;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: #64748B;
   min-width: 2.5rem;
   text-align: right;
 }
@@ -1722,21 +1845,25 @@ body {
   justify-content: space-between;
   gap: 0.5rem;
   margin-top: auto;
-  font-size: 0.625rem;
-  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  color: #64748B;
   flex-wrap: wrap;
 }
 
 .book-last-read {
   flex-shrink: 0;
+  font-weight: 400;
 }
 
 .book-category {
   padding: 0.125rem 0.5rem;
-  border-radius: var(--border-radius-full);
-  font-size: 0.625rem;
+  border-radius: 9999px;
+  font-size: 0.65rem;
   font-weight: 500;
   flex-shrink: 0;
+  background: linear-gradient(135deg, rgba(74, 144, 226, 0.1), rgba(99, 102, 241, 0.05));
+  color: #4A90E2;
+  border: 1px solid rgba(74, 144, 226, 0.2);
 }
 
 /* 空状态 */
@@ -1747,7 +1874,7 @@ body {
   justify-content: center;
   text-align: center;
   padding: 6rem 2rem;
-  color: var(--text-secondary);
+  color: #64748B;
 }
 
 .empty-icon {
@@ -1759,7 +1886,7 @@ body {
 .empty-state h3 {
   font-size: 1.25rem;
   font-weight: 600;
-  color: var(--text-primary);
+  color: #1E293B;
   margin: 0 0 0.5rem 0;
 }
 
@@ -1767,6 +1894,169 @@ body {
   font-size: 1rem;
   margin: 0 0 2rem 0;
   max-width: 400px;
+}
+
+/* 设置面板样式 */
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0;
+  margin: 0;
+  max-width: 800px;
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(203, 213, 225, 0.5);
+}
+
+.settings-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1E293B;
+  margin: 0;
+}
+
+.settings-content {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+  width: 100%;
+}
+
+.setting-section {
+  margin-bottom: 2rem;
+}
+
+.setting-section .section-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #64748B;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 1rem 0;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid #4A90E2;
+}
+
+.setting-card {
+  background: linear-gradient(135deg, #FFFFFF, #F8FAFC);
+  border: 1px solid rgba(203, 213, 225, 0.5);
+  border-radius: 0.75rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+
+  overflow: hidden;
+}
+
+.setting-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid rgba(203, 213, 225, 0.5);
+}
+
+.setting-row:last-child {
+  border-bottom: none;
+}
+
+.setting-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.setting-label {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #1E293B;
+}
+
+.setting-desc {
+  font-size: 0.8125rem;
+  color: #64748B;
+}
+
+.setting-control {
+  flex-shrink: 0;
+}
+
+.status {
+  padding: 0.25rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.status.connected {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: #10B981;
+}
+
+.status.disconnected {
+  background-color: rgba(239, 68, 68, 0.1);
+  color: #EF4444;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  background: linear-gradient(135deg, #FFFFFF, #F8FAFC);
+  border-radius: 0.5rem;
+}
+
+.user-avatar {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid rgba(74, 144, 226, 0.3);
+  box-shadow: 0 2px 8px rgba(74, 144, 226, 0.2);
+}
+
+.user-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.user-name {
+  font-weight: 600;
+  color: #1E293B;
+  font-size: 0.9375rem;
+}
+
+.user-vip {
+  font-size: 0.8125rem;
+  color: #64748B;
+}
+
+.form-control {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid rgba(203, 213, 225, 0.5);
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  color: #475569;
+  background: linear-gradient(135deg, #FFFFFF, #F8FAFC);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 120px;
+}
+
+.form-control:focus {
+  outline: none;
+  border-color: #4A90E2;
+  box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
 }
 
 .add-books-btn {
@@ -1780,34 +2070,38 @@ body {
   position: fixed;
   bottom: 2rem;
   right: 2rem;
-  width: 3rem;
-  height: 3rem;
+  width: 3.5rem;
+  height: 3.5rem;
   border-radius: 50%;
-  background-color: var(--primary-color);
+  background: linear-gradient(135deg, #4A90E2, #6366F1);
   color: white;
   border: none;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: var(--shadow-lg);
-  transition: all var(--transition-fast);
+  box-shadow: 0 4px 12px rgba(74, 144, 226, 0.4);
+  transition: all 0.2s ease;
   z-index: 50;
 }
 
 .floating-add-btn:hover {
-  transform: scale(1.1);
-  box-shadow: 0 12px 20px rgba(74, 144, 226, 0.4);
-  background-color: #357ABD;
+  transform: scale(1.1) rotate(90deg);
+  box-shadow: 0 8px 24px rgba(74, 144, 226, 0.5);
+  background: linear-gradient(135deg, #357ABD, #4f46e5);
+}
+
+.floating-add-btn:active {
+  transform: scale(1.05) rotate(90deg);
 }
 
 /* 右键菜单 */
 .context-menu {
   position: fixed;
-  background-color: var(--card-background);
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-md);
-  box-shadow: var(--shadow-lg);
+  background-color: #FFFFFF;
+  border: 1px solid rgba(203, 213, 225, 0.5);
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   z-index: 1000;
   min-width: 200px;
   overflow: hidden;
@@ -1815,7 +2109,7 @@ body {
 
 .category-submenu {
   margin-left: 0.25rem;
-  border-left: 3px solid var(--primary-color);
+  border-left: 3px solid #4A90E2;
 }
 
 .menu-item {
@@ -1824,18 +2118,18 @@ body {
   gap: 0.75rem;
   padding: 0.75rem 1rem;
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: all 0.2s ease;
   font-size: 0.875rem;
-  color: var(--text-primary);
+  color: #1E293B;
 }
 
 .menu-item:hover {
-  background-color: var(--background-color);
+  background-color: #F8FAFC;
 }
 
 .menu-item.danger:hover {
   background-color: rgba(239, 68, 68, 0.1);
-  color: var(--danger-color);
+  color: #EF4444;
 }
 
 .menu-icon {
@@ -1845,15 +2139,6 @@ body {
 
 .menu-text {
   flex: 1;
-}
-
-.menu-item.add-category {
-  border-top: 1px solid var(--border-color);
-  color: var(--text-secondary);
-}
-
-.menu-item.add-category:hover {
-  color: var(--primary-color);
 }
 
 /* 对话框样式 */
@@ -1868,17 +2153,19 @@ body {
   align-items: center;
   justify-content: center;
   z-index: 2000;
+  backdrop-filter: blur(4px);
 }
 
 .dialog-content {
-  background-color: var(--card-background);
-  border-radius: var(--border-radius-xl);
+  background: #FFFFFF;
+  border-radius: 0.75rem;
   padding: 1.5rem;
-  max-width: 450px;
+  max-width: 420px;
   width: 90%;
-  box-shadow: var(--shadow-xl);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
   max-height: 90vh;
   overflow-y: auto;
+  border: 1px solid rgba(203, 213, 225, 0.5);
 }
 
 .dialog-header {
@@ -1886,12 +2173,14 @@ body {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(203, 213, 225, 0.5);
 }
 
 .dialog-title {
-  font-size: 1.25rem;
+  font-size: 1.125rem;
   font-weight: 600;
-  color: var(--text-primary);
+  color: #1E293B;
   margin: 0;
 }
 
@@ -1900,12 +2189,14 @@ body {
   border: none;
   cursor: pointer;
   padding: 0.5rem;
-  color: var(--text-secondary);
-  transition: color var(--transition-fast);
+  color: #64748B;
+  transition: all 0.2s ease;
+  border-radius: 0.375rem;
 }
 
 .dialog-close:hover {
-  color: var(--text-primary);
+  background: rgba(203, 213, 225, 0.3);
+  color: #1E293B;
 }
 
 .dialog-body {
@@ -1920,24 +2211,30 @@ body {
   display: block;
   font-size: 0.875rem;
   font-weight: 500;
-  color: var(--text-primary);
+  color: #475569;
   margin-bottom: 0.5rem;
 }
 
 .form-input {
   width: 100%;
-  padding: 0.75rem;
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-md);
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(203, 213, 225, 0.5);
+  border-radius: 0.5rem;
   font-size: 0.875rem;
-  color: var(--text-primary);
-  transition: all var(--transition-fast);
+  color: #1E293B;
+  transition: all 0.2s ease;
+  background: #F8FAFC;
 }
 
 .form-input:focus {
   outline: none;
-  border-color: var(--primary-color);
+  border-color: #4A90E2;
+  background: #FFFFFF;
   box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
+}
+
+.form-input::placeholder {
+  color: #94A3B8;
 }
 
 .color-picker-container {
@@ -1946,26 +2243,78 @@ body {
   gap: 1rem;
 }
 
+.category-manage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.category-manage-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(203, 213, 225, 0.5);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.category-manage-item:hover {
+  background: #F8FAFC;
+  border-color: rgba(74, 144, 226, 0.3);
+}
+
+.category-manage-item.selected {
+  background: linear-gradient(135deg, rgba(74, 144, 226, 0.1), rgba(74, 144, 226, 0.05));
+  border-color: #4A90E2;
+  font-weight: 600;
+}
+
+.category-manage-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.375rem;
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.category-manage-name {
+  flex: 1;
+  font-weight: 500;
+  color: #1E293B;
+}
+
 .color-picker {
-  width: 3rem;
-  height: 3rem;
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-md);
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 1px solid rgba(203, 213, 225, 0.5);
+  border-radius: 0.5rem;
   cursor: pointer;
   padding: 0;
   background: transparent;
+  transition: all 0.2s ease;
+}
+
+.color-picker:hover {
+  border-color: #4A90E2;
 }
 
 .color-preview {
   width: 2rem;
   height: 2rem;
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-sm);
+  border: 1px solid rgba(203, 213, 225, 0.5);
+  border-radius: 0.375rem;
 }
 
 .color-value {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  color: #64748B;
   font-family: 'Courier New', monospace;
 }
 
@@ -2020,9 +2369,9 @@ body {
 }
 
 .btn-primary {
-  background-color: var(--primary-color);
+  background-color: #4A90E2;
   color: white;
-  border-color: var(--primary-color);
+  border-color: #4A90E2;
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -2031,13 +2380,24 @@ body {
 }
 
 .btn-secondary {
-  background-color: var(--background-color);
-  color: var(--text-primary);
-  border-color: var(--border-color);
+  background-color: #F1F5F9;
+  color: #1E293B;
+  border-color: #CBD5E1;
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background-color: #e2e8f0;
+  background-color: #E2E8F0;
+}
+
+.btn-danger {
+  background-color: #EF4444;
+  color: white;
+  border-color: #EF4444;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background-color: #DC2626;
+  border-color: #DC2626;
 }
 
 /* 响应式设计 */
@@ -2052,10 +2412,6 @@ body {
     gap: 1.25rem;
   }
   
-  .header {
-    padding: 1rem 1.5rem;
-  }
-  
   .content {
     padding: 1.5rem;
   }
@@ -2063,19 +2419,6 @@ body {
 
 @media (max-width: 768px) {
   /* 移动端设备 */
-  .header {
-    padding: 1rem;
-    height: auto;
-    flex-wrap: wrap;
-    gap: 1rem;
-  }
-  
-  .header-center {
-    order: 3;
-    flex: 1 0 100%;
-    margin: 0;
-  }
-  
   .logo-text {
     font-size: 1.25rem;
   }
@@ -2104,14 +2447,6 @@ body {
   
   .category-item {
     white-space: nowrap;
-    padding: 0.5rem 0.75rem;
-  }
-  
-  .quick-actions {
-    flex-direction: row;
-  }
-  
-  .quick-action-btn {
     padding: 0.5rem 0.75rem;
   }
   

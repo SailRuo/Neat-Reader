@@ -9,8 +9,6 @@
 /.idea/
 .vscode/
 
-# Wails auto-generated
-/frontend/
-
 # Logs
 *.log
+/frontend/wailsjs/
