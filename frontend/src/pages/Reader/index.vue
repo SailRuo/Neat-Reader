@@ -488,7 +488,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, onBeforeUnmount, computed, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, onBeforeUnmount, computed, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ePub from 'epubjs'
 import * as pdfjsLib from 'pdfjs-dist'
@@ -519,6 +519,14 @@ const autoScroll = ref(false)
 const pageAnimation = ref(true)
 const autoNightMode = ref(false)
 const nightModeTime = ref('22:00')
+
+// 版式参数跟踪
+let lastLayoutParams = {
+  margin: margin.value,
+  fontSize: fontSize.value,
+  lineHeight: lineHeight.value,
+  alignment: alignment.value
+}
 
 // 书籍相关
 const book = ref<any>(null)
@@ -585,6 +593,7 @@ const prevChapterTrigger = ref<HTMLElement | null>(null)
 let autoScrollTimer: number | null = null
 const AUTO_SCROLL_INTERVAL = 50
 const isChapterSwitching = ref(false)
+const loadingNext = ref(false)
 let wheelDebounceTimer: number | null = null
 let lastWheelTime = 0
 const WHEEL_DEBOUNCE_DELAY = 150
@@ -612,6 +621,9 @@ const sidebarTitle = computed(() => {
 
 const handleWheel = (e: WheelEvent) => {
   if (pageMode.value !== 'page') return
+  
+  // 阻止默认滚动，防止容器偏移导致白屏
+  e.preventDefault()
   
   // 防抖处理
   const now = Date.now()
@@ -817,6 +829,11 @@ const setupScrollMode = async () => {
     container.style.overflow = 'auto'
     container.style.height = '100%'
     container.style.scrollBehavior = 'smooth'
+    container.style.display = 'block'
+    container.style.alignItems = 'flex-start'
+    container.style.justifyContent = 'flex-start'
+    
+    container.addEventListener('scroll', handleScroll)
   }
   
   await nextTick()
@@ -826,6 +843,14 @@ const setupScrollMode = async () => {
 const cleanupScrollMode = () => {
   console.log('清理滚动模式')
   isScrollModeActive.value = false
+  
+  const container = document.getElementById('epub-render-root')
+  if (container) {
+    container.removeEventListener('scroll', handleScroll)
+    container.style.display = 'flex'
+    container.style.alignItems = 'center'
+    container.style.justifyContent = 'center'
+  }
   
   try {
     cleanupScrollObserver()
@@ -845,9 +870,117 @@ const cleanupScrollMode = () => {
     console.warn('清理上一章失败:', e)
   }
   
-  const container = document.getElementById('epub-render-root')
   if (container) {
     container.style.overflow = 'hidden'
+  }
+}
+
+const handleScroll = () => {
+  if (pageMode.value !== 'scroll' || !bookInstance.value) return
+  
+  const container = document.getElementById('epub-render-root')
+  if (!container) return
+  
+  const scrollBottom = container.scrollTop + container.clientHeight
+  const threshold = container.scrollHeight - container.clientHeight * 0.2
+  
+  if (scrollBottom >= threshold && !loadingNext.value) {
+    loadNextChapterScroll()
+  }
+  
+  // 向上滚动到顶部时加载上一章
+  if (container.scrollTop <= 10 && currentChapterIndex.value > 0 && !isChapterSwitching.value) {
+    loadPrevChapter()
+  }
+}
+
+const loadNextChapterScroll = async () => {
+  if (loadingNext.value || currentChapterIndex.value >= chapters.value.length - 1) return
+  
+  loadingNext.value = true
+  
+  try {
+    const nextIndex = currentChapterIndex.value + 1
+    const nextChapter = chapters.value[nextIndex]
+    
+    if (!nextChapter) {
+      loadingNext.value = false
+      return
+    }
+    
+    const container = document.getElementById('epub-render-root')
+    if (!container) {
+      loadingNext.value = false
+      return
+    }
+    
+    const iframe = container.querySelector('iframe')
+    if (!iframe || !iframe.contentDocument) {
+      loadingNext.value = false
+      return
+    }
+    
+    const section = await bookInstance.value.section(nextChapter.href)
+    if (!section) {
+      loadingNext.value = false
+      return
+    }
+    
+    const contents = await section.document
+    const nextContent = contents.body.innerHTML
+    
+    const separator = document.createElement('div')
+    separator.className = 'chapter-separator'
+    separator.innerHTML = `
+      <div class="chapter-separator-line"></div>
+      <div class="chapter-separator-text">第 ${nextIndex + 1} 章：${nextChapter.title}</div>
+      <div class="chapter-separator-line"></div>
+    `
+    
+    const separatorStyle = document.createElement('style')
+    separatorStyle.textContent = `
+      .chapter-separator {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 20px;
+        margin: 40px 0;
+        padding: 20px 0;
+      }
+      .chapter-separator-line {
+        flex: 1;
+        height: 1px;
+        background: currentColor;
+        opacity: 0.2;
+      }
+      .chapter-separator-text {
+        font-size: 14px;
+        font-weight: 600;
+        opacity: 0.6;
+        text-align: center;
+      }
+    `
+    
+    iframe.contentDocument.head.appendChild(separatorStyle)
+    iframe.contentDocument.body.appendChild(separator)
+    
+    const nextDiv = document.createElement('div')
+    nextDiv.className = 'next-chapter-content'
+    nextDiv.innerHTML = nextContent
+    nextDiv.style.padding = getMarginValue(margin.value)
+    iframe.contentDocument.body.appendChild(nextDiv)
+    
+    currentChapterIndex.value = nextIndex
+    if (chapters.value[currentChapterIndex.value]?.title) {
+      currentChapterTitle.value = chapters.value[currentChapterIndex.value].title
+    }
+    
+    await saveProgress()
+    
+  } catch (error) {
+    console.error('加载下一章失败:', error)
+  } finally {
+    loadingNext.value = false
   }
 }
 
@@ -926,7 +1059,8 @@ const applyStyles = () => {
       'color': `${themeConfig[theme.value].text} !important`,
       'font-size': `${fontSize.value}px !important`,
       'line-height': `${lineHeight.value} !important`,
-      'margin': getMarginValue(margin.value) + ' !important',
+      'margin': pageMode.value === 'page' ? '0 !important' : `${getMarginValue(margin.value)} !important`,
+      'padding': pageMode.value === 'page' ? getMarginValue(margin.value) + ' !important' : '0 !important',
       'text-align': getAlignmentValue(alignment.value) + ' !important',
       '-webkit-font-smoothing': 'antialiased !important',
       '-moz-osx-font-smoothing': 'grayscale !important',
@@ -953,6 +1087,25 @@ const applyStyles = () => {
   if (prevChapterRendition.value) {
     prevChapterRendition.value.themes.register('custom', customTheme)
     prevChapterRendition.value.themes.select('custom')
+  }
+
+  if (pageMode.value === 'page') {
+    setTimeout(() => {
+      if (rendition.value) {
+        rendition.value.views().forEach((view: any) => {
+          if (view.pane) {
+            const doc = view.pane.contentDocument
+            if (doc && doc.body) {
+              doc.body.style.fontSize = `${fontSize.value}px`
+              doc.body.style.lineHeight = `${lineHeight.value}`
+              doc.body.style.margin = '0'
+              doc.body.style.padding = getMarginValue(margin.value)
+              doc.body.style.textAlign = getAlignmentValue(alignment.value)
+            }
+          }
+        })
+      }
+    }, 50)
   }
 
   const scrollbarCss = `
@@ -989,12 +1142,61 @@ const applyStyles = () => {
     }
   })
   
-  updatePageInfo()
+  // 不在这里调用 updatePageInfo，避免不必要的翻页计算
+  // 翻页模式下的分页重建由专门的函数处理
+}
+
+const refreshPageModeStyles = () => {
+  if (!rendition.value || pageMode.value !== 'page') return
+  
+  console.log('刷新翻页模式样式')
+  
+  // 确保视图已经加载完成
+  setTimeout(() => {
+    if (rendition.value) {
+      rendition.value.views().forEach((view: any) => {
+        if (view.pane) {
+          const doc = view.pane.contentDocument
+          if (doc && doc.body) {
+            let styleEl = doc.getElementById('page-mode-styles')
+            if (!styleEl) {
+              styleEl = doc.createElement('style')
+              styleEl.id = 'page-mode-styles'
+              doc.head.appendChild(styleEl)
+            }
+            
+            const alignValue = getAlignmentValue(alignment.value)
+            
+            styleEl.textContent = `
+              body {
+                font-size: ${fontSize.value}px !important;
+                line-height: ${lineHeight.value} !important;
+                margin: 0 !important;
+                padding: ${getMarginValue(margin.value)} !important;
+                text-align: ${alignValue} !important;
+              }
+              p, div {
+                line-height: ${lineHeight.value} !important;
+                text-align: ${alignValue} !important;
+              }
+            `
+            
+            // 翻页模式下通过 padding 设置边距
+            doc.body.style.fontSize = `${fontSize.value}px`
+            doc.body.style.lineHeight = `${lineHeight.value}`
+            doc.body.style.margin = '0'
+            doc.body.style.padding = getMarginValue(margin.value)
+            doc.body.style.textAlign = alignValue
+          }
+        }
+      })
+    }
+  }, 100) // 延迟执行，确保视图加载完成
 }
 
 const getMarginValue = (margin: string) => {
-  const margins = { '小': '10px', '中': '20px', '大': '30px' }
-  return margins[margin as keyof typeof margins] || '20px'
+  const margins = { '小': '20px', '中': '40px', '大': '60px' }
+  return margins[margin as keyof typeof margins] || '40px'
 }
 
 const getAlignmentValue = (alignment: string) => {
@@ -1011,27 +1213,188 @@ const setTheme = (key: 'light' | 'sepia' | 'dark' | 'green') => {
 const changeFontSize = (delta: number) => {
   const newSize = fontSize.value + delta
   if (newSize >= 12 && newSize <= 30) {
+    const oldFontSize = fontSize.value
     fontSize.value = newSize
+    
+    // 检查版式参数是否真正改变
+    const layoutParamsChanged = oldFontSize !== newSize || 
+                                lastLayoutParams.margin !== margin.value ||
+                                lastLayoutParams.lineHeight !== lineHeight.value ||
+                                lastLayoutParams.alignment !== alignment.value
+    
     applyStyles()
+    
+    if (pageMode.value === 'page' && rendition.value) {
+      refreshPageModeStyles()
+    }
+    
+    // 翻页模式下如果样式变化影响了布局，也需要重新计算分页
+    if (pageMode.value === 'page' && layoutParamsChanged) {
+      setTimeout(async () => {
+        await reRenderWithNewLayout()
+      }, 100)
+    }
+    
+    // 更新版式参数记录
+    lastLayoutParams = {
+      margin: margin.value,
+      fontSize: fontSize.value,
+      lineHeight: lineHeight.value,
+      alignment: alignment.value
+    }
+    
     saveUserConfig()
   }
 }
 
 const setLineHeight = (height: number) => {
+  const oldLineHeight = lineHeight.value
   lineHeight.value = height
+  
+  // 检查版式参数是否真正改变
+  const layoutParamsChanged = oldLineHeight !== height || 
+                              lastLayoutParams.margin !== margin.value ||
+                              lastLayoutParams.fontSize !== fontSize.value ||
+                              lastLayoutParams.alignment !== alignment.value
+  
   applyStyles()
+  
+  if (pageMode.value === 'page' && rendition.value) {
+    refreshPageModeStyles()
+  }
+  
+  // 翻页模式下如果样式变化影响了布局，也需要重新计算分页
+  if (pageMode.value === 'page' && layoutParamsChanged) {
+    setTimeout(async () => {
+      await reRenderWithNewLayout()
+    }, 100)
+  }
+  
+  // 更新版式参数记录
+  lastLayoutParams = {
+    margin: margin.value,
+    fontSize: fontSize.value,
+    lineHeight: lineHeight.value,
+    alignment: alignment.value
+  }
+  
   saveUserConfig()
 }
 
 const setMargin = (value: string) => {
+  const oldMargin = margin.value
   margin.value = value
+  
+  // 检查版式参数是否真正改变
+  const layoutParamsChanged = oldMargin !== value || 
+                              lastLayoutParams.fontSize !== fontSize.value ||
+                              lastLayoutParams.lineHeight !== lineHeight.value ||
+                              lastLayoutParams.alignment !== alignment.value
+  
   applyStyles()
+  
+  if (pageMode.value === 'scroll') {
+    nextTick(() => {
+      const container = document.getElementById('epub-render-root')
+      if (container) {
+        const iframe = container.querySelector('iframe')
+        if (iframe && iframe.contentDocument) {
+          const body = iframe.contentDocument.body
+          if (body) {
+            const marginValue = getMarginValue(value)
+            // 为滚动模式设置真实的容器宽度，而不是仅仅依靠padding
+            body.style.margin = marginValue
+            body.style.padding = '0' // 避免padding和margin叠加
+          }
+        }
+      }
+    })
+  }
+  
+  // 翻页模式下更新 CSS 变量和 body 的 padding
+  if (pageMode.value === 'page') {
+    nextTick(() => {
+      const container = document.getElementById('epub-render-root')
+      if (container) {
+        const marginValue = parseInt(getMarginValue(value).replace('px', ''))
+        container.style.setProperty('--content-width', `${container.clientWidth - 2 * marginValue}px`)
+        container.style.setProperty('--content-height', `${container.clientHeight - 2 * marginValue}px`)
+        
+        const iframe = container.querySelector('iframe')
+        if (iframe && iframe.contentDocument) {
+          const body = iframe.contentDocument.body
+          if (body) {
+            body.style.setProperty('padding', getMarginValue(value), 'important')
+            body.style.setProperty('margin', '0', 'important')
+          }
+          
+          // 使用 setInterval 持续设置 epub-view 的宽度
+          const setEpubViewWidth = () => {
+            if (iframe.contentDocument) {
+              const epubView = iframe.contentDocument.querySelector('.epub-view')
+              if (epubView && 'style' in epubView) {
+                const htmlEpubView = epubView as HTMLElement
+                htmlEpubView.style.setProperty('width', `${container.clientWidth - 2 * marginValue}px`, 'important')
+                htmlEpubView.style.setProperty('height', `${container.clientHeight - 2 * marginValue}px`, 'important')
+              }
+            }
+          }
+          
+          // 立即设置一次
+          setEpubViewWidth()
+          
+          // 然后持续设置，确保不被覆盖
+          const intervalId = setInterval(setEpubViewWidth, 100)
+          
+          // 5 秒后停止
+          setTimeout(() => clearInterval(intervalId), 5000)
+        }
+      }
+    })
+  }
+  
+  // 更新版式参数记录
+  lastLayoutParams = {
+    margin: margin.value,
+    fontSize: fontSize.value,
+    lineHeight: lineHeight.value,
+    alignment: alignment.value
+  }
+  
   saveUserConfig()
 }
 
 const setAlignment = (value: string) => {
+  const oldAlignment = alignment.value
   alignment.value = value
+  
+  // 检查版式参数是否真正改变
+  const layoutParamsChanged = oldAlignment !== value || 
+                              lastLayoutParams.margin !== margin.value ||
+                              lastLayoutParams.fontSize !== fontSize.value ||
+                              lastLayoutParams.lineHeight !== lineHeight.value
+  
   applyStyles()
+  
+  if (pageMode.value === 'page' && rendition.value) {
+    refreshPageModeStyles()
+  }
+  
+  // 翻页模式下如果样式变化影响了布局，也需要重新计算分页
+  if (pageMode.value === 'page' && layoutParamsChanged) {
+    setTimeout(async () => {
+      await reRenderWithNewLayout()
+    }, 100)
+  }
+  
+  // 更新版式参数记录
+  lastLayoutParams = {
+    margin: margin.value,
+    fontSize: fontSize.value,
+    lineHeight: lineHeight.value,
+    alignment: alignment.value
+  }
+  
   saveUserConfig()
 }
 
@@ -1047,6 +1410,18 @@ const switchPageMode = async (mode: 'page' | 'scroll') => {
   }
   
   pageMode.value = mode
+  
+  // 重置容器滚动位置，防止白屏
+  const container = document.getElementById('epub-render-root')
+  if (container) {
+    container.scrollTop = 0
+    container.scrollLeft = 0
+    if (mode === 'page') {
+      container.style.overflow = 'hidden'
+    } else {
+      container.style.overflow = 'auto'
+    }
+  }
   
   // 重新初始化阅读器
   loading.value = true
@@ -1243,6 +1618,13 @@ const renderPdfPage = async (pageNum: number) => {
   if (!pdfDoc.value || !pdfCanvas.value) return
 
   try {
+    // 渲染前可以显示一个局部 loading，防止视觉上的白屏
+    const ctx = pdfCanvas.value.getContext('2d')
+    if (ctx) {
+      ctx.fillStyle = theme.value === 'dark' ? '#1a1a1a' : '#ffffff'
+      ctx.fillRect(0, 0, pdfCanvas.value.width, pdfCanvas.value.height)
+    }
+
     const page = await pdfDoc.value.getPage(pageNum)
     const viewport = page.getViewport({ scale: pdfScale.value })
 
@@ -1258,16 +1640,34 @@ const renderPdfPage = async (pageNum: number) => {
     currentChapterTitle.value = `第 ${pageNum} / ${totalPdfPages.value} 页`
   } catch (error) {
     console.error('PDF 页面渲染失败:', error)
+    // 渲染失败时显示错误提示
+    const ctx = pdfCanvas.value?.getContext('2d')
+    if (ctx) {
+      ctx.fillStyle = theme.value === 'dark' ? '#1a1a1a' : '#ffffff'
+      ctx.fillRect(0, 0, pdfCanvas.value.width, pdfCanvas.value.height)
+      ctx.fillStyle = theme.value === 'dark' ? '#ffffff' : '#000000'
+      ctx.font = '16px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('页面加载失败', pdfCanvas.value.width / 2, pdfCanvas.value.height / 2)
+    }
   }
 }
 
 // PDF 导航
+let isPdfNavigating = false
 const goToPdfPage = async (pageNum: number) => {
   if (pageNum < 1 || pageNum > totalPdfPages.value) return
-  currentPdfPage.value = pageNum
-  await renderPdfPage(pageNum)
-  displayProgress.value = Math.floor((currentPdfPage.value / totalPdfPages.value) * 100)
-  readingProgress.value = displayProgress.value
+  if (isPdfNavigating) return
+  
+  isPdfNavigating = true
+  try {
+    currentPdfPage.value = pageNum
+    await renderPdfPage(pageNum)
+    displayProgress.value = Math.floor((currentPdfPage.value / totalPdfPages.value) * 100)
+    readingProgress.value = displayProgress.value
+  } finally {
+    isPdfNavigating = false
+  }
 }
 
 const prevPdfPage = async () => {
@@ -1315,15 +1715,31 @@ const initEpub = async () => {
     }
     
     bookInstance.value = ePub(content)
+
+    const width = container.clientWidth
+    const height = container.clientHeight
+    const marginValue = parseInt(getMarginValue(margin.value).replace('px', ''))
+    
+    // 设置翻页模式的 CSS 变量和类
+    if (pageMode.value === 'page') {
+      container.classList.add('page-mode')
+      container.style.setProperty('--content-width', `${width - 2 * marginValue}px`)
+      container.style.setProperty('--content-height', `${height - 2 * marginValue}px`)
+    } else {
+      container.classList.remove('page-mode')
+      container.style.removeProperty('--content-width')
+      container.style.removeProperty('--content-height')
+    }
     
     const renderOptions = {
-      width: '100%',
-      height: '100%',
+      width: pageMode.value === 'page' ? width - 2 * marginValue : width,
+      height: pageMode.value === 'page' ? height - 2 * marginValue : height,
       flow: pageMode.value === 'page' ? 'paginated' : 'scrolled',
-      manager: 'continuous',
+      manager: pageMode.value === 'page' ? 'default' : 'continuous',
       snap: pageMode.value === 'page',
       spread: 'none',
-      minSpreadWidth: 0,
+      minSpreadWidth: 800,
+      gap: 'auto',
       allowScripts: true,
       allowModals: true
     }
@@ -1336,15 +1752,98 @@ const initEpub = async () => {
       const win = contents.window
 
       const isDark = theme.value === 'dark'
+      const isScroll = pageMode.value === 'scroll'
+      
       const style = doc.createElement('style')
-      style.id = 'custom-scrollbar-style'
+      style.id = 'custom-reader-styles'
+      const marginValue = getMarginValue(margin.value)
       style.textContent = `
-        html { color-scheme: ${isDark ? 'dark' : 'light'}; overflow-y: auto; }
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif !important;
+            font-size: ${fontSize.value}px !important;
+            line-height: ${lineHeight.value} !important;
+            margin: 0 !important;
+            padding: ${marginValue} !important;
+            text-align: ${getAlignmentValue(alignment.value)} !important;
+            -webkit-font-smoothing: antialiased !important;
+            -moz-osx-font-smoothing: grayscale !important;
+            text-rendering: optimizeLegibility !important;
+            color: ${themeConfig[theme.value].text} !important;
+            background: ${themeConfig[theme.value].bg} !important;
+            box-sizing: border-box !important;
+          }
+          
+        html {
+            color-scheme: ${isDark ? 'dark' : 'light'};
+          }
+          
         html::-webkit-scrollbar { width: 2px; }
         html::-webkit-scrollbar-track { background: ${isDark ? 'rgba(0,0,0,0.2)' : 'transparent'}; }
         html::-webkit-scrollbar-thumb { background: ${isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)'}; border-radius: 1px; }
       `
       doc.head.appendChild(style)
+      
+      // 强制设置 body 的 padding 和居中对齐
+      doc.body.style.setProperty('padding', marginValue, 'important')
+      doc.body.style.setProperty('margin', '0', 'important')
+      doc.body.style.setProperty('text-align', 'center', 'important')
+      doc.body.style.setProperty('display', 'block', 'important')
+      doc.body.style.setProperty('box-sizing', 'border-box', 'important')
+      
+      // 注意：epub-view 元素是在 iframe 外部，由 epub.js 创建
+      // 所以需要在外层文档中查找
+      if (pageMode.value === 'page') {
+        const outerContainer = document.getElementById('epub-render-root')
+        if (outerContainer) {
+          // 计算正确的宽度和高度
+          const containerWidth = outerContainer.clientWidth || 800
+          const containerHeight = outerContainer.clientHeight || 600
+          const marginValue = parseInt(getMarginValue(margin.value).replace('px', '')) || 40
+          const contentWidth = containerWidth - 2 * marginValue
+          const contentHeight = containerHeight - 2 * marginValue
+          
+          console.log('尝试设置 epub-view 宽度:', `${contentWidth}px`, {
+            containerWidth,
+            containerHeight,
+            marginValue,
+            contentWidth,
+            contentHeight
+          })
+          
+          // 使用 setInterval 持续设置 epub-view 的宽度
+          const setEpubViewWidth = () => {
+            const epubView = outerContainer.querySelector('.epub-view')
+            if (epubView && 'style' in epubView) {
+              const htmlEpubView = epubView as HTMLElement
+              console.log('找到 epub-view 元素，设置宽度:', `${contentWidth}px`)
+              htmlEpubView.style.setProperty('width', `${contentWidth}px`, 'important')
+              htmlEpubView.style.setProperty('height', `${contentHeight}px`, 'important')
+              
+              // 同时设置 iframe 的宽度
+              const iframe = epubView.querySelector('iframe')
+              if (iframe && 'style' in iframe) {
+                const htmlIframe = iframe as HTMLElement
+                console.log('找到 iframe 元素，设置宽度:', `${contentWidth}px`)
+                htmlIframe.style.setProperty('width', `${contentWidth}px`, 'important')
+                htmlIframe.style.setProperty('height', `${contentHeight}px`, 'important')
+              }
+            } else {
+              console.log('未找到 epub-view 元素')
+            }
+          }
+          
+          // 立即设置一次
+          setEpubViewWidth()
+          
+          // 然后持续设置，确保不被覆盖
+          const intervalId = setInterval(setEpubViewWidth, 100)
+          
+          // 5 秒后停止
+          setTimeout(() => clearInterval(intervalId), 5000)
+        } else {
+          console.log('未找到 epub-render-root 元素')
+        }
+      }
 
       doc.addEventListener('wheel', (e: WheelEvent) => {
         if (pageMode.value === 'page') {
@@ -1365,8 +1864,7 @@ const initEpub = async () => {
       
       contents.addStylesheetRules({
         'html': {
-          'color-scheme': `${isDark ? 'dark' : 'light'} !important`,
-          'overflow-y': 'auto !important'
+          'color-scheme': `${isDark ? 'dark' : 'light'} !important`
         },
         'html::-webkit-scrollbar': {
           'width': '2px !important'
@@ -1383,7 +1881,9 @@ const initEpub = async () => {
         },
         'body': {
           'font-family': 'Inter, system-ui, sans-serif !important',
-          'user-select': 'auto !important'
+          'user-select': 'auto !important',
+          'margin': '0 !important',
+          'padding': `${getMarginValue(margin.value)} !important`
         }
       })
     })
@@ -1505,6 +2005,36 @@ const closeSidebar = () => {
   document.removeEventListener('click', handleOutsideClick, true)
 }
 
+// 重新渲染函数，用于在页边距等版式参数变化时重新计算分页
+const reRenderWithNewLayout = async () => {
+  if (!book.value || !rendition.value) return
+  
+  // 保存当前阅读位置
+  const currentLocation = rendition.value.currentLocation()
+  const currentCFI = currentLocation?.start?.cfi || null
+  
+  // 重新初始化
+  loading.value = true
+  await nextTick()
+  
+  if (book.value.format === 'pdf') {
+    await initPdf()
+  } else {
+    await initEpub()
+  }
+  
+  // 恢复到之前的位置
+  if (currentCFI) {
+    setTimeout(() => {
+      if (rendition.value) {
+        rendition.value.display(currentCFI)
+      }
+    }, 300)
+  }
+  
+  loading.value = false
+}
+
 const goToChapter = async (href: string, index: number) => {
   currentChapterIndex.value = index
   if (chapters.value[index]?.title) {
@@ -1620,6 +2150,50 @@ const goBack = async () => {
   router.push('/')
 }
 
+// --- 监听器 ---
+watch(pageMode, (newMode) => {
+  nextTick(() => {
+    refreshLayout()
+    
+    if (newMode === 'page' && rendition.value) {
+      setTimeout(() => {
+        applyStyles()
+        refreshPageModeStyles()
+      }, 200)
+    }
+  })
+})
+
+watch(margin, () => {
+  nextTick(() => {
+    refreshLayout()
+  })
+})
+
+watch(fontSize, () => {
+  nextTick(() => {
+    refreshLayout()
+  })
+})
+
+watch(lineHeight, () => {
+  nextTick(() => {
+    refreshLayout()
+  })
+})
+
+const refreshLayout = () => {
+  if (pageMode.value === 'page') {
+    updatePageInfo()
+  }
+  if (pageMode.value === 'scroll') {
+    const container = document.getElementById('epub-render-root')
+    if (container) {
+      container.scrollTop = container.scrollTop
+    }
+  }
+}
+
 // --- 生命周期 ---
 onMounted(async () => {
   isLocationsReady.value = false
@@ -1644,7 +2218,18 @@ onMounted(async () => {
     checkNightMode()
     setInterval(checkNightMode, 60000)
   }
+  
+  window.addEventListener('resize', handleWindowResize)
 })
+
+const handleWindowResize = () => {
+  if (rendition.value && pageMode.value === 'page') {
+    const container = document.getElementById('epub-render-root')
+    if (container) {
+      rendition.value.resize(container.clientWidth, container.clientHeight)
+    }
+  }
+}
 
 onBeforeUnmount(async () => {
   if (isSavingProgress.value) {
@@ -1676,6 +2261,8 @@ onBeforeUnmount(async () => {
 })
 
 onUnmounted(async () => {
+  window.removeEventListener('resize', handleWindowResize)
+  
   try {
     cleanupNextChapter()
   } catch (e) {
@@ -2376,6 +2963,26 @@ const formatNoteTime = (timestamp: string) => {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+
+#epub-render-root {
+  width: 100% !important;
+  height: 100% !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: block !important;
+}
+
+#epub-render-root.page-mode {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+#epub-render-root.page-mode :deep(.epub-container) {
+  width: var(--content-width, 100%) !important;
+  height: var(--content-height, 100%) !important;
 }
 
 .pdf-container {

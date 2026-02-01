@@ -10,6 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor/cli": "^8.0.2",
+    "@capacitor/core": "^8.0.2",
     "axios": "^1.13.2",
     "cors": "^2.8.6",
     "dayjs": "^1.11.13",
