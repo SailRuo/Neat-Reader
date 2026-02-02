@@ -137,7 +137,9 @@ const initialize = async () => {
       width,
       height,
       spread: 'none',
-      allowScriptedContent: true  // 允许脚本内容执行
+      allowScriptedContent: true,  // 允许脚本内容执行
+      allowPopups: false,
+      snap: false
     }
     
     // 根据页面模式选择合适的配置
@@ -166,10 +168,51 @@ const initialize = async () => {
     console.log(`[${environment}] 注册内容钩子...`)
     rendition.hooks.content.register((contents: any) => {
       console.log(`[${environment}] 内容钩子被调用，contents:`, contents)
+      
+      // 在内容加载后重新应用样式
+      console.log(`[${environment}] 在内容钩子中重新应用样式...`)
+      const colors = themeColors[props.theme as keyof typeof themeColors]
+      const marginValue = marginMap[props.margin] || '40px'
+      const alignValue = alignmentMap[props.alignment] || 'justify'
+      
+      // 直接在 contents 的 document 上应用样式
+      const doc = contents.document
+      if (doc && doc.body) {
+        console.log(`[${environment}] 直接设置 body 样式`)
+        console.log(`[${environment}] 页边距值:`, marginValue)
+        
+        doc.body.style.backgroundColor = colors.bg
+        doc.body.style.color = colors.text
+        doc.body.style.fontSize = `${props.fontSize}px`
+        doc.body.style.lineHeight = `${props.lineHeight}`
+        // 分别设置上下左右的 padding，避免内容偏移
+        doc.body.style.paddingTop = marginValue
+        doc.body.style.paddingBottom = marginValue
+        doc.body.style.paddingLeft = marginValue
+        doc.body.style.paddingRight = marginValue
+        doc.body.style.margin = '0'
+        doc.body.style.textAlign = alignValue
+        doc.body.style.boxSizing = 'border-box'
+        
+        console.log(`[${environment}] body 实际样式:`, {
+          paddingTop: doc.body.style.paddingTop,
+          paddingLeft: doc.body.style.paddingLeft,
+          margin: doc.body.style.margin,
+          backgroundColor: doc.body.style.backgroundColor,
+          color: doc.body.style.color
+        })
+        
+        // 设置所有文本元素的颜色
+        const allElements = doc.body.querySelectorAll('*')
+        console.log(`[${environment}] 设置 ${allElements.length} 个元素的颜色`)
+        allElements.forEach((el: any) => {
+          el.style.color = colors.text
+        })
+      }
+      
       setupContentHooks(contents)
       
       // 拦截资源加载错误
-      const doc = contents.document
       if (doc) {
         console.log(`[${environment}] 设置资源错误拦截`)
         // 拦截 CSS 加载错误
@@ -293,7 +336,14 @@ const applyStyles = () => {
     const marginValue = marginMap[props.margin] || '40px'
     const alignValue = alignmentMap[props.alignment] || 'justify'
     
-    console.log('应用样式 - 页边距:', props.margin, '→', marginValue, '模式:', props.pageMode)
+    console.log('=== 应用样式 ===')
+    console.log('当前主题:', props.theme)
+    console.log('主题颜色:', colors)
+    console.log('页边距:', props.margin, '→', marginValue)
+    console.log('对齐方式:', props.alignment, '→', alignValue)
+    console.log('字体大小:', props.fontSize)
+    console.log('行高:', props.lineHeight)
+    console.log('页面模式:', props.pageMode)
     
     // 使用更具体的选择器以确保内联模式下的样式隔离
     const styles = {
@@ -338,11 +388,17 @@ const applyStyles = () => {
       }
     }
     
+    console.log('样式配置:', styles)
+    
     rendition.themes.register('custom', styles)
     rendition.themes.select('custom')
+    
+    console.log('样式已注册并选择')
+    console.log('当前主题列表:', rendition.themes)
   } catch (error) {
     const environment = isWailsEnvironment() ? 'Wails Desktop' : 'Browser'
-    console.warn(`[${environment}] 应用自定义主题失败，使用默认样式:`, error)
+    console.error(`[${environment}] 应用自定义主题失败:`, error)
+    console.error('错误堆栈:', (error as Error).stack)
     // 继续渲染，使用默认样式
   }
 }
@@ -582,6 +638,49 @@ const cleanup = () => {
 
 // 监听属性变化
 watch([() => props.theme, () => props.fontSize, () => props.lineHeight, () => props.margin, () => props.alignment], () => {
+  console.log('=== 样式属性变化 ===')
+  console.log('主题:', props.theme)
+  console.log('字体:', props.fontSize)
+  console.log('行高:', props.lineHeight)
+  console.log('页边距:', props.margin)
+  console.log('对齐:', props.alignment)
+  
+  // 重新应用样式到所有已加载的内容
+  if (rendition && rendition.getContents) {
+    const contents = rendition.getContents()
+    console.log('当前内容数量:', contents.length)
+    
+    const colors = themeColors[props.theme as keyof typeof themeColors]
+    const marginValue = marginMap[props.margin] || '40px'
+    const alignValue = alignmentMap[props.alignment] || 'justify'
+    
+    contents.forEach((content: any) => {
+      const doc = content.document
+      if (doc && doc.body) {
+        console.log('更新内容样式')
+        doc.body.style.backgroundColor = colors.bg
+        doc.body.style.color = colors.text
+        doc.body.style.fontSize = `${props.fontSize}px`
+        doc.body.style.lineHeight = `${props.lineHeight}`
+        // 分别设置上下左右的 padding
+        doc.body.style.paddingTop = marginValue
+        doc.body.style.paddingBottom = marginValue
+        doc.body.style.paddingLeft = marginValue
+        doc.body.style.paddingRight = marginValue
+        doc.body.style.margin = '0'
+        doc.body.style.textAlign = alignValue
+        doc.body.style.boxSizing = 'border-box'
+        
+        // 更新所有元素的颜色
+        const allElements = doc.body.querySelectorAll('*')
+        allElements.forEach((el: any) => {
+          el.style.color = colors.text
+        })
+      }
+    })
+  }
+  
+  // 也调用原来的 applyStyles
   applyStyles()
 })
 
@@ -593,6 +692,64 @@ watch(() => props.pageMode, () => {
 const highlights = new Map<string, string>()
 const highlightNotes = new Map<string, any>() // 存储 CFI 到笔记的映射
 
+// 添加高亮到 DOM
+const applyHighlightToContent = (content: any, cfi: string, color: string) => {
+  try {
+    const range = content.range(cfi)
+    if (!range) {
+      return false
+    }
+    
+    console.log('找到 CFI 对应的范围:', cfi)
+    
+    // 检查是否已经有高亮
+    const existingHighlight = content.document.querySelector(`[data-highlight-cfi="${cfi}"]`)
+    if (existingHighlight) {
+      console.log('高亮已存在，跳过')
+      return true
+    }
+    
+    // 创建高亮元素
+    const mark = content.document.createElement('mark')
+    mark.style.backgroundColor = color
+    mark.style.opacity = '0.4'
+    mark.style.mixBlendMode = 'multiply'
+    mark.style.cursor = 'pointer'
+    mark.style.border = 'none'
+    mark.style.padding = '0'
+    mark.setAttribute('data-highlight-cfi', cfi)
+    mark.setAttribute('data-highlight-color', color)
+    
+    // 添加点击事件
+    mark.addEventListener('click', (e: Event) => {
+      e.stopPropagation()
+      console.log('高亮被点击:', cfi)
+      const noteData = highlightNotes.get(cfi)
+      if (noteData) {
+        emit('highlight-clicked', noteData)
+      }
+    })
+    
+    // 使用更安全的方法包裹内容
+    try {
+      // 先提取内容
+      const fragment = range.extractContents()
+      // 将内容放入 mark 元素
+      mark.appendChild(fragment)
+      // 插入 mark 元素
+      range.insertNode(mark)
+      console.log('高亮样式应用成功')
+      return true
+    } catch (e) {
+      console.error('应用高亮失败:', e)
+      return false
+    }
+  } catch (error) {
+    console.warn('应用高亮到内容失败:', error)
+    return false
+  }
+}
+
 // 添加高亮
 const addHighlight = (cfi: string, color: string, note?: any) => {
   if (!rendition) {
@@ -601,7 +758,9 @@ const addHighlight = (cfi: string, color: string, note?: any) => {
   }
   
   try {
-    console.log('添加高亮:', cfi, color)
+    console.log('=== 添加高亮 ===')
+    console.log('CFI:', cfi)
+    console.log('颜色:', color)
     
     // 存储高亮信息
     highlights.set(cfi, color)
@@ -609,30 +768,26 @@ const addHighlight = (cfi: string, color: string, note?: any) => {
       highlightNotes.set(cfi, note)
     }
     
-    // 使用 epub.js 的 annotations API 添加高亮
-    rendition.annotations.add(
-      'highlight',
-      cfi,
-      {},
-      (e: any) => {
-        console.log('高亮被点击:', cfi)
-        // 触发高亮点击事件
-        const noteData = highlightNotes.get(cfi)
-        if (noteData) {
-          emit('highlight-clicked', noteData)
-        }
-      },
-      'hl',
-      {
-        'fill': color,
-        'fill-opacity': '0.4',
-        'mix-blend-mode': 'multiply'
-      }
-    )
+    // 直接操作 DOM 添加高亮
+    const contents = rendition.getContents()
+    let applied = false
     
-    console.log('高亮添加成功')
+    contents.forEach((content: any) => {
+      if (applyHighlightToContent(content, cfi, color)) {
+        applied = true
+      }
+    })
+    
+    if (applied) {
+      console.log('高亮添加成功')
+    } else {
+      console.warn('高亮未能应用到任何内容，可能该 CFI 不在当前渲染的页面中')
+    }
+    
+    console.log('当前所有高亮:', highlights)
   } catch (error) {
     console.error('添加高亮失败:', error)
+    console.error('错误堆栈:', (error as Error).stack)
   }
 }
 
@@ -644,7 +799,22 @@ const removeHighlight = (cfi: string) => {
     console.log('移除高亮:', cfi)
     highlights.delete(cfi)
     highlightNotes.delete(cfi)
-    rendition.annotations.remove(cfi, 'highlight')
+    
+    // 从 DOM 中移除高亮元素
+    const contents = rendition.getContents()
+    contents.forEach((content: any) => {
+      const highlightElement = content.document.querySelector(`[data-highlight-cfi="${cfi}"]`)
+      if (highlightElement) {
+        // 将高亮元素的内容提取出来，替换高亮元素
+        const parent = highlightElement.parentNode
+        while (highlightElement.firstChild) {
+          parent.insertBefore(highlightElement.firstChild, highlightElement)
+        }
+        parent.removeChild(highlightElement)
+        console.log('高亮 DOM 元素已移除')
+      }
+    })
+    
     console.log('高亮移除成功')
   } catch (error) {
     console.error('移除高亮失败:', error)
@@ -658,16 +828,39 @@ const restoreHighlights = (notes: any[]) => {
     return
   }
   
-  console.log('恢复高亮，笔记数量:', notes.length)
+  console.log('=== 恢复高亮 ===')
+  console.log('笔记数量:', notes.length)
   
-  // 延迟恢复，确保渲染器完全就绪
+  // 存储所有笔记信息
+  notes.forEach(note => {
+    if (note.cfi && note.color) {
+      highlights.set(note.cfi, note.color)
+      highlightNotes.set(note.cfi, note)
+    }
+  })
+  
+  // 延迟恢复高亮，确保内容已经完全渲染
   setTimeout(() => {
+    console.log('开始延迟恢复高亮')
+    const contents = rendition.getContents()
+    console.log('当前渲染的内容数量:', contents.length)
+    
     notes.forEach(note => {
       if (note.cfi && note.color) {
         console.log('恢复高亮:', note.cfi, note.color)
-        addHighlight(note.cfi, note.color, note)
+        let applied = false
+        contents.forEach((content: any) => {
+          if (applyHighlightToContent(content, note.cfi, note.color)) {
+            applied = true
+          }
+        })
+        if (!applied) {
+          console.warn('高亮未应用到任何内容:', note.cfi)
+        }
       }
     })
+    
+    console.log('高亮恢复完成，共', highlights.size, '个高亮')
   }, 500)
 }
 
@@ -701,10 +894,23 @@ defineExpose({
 // 生命周期
 onMounted(() => {
   initialize()
+  
+  // 监听窗口大小改变
+  window.addEventListener('resize', () => {
+    if (rendition) {
+      console.log('窗口大小改变，调整渲染器')
+      const width = containerRef.value?.clientWidth || 0
+      const height = containerRef.value?.clientHeight || 0
+      console.log('新尺寸:', width, 'x', height)
+      rendition.resize(width, height)
+    }
+  })
 })
 
 onBeforeUnmount(() => {
   cleanup()
+  // 移除窗口大小监听
+  window.removeEventListener('resize', () => {})
 })
 </script>
 
