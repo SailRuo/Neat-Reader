@@ -581,7 +581,61 @@ const cachedResults = ref<CachedResults>({
 })
 
 // 方法
-const goToReader = (bookId: string) => {
+const goToReader = async (bookId: string) => {
+  const book = ebookStore.getBookById(bookId)
+  if (!book) {
+    dialogStore.showErrorDialog('书籍不存在', '无法找到该书籍')
+    return
+  }
+
+  // 检查云端书籍是否已下载到本地
+  if (book.storageType === 'baidupan') {
+    // 显示下载确认对话框
+    dialogStore.showDialog({
+      title: '需要下载',
+      message: `《${book.title}》尚未下载到本地，是否立即下载？`,
+      type: 'info',
+      buttons: [
+        { text: '取消' },
+        { 
+          text: '下载', 
+          primary: true,
+          callback: async () => {
+            try {
+              // 显示下载进度
+              dialogStore.showDialog({
+                title: '正在下载',
+                message: `正在从百度网盘下载《${book.title}》...`,
+                type: 'info',
+                buttons: []
+              })
+              
+              const result = await ebookStore.downloadFromBaidupan(book.baidupanPath || book.path)
+              
+              dialogStore.closeDialog()
+              
+              if (result) {
+                dialogStore.showSuccessDialog('下载成功', '即将打开阅读器')
+                // 等待一下让用户看到成功提示
+                await new Promise(resolve => setTimeout(resolve, 500))
+                router.push(`/reader/${bookId}`)
+              } else {
+                dialogStore.showErrorDialog('下载失败', '请检查网络连接或授权状态')
+              }
+            } catch (error) {
+              dialogStore.closeDialog()
+              console.error('下载失败:', error)
+              const errorMessage = error instanceof Error ? error.message : '下载失败，请重试'
+              dialogStore.showErrorDialog('下载失败', errorMessage)
+            }
+          }
+        }
+      ]
+    })
+    return
+  }
+
+  // 本地书籍或已同步书籍，直接打开
   router.push(`/reader/${bookId}`)
 }
 

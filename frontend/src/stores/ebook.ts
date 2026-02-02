@@ -766,6 +766,12 @@ export const useEbookStore = defineStore('ebook', () => {
       return;
     }
     
+    // 检查是否在 Wails 环境中
+    if (!uploadToBaidupanNew) {
+      console.log('非 Wails 环境，跳过配置云端同步');
+      return;
+    }
+    
     try {
       if (await ensureBaidupanToken()) {
         const configData = JSON.stringify({ config: userConfig.value, timestamp: Date.now() });
@@ -965,6 +971,12 @@ export const useEbookStore = defineStore('ebook', () => {
       
       const uploadResult = JSON.parse(result);
       console.log('解析后的上传结果:', uploadResult);
+      
+      // 处理文件已存在的情况（error_code: 31061）
+      if (uploadResult.error_code === 31061) {
+        console.log('文件已存在，视为上传成功:', file.name);
+        return true;
+      }
       
       if (uploadResult.error) {
         console.error('上传失败，错误信息:', uploadResult.error);
@@ -1914,6 +1926,7 @@ export const useEbookStore = defineStore('ebook', () => {
     syncCurrentBookProgress,
     loadBaidupanBooks,
     fetchBaidupanUserInfo,
+    uploadToBaidupanNew,
     initialize
   };
 });

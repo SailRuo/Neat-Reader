@@ -57,12 +57,15 @@ export const wails = {
       }, 10000);
     });
   },
+  isAvailable(): boolean {
+    return !!(window.go && window.go.main && window.go.main.App);
+  },
   async call<T>(method: keyof WailsAPI, ...args: any[]): Promise<T> {
     if (!this.initialized) {
       await this.init();
     }
 
-    if (!window.go || !window.go.main || !window.go.main.App) {
+    if (!this.isAvailable()) {
       throw new Error('Wails API not available');
     }
 
