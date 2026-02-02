@@ -12,3 +12,5 @@
 # Logs
 *.log
 /frontend/wailsjs/
+frontend/dist/*/*
+frontend/node_modules/*
