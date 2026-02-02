@@ -8,9 +8,10 @@
 # IDE
 /.idea/
 .vscode/
-
+.trae/
+.kiro/
 # Logs
 *.log
 /frontend/wailsjs/
-frontend/dist/*/*
+frontend/dist/*
 frontend/node_modules/*

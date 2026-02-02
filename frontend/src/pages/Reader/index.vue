@@ -31,6 +31,7 @@
         @chapter-change="handleChapterChange"
         @click="handleContentClick"
         @text-selected="handleTextSelected"
+        @highlight-clicked="handleHighlightClicked"
       />
       
       <PdfReader
@@ -126,6 +127,34 @@
       </div>
     </div>
     
+    <!-- 查看笔记对话框 -->
+    <div v-if="showViewNoteDialog && viewingNote" class="note-dialog-overlay" @click="showViewNoteDialog = false">
+      <div class="note-dialog" @click.stop>
+        <div class="note-dialog-header">
+          <h3>查看笔记</h3>
+          <button class="close-btn" @click="showViewNoteDialog = false">×</button>
+        </div>
+        <div class="note-dialog-body">
+          <div class="selected-text">
+            <label>选中文本</label>
+            <p :style="{ backgroundColor: viewingNote.color + '33', borderLeftColor: viewingNote.color }">{{ viewingNote.text }}</p>
+          </div>
+          <div class="note-content" v-if="viewingNote.content">
+            <label>笔记内容</label>
+            <p class="note-text">{{ viewingNote.content }}</p>
+          </div>
+          <div class="note-meta">
+            <span class="note-chapter">{{ viewingNote.chapter }}</span>
+            <span class="note-time">{{ new Date(viewingNote.timestamp).toLocaleString('zh-CN') }}</span>
+          </div>
+        </div>
+        <div class="note-dialog-footer">
+          <button class="btn-secondary" @click="showViewNoteDialog = false">关闭</button>
+          <button class="btn-danger" @click="handleDeleteViewingNote">删除</button>
+        </div>
+      </div>
+    </div>
+    
     <!-- 亮度遮罩 -->
     <div class="brightness-overlay" :style="{ opacity: (100 - brightness) / 100 }"></div>
   </div>
@@ -180,6 +209,8 @@ const readingTime = ref(0)
 // 笔记相关
 const notes = ref<any[]>([])
 const showNoteDialog = ref(false)
+const showViewNoteDialog = ref(false)
+const viewingNote = ref<any>(null)
 const selectedText = ref('')
 const selectedCfi = ref('')
 const noteContent = ref('')
@@ -279,6 +310,22 @@ const handleTextSelected = (data: { text: string, cfi: string }) => {
   })
 }
 
+// 高亮点击处理 - 查看笔记
+const handleHighlightClicked = (note: any) => {
+  console.log('高亮被点击，显示笔记:', note)
+  viewingNote.value = note
+  showViewNoteDialog.value = true
+}
+
+// 删除正在查看的笔记
+const handleDeleteViewingNote = async () => {
+  if (!viewingNote.value) return
+  
+  await handleDeleteNote(viewingNote.value.id)
+  showViewNoteDialog.value = false
+  viewingNote.value = null
+}
+
 // 保存笔记
 const handleSaveNote = async () => {
   // 笔记内容改为非必填
@@ -344,7 +391,7 @@ const clearTextSelection = () => {
 const addHighlightToReader = (note: any) => {
   const reader = epubReaderRef.value
   if (reader && reader.addHighlight) {
-    reader.addHighlight(note.cfi, note.color)
+    reader.addHighlight(note.cfi, note.color, note)
   }
 }
 
@@ -880,5 +927,65 @@ onBeforeUnmount(async () => {
   background: #3a80d2;
   transform: translateY(-1px);
   box-shadow: 0 3px 10px rgba(74, 144, 226, 0.3);
+}
+
+.btn-danger {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: #e74c3c;
+  color: white;
+}
+
+.btn-danger:hover {
+  background: #c0392b;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(231, 76, 60, 0.3);
+}
+
+.note-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.note-text {
+  margin: 0;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.theme-dark .note-text {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.note-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.theme-dark .note-meta {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+.note-chapter {
+  font-weight: 500;
+}
+
+.note-time {
+  font-style: italic;
 }
 </style>

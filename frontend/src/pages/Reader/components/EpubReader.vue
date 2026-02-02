@@ -71,7 +71,16 @@ const initialize = async () => {
   const environment = isWailsEnvironment() ? 'Wails Desktop' : 'Browser'
   console.log('=== EPUB 阅读器初始化 ===')
   console.log('运行环境:', environment)
+  console.log('容器元素:', containerRef.value)
   console.log('容器尺寸:', containerRef.value.clientWidth, 'x', containerRef.value.clientHeight)
+  console.log('容器偏移:', containerRef.value.offsetWidth, 'x', containerRef.value.offsetHeight)
+  
+  // 检查容器尺寸
+  if (containerRef.value.clientWidth === 0 || containerRef.value.clientHeight === 0) {
+    console.error('容器尺寸为 0，无法初始化阅读器')
+    console.error('容器样式:', window.getComputedStyle(containerRef.value))
+    return
+  }
   
   // 添加全局错误处理，捕获 epub.js 内部的资源加载错误
   resourceErrorHandler = (event: PromiseRejectionEvent) => {
@@ -124,11 +133,11 @@ const initialize = async () => {
     console.log(`[${environment}] 创建渲染器，尺寸:`, width, 'x', height, '，模式: 内联渲染')
     
     // 内联渲染模式的配置
-    // 注意：内联模式不支持 continuous 管理器，滚动模式使用 scrolled-doc 流
     const renderConfig: any = {
       width,
       height,
-      spread: 'none'
+      spread: 'none',
+      allowScriptedContent: true  // 允许脚本内容执行
     }
     
     // 根据页面模式选择合适的配置
@@ -137,28 +146,32 @@ const initialize = async () => {
       renderConfig.flow = 'paginated'
       renderConfig.manager = 'default'
     } else {
-      // 滚动模式：使用 scrolled-continuous 流实现章节自动衔接
+      // 滚动模式：使用 scrolled 流实现章节自动衔接
       renderConfig.flow = 'scrolled'
       renderConfig.manager = 'continuous'
-      // 设置为 100% 宽度，避免横向滚动
-      renderConfig.width = '100%'
-      renderConfig.height = '100%'
     }
     
     rendition = bookInstance.renderTo(containerRef.value, renderConfig)
     
     console.log(`[${environment}] 渲染器已创建，配置:`, renderConfig)
+    console.log(`[${environment}] 渲染器对象:`, rendition)
+    console.log(`[${environment}] 渲染器是否存在:`, !!rendition)
     
     // 应用样式
+    console.log(`[${environment}] 开始应用样式...`)
     applyStyles()
+    console.log(`[${environment}] 样式应用完成`)
     
     // 注册内容钩子
+    console.log(`[${environment}] 注册内容钩子...`)
     rendition.hooks.content.register((contents: any) => {
+      console.log(`[${environment}] 内容钩子被调用，contents:`, contents)
       setupContentHooks(contents)
       
       // 拦截资源加载错误
       const doc = contents.document
       if (doc) {
+        console.log(`[${environment}] 设置资源错误拦截`)
         // 拦截 CSS 加载错误
         doc.addEventListener('error', (e: Event) => {
           const target = e.target as HTMLElement
@@ -170,9 +183,12 @@ const initialize = async () => {
         }, true)
       }
     })
+    console.log(`[${environment}] 内容钩子注册完成`)
     
     // 绑定事件（在显示之前）
+    console.log(`[${environment}] 绑定事件...`)
     bindEvents()
+    console.log(`[${environment}] 事件绑定完成`)
     
     // 先加载目录和生成位置索引（同步等待）
     try {
