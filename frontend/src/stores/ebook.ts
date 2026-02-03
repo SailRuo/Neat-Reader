@@ -232,15 +232,15 @@ export const useEbookStore = defineStore('ebook', () => {
         }));
         
         // 验证加载的数据
-        if (books.value.length > 0) {
-          console.log('加载的书籍示例:', {
-            id: books.value[0].id,
-            title: books.value[0].title,
-            author: books.value[0].author,
-            cover: books.value[0].cover,
-            storageType: books.value[0].storageType
-          });
-        }
+        // if (books.value.length > 0) {
+        //   console.log('加载的书籍示例:', {
+        //     id: books.value[0].id,
+        //     title: books.value[0].title,
+        //     author: books.value[0].author,
+        //     cover: books.value[0].cover,
+        //     storageType: books.value[0].storageType
+        //   });
+        // }
       } else {
         console.log('未找到保存的书籍列表，初始化为空数组');
         books.value = [];
@@ -297,7 +297,7 @@ export const useEbookStore = defineStore('ebook', () => {
   // 加载分类列表
   const loadCategories = async () => {
     try {
-      console.log('开始加载分类列表...');
+      // console.log('开始加载分类列表...');
       const savedCategories = await localforage.getItem<BookCategory[]>('categories');
       
       if (savedCategories && Array.isArray(savedCategories) && savedCategories.length > 0) {
@@ -898,7 +898,6 @@ export const useEbookStore = defineStore('ebook', () => {
           avatar_url: data.avatar_url || '',
           vip_type: data.vip_type || 0
         }
-        console.log('设置百度网盘用户信息:', userInfo)
         baidupanUser.value = userInfo
         const cacheData = {
           data: userInfo,
@@ -935,7 +934,7 @@ export const useEbookStore = defineStore('ebook', () => {
 
   const uploadToBaidupanNew = async (file: File, path: string): Promise<boolean> => {
     try {
-      console.log('开始上传到百度网盘:', file.name, '大小:', file.size, '路径:', path);
+      // console.log('开始上传到百度网盘:', file.name, '大小:', file.size, '路径:', path);
       
       // 确保令牌有效
       if (!await ensureBaidupanToken() || !userConfig.value.storage.baidupan) {
@@ -954,23 +953,23 @@ export const useEbookStore = defineStore('ebook', () => {
       // 构建路径，直接使用相对路径，服务器端会添加/apps/网盘前缀
       const relativePath = path ? path.replace(/^\/+|\/+$/g, '') : '';
 
-      console.log('准备上传文件到Go服务器:', {
-        fileName: file.name,
-        relativePath: relativePath,
-        fileSize: file.size,
-        accessToken: accessToken ? '***' : null
-      });
+      // console.log('准备上传文件到Go服务器:', {
+      //   fileName: file.name,
+      //   relativePath: relativePath,
+      //   fileSize: file.size,
+      //   accessToken: accessToken ? '***' : null
+      // });
       
       const fileArrayBuffer = await file.arrayBuffer();
       const fileBytes = new Uint8Array(fileArrayBuffer);
       
-      console.log('文件转换为字节数组成功，长度:', fileBytes.length);
+      // console.log('文件转换为字节数组成功，长度:', fileBytes.length);
       
       const result = await wails.uploadFile(file.name, fileBytes, accessToken);
-      console.log('Go服务器返回结果:', result);
+      // console.log('Go服务器返回结果:', result);
       
       const uploadResult = JSON.parse(result);
-      console.log('解析后的上传结果:', uploadResult);
+      // console.log('解析后的上传结果:', uploadResult);
       
       // 处理文件已存在的情况（error_code: 31061）
       if (uploadResult.error_code === 31061) {
@@ -984,7 +983,7 @@ export const useEbookStore = defineStore('ebook', () => {
       }
       
       if (uploadResult.path || uploadResult.fs_id) {
-        console.log('文件上传成功:', uploadResult.path || uploadResult.fs_id);
+        // console.log('文件上传成功:', uploadResult.path || uploadResult.fs_id);
         return true;
       } else {
         console.error('文件上传失败，返回结果中没有路径或文件ID:', uploadResult);
@@ -1055,7 +1054,7 @@ export const useEbookStore = defineStore('ebook', () => {
       if (!uploadPath || uploadPath === '/') {
         uploadPath = '';
       }
-      console.log('开始上传到百度网盘，路径:', uploadPath ? `${uploadPath}/${fileName}` : fileName);
+      // console.log('开始上传到百度网盘，路径:', uploadPath ? `${uploadPath}/${fileName}` : fileName);
       
       const uploadResult = await uploadToBaidupanNew(file, uploadPath);
       
@@ -1368,7 +1367,7 @@ export const useEbookStore = defineStore('ebook', () => {
         1
       );
       const data = JSON.parse(result);
-      console.log('百度网盘文件列表:', data);
+      // console.log('百度网盘文件列表:', data);
       
       if (data.list && Array.isArray(data.list) && data.list.length > 0) {
         for (const fileInfo of data.list) {
@@ -1425,7 +1424,7 @@ export const useEbookStore = defineStore('ebook', () => {
             books.value.push(newBook);
             console.log('添加云端书籍:', newBook.title);
           } else {
-            console.log('跳过已存在的书籍:', title, '存储类型:', existingBook.storageType);
+            // console.log('跳过已存在的书籍:', title, '存储类型:', existingBook.storageType);
           }
         }
         

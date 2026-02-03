@@ -35,7 +35,6 @@ let resourceErrorHandler: ((event: PromiseRejectionEvent) => void) | null = null
 
 // 环境检测：检查是否在 Wails 环境中运行
 const isWailsEnvironment = (): boolean => {
-  // Wails 会注入 window.go 对象
   return typeof (window as any).go !== 'undefined'
 }
 
@@ -67,18 +66,9 @@ const initialize = async () => {
     return
   }
   
-  // 记录运行环境
-  const environment = isWailsEnvironment() ? 'Wails Desktop' : 'Browser'
-  console.log('=== EPUB 阅读器初始化 ===')
-  console.log('运行环境:', environment)
-  console.log('容器元素:', containerRef.value)
-  console.log('容器尺寸:', containerRef.value.clientWidth, 'x', containerRef.value.clientHeight)
-  console.log('容器偏移:', containerRef.value.offsetWidth, 'x', containerRef.value.offsetHeight)
-  
   // 检查容器尺寸
   if (containerRef.value.clientWidth === 0 || containerRef.value.clientHeight === 0) {
     console.error('容器尺寸为 0，无法初始化阅读器')
-    console.error('容器样式:', window.getComputedStyle(containerRef.value))
     return
   }
   
@@ -86,8 +76,7 @@ const initialize = async () => {
   resourceErrorHandler = (event: PromiseRejectionEvent) => {
     const error = event.reason
     if (error && error.message && error.message.includes('File not found in the epub')) {
-      console.warn(`[${environment}] EPUB 资源未找到（已忽略）:`, error.message)
-      event.preventDefault() // 阻止错误冒泡到控制台
+      event.preventDefault()
     }
   }
   window.addEventListener('unhandledrejection', resourceErrorHandler)
@@ -96,32 +85,21 @@ const initialize = async () => {
     // 加载书籍内容
     const content = await localforage.getItem<ArrayBuffer>(`ebook_content_${props.bookId}`)
     if (!content) {
-      console.error(`[${environment}] 无法加载书籍内容，书籍ID:`, props.bookId)
+      console.error(`无法加载书籍内容，书籍ID:`, props.bookId)
       return
     }
     
-    console.log(`[${environment}] 书籍内容已加载，大小:`, content.byteLength, 'bytes')
-    
     // 创建书籍实例
     bookInstance = ePub(content)
-    console.log(`[${environment}] 书籍实例已创建`)
-    
-    // 添加错误处理，忽略非关键资源加载失败
-    bookInstance.on('openFailed', (error: any) => {
-      console.warn(`[${environment}] 资源加载失败（非关键）:`, error.message)
-      // 不阻止渲染继续
-    })
     
     // 拦截 Archive 的资源请求错误
     if (bookInstance.archive) {
       const originalCreateUrl = bookInstance.archive.createUrl.bind(bookInstance.archive)
-      bookInstance.archive.createUrl = function(url: string, options: any) {
+      bookInstance.archive.createUrl = async function(url: string, options: any) {
         try {
-          return originalCreateUrl(url, options)
+          return await originalCreateUrl(url, options)
         } catch (error: any) {
-          console.warn(`[${environment}] 资源 URL 创建失败（已忽略）: ${url}`, error.message)
-          // 返回一个空的 data URL，避免阻塞渲染
-          return Promise.resolve('data:text/css;base64,')
+          return 'data:text/css;base64,'
         }
       }
     }
@@ -130,81 +108,67 @@ const initialize = async () => {
     const width = containerRef.value.clientWidth
     const height = containerRef.value.clientHeight
     
-    console.log(`[${environment}] 创建渲染器，尺寸:`, width, 'x', height, '，模式: 内联渲染')
+    // 根据边距调整渲染区域尺寸
+    const marginValue = marginMap[props.margin] || '40px'
+    const marginPx = parseInt(marginValue)
     
     // 内联渲染模式的配置
     const renderConfig: any = {
-      width,
-      height,
-      spread: 'none',
-      allowScriptedContent: true,  // 允许脚本内容执行
+      width: width,  // 使用完整宽度
+      height: height, // 使用完整高度
+      spread: 'none', // 强制单页显示
+      minSpreadWidth: 0, // 禁用双页展开
+      allowScriptedContent: true,
       allowPopups: false,
       snap: false
     }
     
+    console.log('📐 [初始化] 渲染器配置:', {
+      容器尺寸: `${width}x${height}`,
+      边距: marginValue,
+      渲染尺寸: `${renderConfig.width}x${renderConfig.height}`,
+      spread: renderConfig.spread
+    })
+    
     // 根据页面模式选择合适的配置
     if (props.pageMode === 'page') {
-      // 翻页模式：使用 paginated 流和 default 管理器
       renderConfig.flow = 'paginated'
       renderConfig.manager = 'default'
     } else {
-      // 滚动模式：使用 scrolled 流实现章节自动衔接
       renderConfig.flow = 'scrolled'
       renderConfig.manager = 'continuous'
     }
     
     rendition = bookInstance.renderTo(containerRef.value, renderConfig)
     
-    console.log(`[${environment}] 渲染器已创建，配置:`, renderConfig)
-    console.log(`[${environment}] 渲染器对象:`, rendition)
-    console.log(`[${environment}] 渲染器是否存在:`, !!rendition)
+    // 应用样式（包含边距）
+    applyStyles()
     
     // 应用样式
-    console.log(`[${environment}] 开始应用样式...`)
     applyStyles()
-    console.log(`[${environment}] 样式应用完成`)
     
     // 注册内容钩子
-    console.log(`[${environment}] 注册内容钩子...`)
     rendition.hooks.content.register((contents: any) => {
-      console.log(`[${environment}] 内容钩子被调用，contents:`, contents)
-      
-      // 在内容加载后重新应用样式
-      console.log(`[${environment}] 在内容钩子中重新应用样式...`)
       const colors = themeColors[props.theme as keyof typeof themeColors]
-      const marginValue = marginMap[props.margin] || '40px'
       const alignValue = alignmentMap[props.alignment] || 'justify'
       
-      // 直接在 contents 的 document 上应用样式
       const doc = contents.document
       if (doc && doc.body) {
-        console.log(`[${environment}] 直接设置 body 样式`)
-        console.log(`[${environment}] 页边距值:`, marginValue)
-        
         doc.body.style.backgroundColor = colors.bg
         doc.body.style.color = colors.text
         doc.body.style.fontSize = `${props.fontSize}px`
         doc.body.style.lineHeight = `${props.lineHeight}`
-        // 分别设置上下左右的 padding，避免内容偏移
-        doc.body.style.paddingTop = marginValue
-        doc.body.style.paddingBottom = marginValue
-        doc.body.style.paddingLeft = marginValue
-        doc.body.style.paddingRight = marginValue
-        doc.body.style.margin = '0'
         doc.body.style.textAlign = alignValue
-        doc.body.style.boxSizing = 'border-box'
+        doc.body.style.margin = '0'
+        doc.body.style.padding = '0'
         
-        console.log(`[${environment}] body 实际样式:`, {
-          paddingTop: doc.body.style.paddingTop,
-          paddingLeft: doc.body.style.paddingLeft,
-          margin: doc.body.style.margin,
-          backgroundColor: doc.body.style.backgroundColor,
-          color: doc.body.style.color
-        })
+        if (doc.documentElement) {
+          doc.documentElement.style.backgroundColor = colors.bg
+          doc.documentElement.style.padding = '0'
+          doc.documentElement.style.margin = '0'
+        }
         
-        // 设置所有文本元素的颜色
         const allElements = doc.body.querySelectorAll('*')
-        console.log(`[${environment}] 设置 ${allElements.length} 个元素的颜色`)
         allElements.forEach((el: any) => {
           el.style.color = colors.text
         })
@@ -212,28 +176,20 @@ const initialize = async () => {
       
       setupContentHooks(contents)
       
-      // 拦截资源加载错误
       if (doc) {
-        console.log(`[${environment}] 设置资源错误拦截`)
-        // 拦截 CSS 加载错误
         doc.addEventListener('error', (e: Event) => {
           const target = e.target as HTMLElement
           if (target.tagName === 'LINK' && target.getAttribute('rel') === 'stylesheet') {
-            console.warn(`[${environment}] CSS 加载失败（已忽略）:`, target.getAttribute('href'))
             e.stopPropagation()
             e.preventDefault()
           }
         }, true)
       }
     })
-    console.log(`[${environment}] 内容钩子注册完成`)
     
-    // 绑定事件（在显示之前）
-    console.log(`[${environment}] 绑定事件...`)
     bindEvents()
-    console.log(`[${environment}] 事件绑定完成`)
     
-    // 先加载目录和生成位置索引（同步等待）
+    // 先加载目录
     try {
       const nav = await bookInstance.loaded.navigation
       const chapters = nav.toc.map((item: any) => ({
@@ -241,50 +197,53 @@ const initialize = async () => {
         href: item.href
       }))
       
-      // 生成位置索引
       await bookInstance.ready
-      await bookInstance.locations.generate(1000)
+      
+      // 尝试从缓存加载位置索引
+      const cachedLocations = await localforage.getItem<string>(`locations_${props.bookId}`)
+      
+      if (cachedLocations) {
+        // 使用缓存的位置索引
+        console.log('使用缓存的位置索引')
+        bookInstance.locations.load(cachedLocations)
+      } else {
+        // 第一次打开，异步生成位置索引（不阻塞显示）
+        console.log('首次打开，异步生成位置索引...')
+        bookInstance.locations.generate(1000).then((locations: any) => {
+          // 保存位置索引到缓存
+          const locationsString = bookInstance.locations.save()
+          localforage.setItem(`locations_${props.bookId}`, locationsString)
+          console.log('位置索引生成并缓存成功')
+        }).catch((err: Error) => {
+          console.warn('生成位置索引失败:', err)
+        })
+      }
       
       isReady = true
       
       // 如果有保存的进度，直接跳转到该位置
       if (props.initialProgress && props.initialProgress > 0) {
-        console.log('恢复进度:', props.initialProgress)
         const cfi = bookInstance.locations.cfiFromPercentage(props.initialProgress / 100)
-        console.log('计算的 CFI:', cfi)
         if (cfi) {
           await rendition.display(cfi)
         } else {
           await rendition.display()
         }
       } else {
-        console.log('没有进度，显示第一页')
-        // 没有进度，显示第一页
         await rendition.display()
       }
       
       emit('ready', { chapters })
     } catch (err) {
-      const environment = isWailsEnvironment() ? 'Wails Desktop' : 'Browser'
-      console.warn(`[${environment}] 加载目录或生成位置索引失败:`, err)
-      // 即使失败也显示书籍
+      console.warn('加载目录失败:', err)
       await rendition.display()
       isReady = true
       emit('ready', { chapters: [] })
     }
     
   } catch (error) {
-    const environment = isWailsEnvironment() ? 'Wails Desktop' : 'Browser'
-    console.error(`[${environment}] 初始化 EPUB 阅读器失败:`, error)
-    console.error('错误堆栈:', (error as Error).stack)
-    console.error('渲染配置:', {
-      pageMode: props.pageMode,
-      theme: props.theme,
-      fontSize: props.fontSize,
-      bookId: props.bookId
-    })
+    console.error('初始化 EPUB 阅读器失败:', error)
     
-    // 显示用户友好的错误信息
     if (containerRef.value) {
       containerRef.value.innerHTML = `
         <div style="
@@ -299,9 +258,6 @@ const initialize = async () => {
         ">
           <div style="font-size: 48px; margin-bottom: 20px;">📚</div>
           <h3 style="margin: 0 0 10px 0; color: #333;">无法加载 EPUB 内容</h3>
-          <p style="margin: 0 0 20px 0; color: #666;">
-            ${environment === 'Wails Desktop' ? '桌面应用' : '浏览器'}环境下加载失败
-          </p>
           <button 
             onclick="location.reload()" 
             style="
@@ -320,10 +276,7 @@ const initialize = async () => {
       `
     }
     
-    emit('ready', { 
-      chapters: [], 
-      error: `Failed to initialize EPUB reader in ${environment} environment` 
-    })
+    emit('ready', { chapters: [], error: 'Failed to initialize EPUB reader' })
   }
 }
 
@@ -336,70 +289,95 @@ const applyStyles = () => {
     const marginValue = marginMap[props.margin] || '40px'
     const alignValue = alignmentMap[props.alignment] || 'justify'
     
-    console.log('=== 应用样式 ===')
-    console.log('当前主题:', props.theme)
-    console.log('主题颜色:', colors)
-    console.log('页边距:', props.margin, '→', marginValue)
-    console.log('对齐方式:', props.alignment, '→', alignValue)
-    console.log('字体大小:', props.fontSize)
-    console.log('行高:', props.lineHeight)
-    console.log('页面模式:', props.pageMode)
+    console.log('🎨 [applyStyles] 应用样式:', {
+      theme: props.theme,
+      margin: marginValue,
+      fontSize: props.fontSize,
+      pageMode: props.pageMode
+    })
     
-    // 使用更具体的选择器以确保内联模式下的样式隔离
-    const styles = {
-      '.epub-view': {
-        'background': `${colors.bg} !important`,
-        'color': `${colors.text} !important`,
-        'overflow-x': 'hidden !important'
-      },
-      '.epub-view body': {
+    // 使用 override 方法强制覆盖 epub.js 的默认样式
+    const styles: any = {
+      'body': {
         'background': `${colors.bg} !important`,
         'color': `${colors.text} !important`,
         'font-size': `${props.fontSize}px !important`,
         'line-height': `${props.lineHeight} !important`,
         'margin': '0 !important',
-        'padding': `${marginValue} !important`,
         'text-align': `${alignValue} !important`,
         'overflow-x': 'hidden !important',
-        'max-width': '100% !important',
         'box-sizing': 'border-box !important'
       },
-      '.epub-view p, .epub-view div, .epub-view span, .epub-view li, .epub-view td, .epub-view th': {
+      'p': {
         'color': `${colors.text} !important`,
         'text-align': `${alignValue} !important`,
-        'max-width': '100% !important',
         'overflow-wrap': 'break-word !important',
         'word-wrap': 'break-word !important'
       },
-      '.epub-view h1, .epub-view h2, .epub-view h3, .epub-view h4, .epub-view h5, .epub-view h6': {
+      'div, span, li, td, th': {
         'color': `${colors.text} !important`,
-        'max-width': '100% !important'
+        'overflow-wrap': 'break-word !important',
+        'word-wrap': 'break-word !important'
       },
-      '.epub-view a': {
+      'h1, h2, h3, h4, h5, h6': {
+        'color': `${colors.text} !important`
+      },
+      'a': {
         'color': `${colors.text} !important`,
         'opacity': '0.8'
       },
-      '.epub-view img': {
+      'img': {
         'max-width': '100% !important',
         'height': 'auto !important'
       },
-      '.epub-view *': {
+      '*': {
         'color': `${colors.text} !important`
       }
     }
     
-    console.log('样式配置:', styles)
+    // 翻页模式和滚动模式都使用 body padding 实现边距
+    styles['html'] = {
+      'padding': '0 !important',
+      'margin': '0 !important',
+      'background': `${colors.bg} !important`
+    }
     
-    rendition.themes.register('custom', styles)
-    rendition.themes.select('custom')
+    if (props.pageMode === 'page') {
+      // 翻页模式：使用 body padding 实现边距
+      styles['body']['padding'] = `${marginValue} !important`
+    } else {
+      // 滚动模式：给块级元素添加左右 margin
+      styles['body']['padding-top'] = `${marginValue} !important`
+      styles['body']['padding-bottom'] = `${marginValue} !important`
+      styles['body']['padding-left'] = '0 !important'
+      styles['body']['padding-right'] = '0 !important'
+      
+      styles['p, div, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre'] = {
+        'margin-left': `${marginValue} !important`,
+        'margin-right': `${marginValue} !important`,
+        'box-sizing': 'border-box !important'
+      }
+    }
     
-    console.log('样式已注册并选择')
-    console.log('当前主题列表:', rendition.themes)
+    // 使用 override 而不是 register，强制覆盖默认样式
+    rendition.themes.override('body', styles['body'])
+    rendition.themes.override('p', styles['p'])
+    rendition.themes.override('div, span, li, td, th', styles['div, span, li, td, th'])
+    rendition.themes.override('h1, h2, h3, h4, h5, h6', styles['h1, h2, h3, h4, h5, h6'])
+    rendition.themes.override('a', styles['a'])
+    rendition.themes.override('img', styles['img'])
+    rendition.themes.override('*', styles['*'])
+    
+    if (styles['html']) {
+      rendition.themes.override('html', styles['html'])
+    }
+    
+    if (styles['p, div, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre']) {
+      rendition.themes.override('p, div, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre', 
+        styles['p, div, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre'])
+    }
   } catch (error) {
-    const environment = isWailsEnvironment() ? 'Wails Desktop' : 'Browser'
-    console.error(`[${environment}] 应用自定义主题失败:`, error)
-    console.error('错误堆栈:', (error as Error).stack)
-    // 继续渲染，使用默认样式
+    console.error('应用自定义主题失败:', error)
   }
 }
 
@@ -638,50 +616,29 @@ const cleanup = () => {
 
 // 监听属性变化
 watch([() => props.theme, () => props.fontSize, () => props.lineHeight, () => props.margin, () => props.alignment], () => {
-  console.log('=== 样式属性变化 ===')
-  console.log('主题:', props.theme)
-  console.log('字体:', props.fontSize)
-  console.log('行高:', props.lineHeight)
-  console.log('页边距:', props.margin)
-  console.log('对齐:', props.alignment)
+  if (!rendition || !containerRef.value) return
   
-  // 重新应用样式到所有已加载的内容
-  if (rendition && rendition.getContents) {
-    const contents = rendition.getContents()
-    console.log('当前内容数量:', contents.length)
-    
-    const colors = themeColors[props.theme as keyof typeof themeColors]
-    const marginValue = marginMap[props.margin] || '40px'
-    const alignValue = alignmentMap[props.alignment] || 'justify'
-    
-    contents.forEach((content: any) => {
-      const doc = content.document
-      if (doc && doc.body) {
-        console.log('更新内容样式')
-        doc.body.style.backgroundColor = colors.bg
-        doc.body.style.color = colors.text
-        doc.body.style.fontSize = `${props.fontSize}px`
-        doc.body.style.lineHeight = `${props.lineHeight}`
-        // 分别设置上下左右的 padding
-        doc.body.style.paddingTop = marginValue
-        doc.body.style.paddingBottom = marginValue
-        doc.body.style.paddingLeft = marginValue
-        doc.body.style.paddingRight = marginValue
-        doc.body.style.margin = '0'
-        doc.body.style.textAlign = alignValue
-        doc.body.style.boxSizing = 'border-box'
-        
-        // 更新所有元素的颜色
-        const allElements = doc.body.querySelectorAll('*')
-        allElements.forEach((el: any) => {
-          el.style.color = colors.text
-        })
-      }
-    })
-  }
+  // 重新计算渲染器尺寸（使用完整尺寸）
+  const width = containerRef.value.clientWidth
+  const height = containerRef.value.clientHeight
   
-  // 也调用原来的 applyStyles
+  console.log('📐 [Watch] 调整渲染器尺寸:', {
+    容器: `${width}x${height}`
+  })
+  
+  // 调整渲染器尺寸
+  rendition.resize(width, height)
+  
+  // 重新应用样式（包含边距）
   applyStyles()
+  
+  // 刷新当前页面以应用新样式
+  setTimeout(() => {
+    const currentLocation = rendition.currentLocation()
+    if (currentLocation && currentLocation.start) {
+      rendition.display(currentLocation.start.cfi)
+    }
+  }, 100)
 })
 
 watch(() => props.pageMode, () => {
@@ -700,12 +657,9 @@ const applyHighlightToContent = (content: any, cfi: string, color: string) => {
       return false
     }
     
-    console.log('找到 CFI 对应的范围:', cfi)
-    
     // 检查是否已经有高亮
     const existingHighlight = content.document.querySelector(`[data-highlight-cfi="${cfi}"]`)
     if (existingHighlight) {
-      console.log('高亮已存在，跳过')
       return true
     }
     
@@ -723,7 +677,6 @@ const applyHighlightToContent = (content: any, cfi: string, color: string) => {
     // 添加点击事件
     mark.addEventListener('click', (e: Event) => {
       e.stopPropagation()
-      console.log('高亮被点击:', cfi)
       const noteData = highlightNotes.get(cfi)
       if (noteData) {
         emit('highlight-clicked', noteData)
@@ -732,13 +685,9 @@ const applyHighlightToContent = (content: any, cfi: string, color: string) => {
     
     // 使用更安全的方法包裹内容
     try {
-      // 先提取内容
       const fragment = range.extractContents()
-      // 将内容放入 mark 元素
       mark.appendChild(fragment)
-      // 插入 mark 元素
       range.insertNode(mark)
-      console.log('高亮样式应用成功')
       return true
     } catch (e) {
       console.error('应用高亮失败:', e)
@@ -758,17 +707,11 @@ const addHighlight = (cfi: string, color: string, note?: any) => {
   }
   
   try {
-    console.log('=== 添加高亮 ===')
-    console.log('CFI:', cfi)
-    console.log('颜色:', color)
-    
-    // 存储高亮信息
     highlights.set(cfi, color)
     if (note) {
       highlightNotes.set(cfi, note)
     }
     
-    // 直接操作 DOM 添加高亮
     const contents = rendition.getContents()
     let applied = false
     
@@ -778,16 +721,11 @@ const addHighlight = (cfi: string, color: string, note?: any) => {
       }
     })
     
-    if (applied) {
-      console.log('高亮添加成功')
-    } else {
-      console.warn('高亮未能应用到任何内容，可能该 CFI 不在当前渲染的页面中')
+    if (!applied) {
+      console.warn('高亮未能应用到当前页面，CFI:', cfi)
     }
-    
-    console.log('当前所有高亮:', highlights)
   } catch (error) {
     console.error('添加高亮失败:', error)
-    console.error('错误堆栈:', (error as Error).stack)
   }
 }
 
@@ -796,26 +734,20 @@ const removeHighlight = (cfi: string) => {
   if (!rendition) return
   
   try {
-    console.log('移除高亮:', cfi)
     highlights.delete(cfi)
     highlightNotes.delete(cfi)
     
-    // 从 DOM 中移除高亮元素
     const contents = rendition.getContents()
     contents.forEach((content: any) => {
       const highlightElement = content.document.querySelector(`[data-highlight-cfi="${cfi}"]`)
       if (highlightElement) {
-        // 将高亮元素的内容提取出来，替换高亮元素
         const parent = highlightElement.parentNode
         while (highlightElement.firstChild) {
           parent.insertBefore(highlightElement.firstChild, highlightElement)
         }
         parent.removeChild(highlightElement)
-        console.log('高亮 DOM 元素已移除')
       }
     })
-    
-    console.log('高亮移除成功')
   } catch (error) {
     console.error('移除高亮失败:', error)
   }
@@ -824,14 +756,9 @@ const removeHighlight = (cfi: string) => {
 // 恢复所有高亮
 const restoreHighlights = (notes: any[]) => {
   if (!rendition || !notes || notes.length === 0) {
-    console.log('没有需要恢复的高亮')
     return
   }
   
-  console.log('=== 恢复高亮 ===')
-  console.log('笔记数量:', notes.length)
-  
-  // 存储所有笔记信息
   notes.forEach(note => {
     if (note.cfi && note.color) {
       highlights.set(note.cfi, note.color)
@@ -839,28 +766,15 @@ const restoreHighlights = (notes: any[]) => {
     }
   })
   
-  // 延迟恢复高亮，确保内容已经完全渲染
   setTimeout(() => {
-    console.log('开始延迟恢复高亮')
     const contents = rendition.getContents()
-    console.log('当前渲染的内容数量:', contents.length)
-    
     notes.forEach(note => {
       if (note.cfi && note.color) {
-        console.log('恢复高亮:', note.cfi, note.color)
-        let applied = false
         contents.forEach((content: any) => {
-          if (applyHighlightToContent(content, note.cfi, note.color)) {
-            applied = true
-          }
+          applyHighlightToContent(content, note.cfi, note.color)
         })
-        if (!applied) {
-          console.warn('高亮未应用到任何内容:', note.cfi)
-        }
       }
     })
-    
-    console.log('高亮恢复完成，共', highlights.size, '个高亮')
   }, 500)
 }
 
@@ -897,11 +811,9 @@ onMounted(() => {
   
   // 监听窗口大小改变
   window.addEventListener('resize', () => {
-    if (rendition) {
-      console.log('窗口大小改变，调整渲染器')
-      const width = containerRef.value?.clientWidth || 0
-      const height = containerRef.value?.clientHeight || 0
-      console.log('新尺寸:', width, 'x', height)
+    if (rendition && containerRef.value) {
+      const width = containerRef.value.clientWidth
+      const height = containerRef.value.clientHeight
       rendition.resize(width, height)
     }
   })
@@ -924,6 +836,7 @@ onBeforeUnmount(() => {
   right: 0;
   bottom: 0;
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 /* 内联模式下的内容容器样式 */

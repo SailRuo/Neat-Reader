@@ -1091,9 +1091,7 @@ onMounted(async () => {
     console.log('首页加载，开始初始化电子书存储...');
     // 初始化电子书存储
     await ebookStore.initialize();
-    console.log('电子书存储初始化完成');
-    console.log('当前书籍数量:', ebookStore.books.length);
-    console.log('当前分类数量:', ebookStore.categories.length);
+    // console.log('电子书存储初始化完成');
     
     // 获取百度网盘用户信息（仅在 token 有效且没有缓存时）
     if (isBaidupanAuthorized.value && !ebookStore.baidupanUser) {
