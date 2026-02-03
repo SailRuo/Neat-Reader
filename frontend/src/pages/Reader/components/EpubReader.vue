@@ -33,9 +33,9 @@ let rendition: any = null
 let isReady = false
 let resourceErrorHandler: ((event: PromiseRejectionEvent) => void) | null = null
 
-// 环境检测：检查是否在 Wails 环境中运行
-const isWailsEnvironment = (): boolean => {
-  return typeof (window as any).go !== 'undefined'
+// 环境检测：检查是否在 Electron 环境中运行
+const isElectronEnvironment = (): boolean => {
+  return typeof (window as any).electron !== 'undefined'
 }
 
 // 主题配置
@@ -293,8 +293,12 @@ const applyStyles = () => {
       theme: props.theme,
       margin: marginValue,
       fontSize: props.fontSize,
+      lineHeight: props.lineHeight,
       pageMode: props.pageMode
     })
+    
+    // 清除所有现有样式
+    rendition.themes.default({})
     
     // 使用 override 方法强制覆盖 epub.js 的默认样式
     const styles: any = {
@@ -360,22 +364,11 @@ const applyStyles = () => {
     }
     
     // 使用 override 而不是 register，强制覆盖默认样式
-    rendition.themes.override('body', styles['body'])
-    rendition.themes.override('p', styles['p'])
-    rendition.themes.override('div, span, li, td, th', styles['div, span, li, td, th'])
-    rendition.themes.override('h1, h2, h3, h4, h5, h6', styles['h1, h2, h3, h4, h5, h6'])
-    rendition.themes.override('a', styles['a'])
-    rendition.themes.override('img', styles['img'])
-    rendition.themes.override('*', styles['*'])
+    Object.keys(styles).forEach(selector => {
+      rendition.themes.override(selector, styles[selector])
+    })
     
-    if (styles['html']) {
-      rendition.themes.override('html', styles['html'])
-    }
-    
-    if (styles['p, div, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre']) {
-      rendition.themes.override('p, div, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre', 
-        styles['p, div, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre'])
-    }
+    console.log('✅ 样式已应用到 rendition.themes')
   } catch (error) {
     console.error('应用自定义主题失败:', error)
   }
@@ -618,28 +611,36 @@ const cleanup = () => {
 watch([() => props.theme, () => props.fontSize, () => props.lineHeight, () => props.margin, () => props.alignment], () => {
   if (!rendition || !containerRef.value) return
   
-  // 重新计算渲染器尺寸（使用完整尺寸）
-  const width = containerRef.value.clientWidth
-  const height = containerRef.value.clientHeight
+  console.log('📐 [Watch] 样式属性变化，重新应用样式')
   
-  console.log('📐 [Watch] 调整渲染器尺寸:', {
-    容器: `${width}x${height}`
-  })
-  
-  // 调整渲染器尺寸
-  rendition.resize(width, height)
-  
-  // 重新应用样式（包含边距）
+  // 重新应用样式
   applyStyles()
   
-  // 刷新当前页面以应用新样式
-  setTimeout(() => {
-    const currentLocation = rendition.currentLocation()
-    if (currentLocation && currentLocation.start) {
-      rendition.display(currentLocation.start.cfi)
+  // 使用 epub.js 的 themes.update 方法强制更新所有视图
+  nextTick(() => {
+    try {
+      // 获取当前位置
+      const currentLocation = rendition.currentLocation()
+      
+      // 清除所有现有主题
+      rendition.themes.default({})
+      
+      // 重新应用样式
+      applyStyles()
+      
+      // 强制重新渲染当前位置
+      if (currentLocation && currentLocation.start) {
+        setTimeout(() => {
+          rendition.display(currentLocation.start.cfi).then(() => {
+            console.log('✅ 样式已应用并重新渲染')
+          })
+        }, 100)
+      }
+    } catch (error) {
+      console.error('重新应用样式失败:', error)
     }
-  }, 100)
-})
+  })
+}, { deep: true })
 
 watch(() => props.pageMode, () => {
   reinitialize()

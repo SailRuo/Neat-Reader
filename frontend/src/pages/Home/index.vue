@@ -165,7 +165,15 @@
                       <span class="placeholder-text">{{ book.title.charAt(0) }}</span>
                     </div>
                     <div class="book-format-badge">{{ book.format.toUpperCase() }}</div>
+                    
+                    <!-- 下载状态覆盖层 -->
+                    <div v-if="book.downloading" class="book-downloading-overlay">
+                      <div class="downloading-spinner"></div>
+                      <span class="downloading-text">下载中...</span>
+                    </div>
+                    
                     <div 
+                      v-else
                       class="book-storage-badge" 
                       :class="{ 
                         'local': book.storageType === 'local',
@@ -410,7 +418,7 @@ import { useEbookStore } from '../../stores/ebook'
 import { useDialogStore } from '../../stores/dialog'
 import SettingsPanel from '../../components/SettingsPanel/index.vue'
 import * as Icons from 'lucide-vue-next'
-import { wails } from '../../wails'
+import { api } from '../../api/adapter'
 
 // 初始化路由和状态管理
 const router = useRouter()
@@ -490,8 +498,7 @@ const saveBaidupanAuth = async () => {
     }, true)
     
     if (baidupanForm.value.refreshToken && baidupanForm.value.appKey && baidupanForm.value.secretKey) {
-      const result = await wails.refreshToken(baidupanForm.value.refreshToken, baidupanForm.value.appKey, baidupanForm.value.secretKey)
-      const data = JSON.parse(result)
+      const data = await api.refreshToken(baidupanForm.value.refreshToken, baidupanForm.value.appKey, baidupanForm.value.secretKey)
       if (!data.error && data.access_token) {
         await ebookStore.updateUserConfig({
           storage: {
@@ -774,29 +781,23 @@ const handleDownloadFromBaidupan = async (book: any) => {
   if (!book || !book.baidupanPath) return
   
   try {
-    dialogStore.showDialog({
-      title: '正在下载',
-      message: `正在从百度网盘下载《${book.title}》...`,
-      type: 'info',
-      buttons: []
-    })
+    // 设置下载状态
+    book.downloading = true
     
     const result = await ebookStore.downloadFromBaidupan(book.baidupanPath)
     
-    dialogStore.closeDialog()
-    
     if (result) {
-      dialogStore.showSuccessDialog('下载成功')
       // 刷新书籍列表
       await ebookStore.loadBooks()
     } else {
       dialogStore.showErrorDialog('下载失败', '请检查网络连接或授权状态')
     }
   } catch (error) {
-    dialogStore.closeDialog()
     console.error('从百度网盘下载失败:', error)
     const errorMessage = error instanceof Error ? error.message : '下载失败，请重试'
     dialogStore.showErrorDialog('下载失败', errorMessage)
+  } finally {
+    book.downloading = false
   }
 }
 
@@ -1813,6 +1814,43 @@ body {
 
 .book-storage-badge.baidupan:hover {
   background: #10B981;
+}
+
+.book-downloading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  z-index: 10;
+}
+
+.downloading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.downloading-text {
+  color: white;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .book-info {

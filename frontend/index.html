@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- 允许 iframe 和 blob URL，确保 epub.js 正常工作 -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; connect-src 'self' http://localhost:3000 https://openapi.baidu.com https://pan.baidu.com blob:; frame-src 'self' blob: data:; img-src 'self' data: blob: https://himg.bdimg.com;">
     <title>Neat Reader</title>
   </head>
   <body>

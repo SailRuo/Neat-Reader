@@ -427,9 +427,9 @@ const handleDeleteNote = async (noteId: string) => {
 const syncNotesToCloud = async () => {
   if (!book.value) return
   
-  // 检查是否在 Wails 环境中
+  // 检查是否需要云端同步
   if (!ebookStore.uploadToBaidupanNew) {
-    console.log('非 Wails 环境，跳过云端同步')
+    console.log('跳过云端同步')
     return
   }
   

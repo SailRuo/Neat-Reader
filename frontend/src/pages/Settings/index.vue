@@ -134,7 +134,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useEbookStore } from '../../stores/ebook'
 import { useDialogStore } from '../../stores/dialog'
-import { wails } from '../../wails'
+import { api } from '../../api/adapter'
 
 const ebookStore = useEbookStore()
 const dialogStore = useDialogStore()
@@ -173,12 +173,11 @@ const refreshAccessToken = async () => {
   isLoading.value = true
   
   try {
-    const result = await wails.refreshToken(
+    const data = await api.refreshToken(
       refreshToken.value,
       baiduClientId.value,
       baiduClientSecret.value
     )
-    const data = JSON.parse(result)
     
     if (!data.error && data.access_token) {
       inputAccessToken.value = data.access_token
@@ -198,8 +197,7 @@ const verifyAndConnect = async () => {
   isLoading.value = true
   
   try {
-    const result = await wails.verifyToken(inputAccessToken.value)
-    const data = JSON.parse(result)
+    const data = await api.verifyToken(inputAccessToken.value)
     
     if (!data.error) {
       await ebookStore.updateUserConfig({

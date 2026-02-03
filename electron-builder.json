@@ -1,0 +1,63 @@
+{
+  "appId": "com.neatreader.app",
+  "productName": "Neat Reader",
+  "directories": {
+    "output": "dist-electron",
+    "buildResources": "build"
+  },
+  "files": [
+    "electron/**/*",
+    "backend/**/*",
+    "frontend/dist/**/*",
+    "package.json",
+    "!backend/node_modules/**/{CHANGELOG.md,README.md,README,readme.md,readme}",
+    "!backend/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
+    "!backend/node_modules/*.d.ts",
+    "!backend/node_modules/.bin",
+    "!**/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}",
+    "!.editorconfig",
+    "!**/._*",
+    "!**/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,.gitignore,.gitattributes}",
+    "!**/{__pycache__,thumbs.db,.flowconfig,.idea,.vs,.nyc_output}",
+    "!**/{appveyor.yml,.travis.yml,circle.yml}",
+    "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}"
+  ],
+  "extraResources": [
+    {
+      "from": "backend/node_modules",
+      "to": "backend/node_modules",
+      "filter": ["**/*"]
+    }
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "build/icon.ico",
+    "artifactName": "${productName}-${version}-${arch}.${ext}"
+  },
+  "mac": {
+    "target": ["dmg"],
+    "icon": "build/icon.icns",
+    "category": "public.app-category.productivity",
+    "artifactName": "${productName}-${version}-${arch}.${ext}"
+  },
+  "linux": {
+    "target": ["AppImage"],
+    "icon": "build/icon.png",
+    "category": "Office",
+    "artifactName": "${productName}-${version}-${arch}.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Neat Reader",
+    "perMachine": false,
+    "allowElevation": true
+  }
+}

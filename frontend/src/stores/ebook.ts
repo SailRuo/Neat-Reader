@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import localforage from 'localforage'
 import ePub from 'epubjs'
 import { v4 as uuidv4 } from 'uuid'
-import { wails } from '../wails'
+import { api } from '../api/adapter'
 
 // 定义分类类型
 export interface BookCategory {
@@ -31,6 +31,8 @@ export interface EbookMetadata {
   baidupanPath?: string;
   categoryId?: string;
   addedAt: number;
+  downloading?: boolean; // 是否正在下载
+  uploadProgress?: number; // 上传进度 0-100
 }
 
 // 定义阅读进度类型
@@ -566,14 +568,14 @@ export const useEbookStore = defineStore('ebook', () => {
         console.log('搜索目录:', searchDir);
         
         try {
-          const result = await wails.searchFiles(
+          const result = await api.searchFiles(
             accessToken,
             keyword,
             searchDir,
             'search',
             1
           );
-          const data = JSON.parse(result);
+          const data = result;
           console.log('百度网盘搜索结果:', data);
           
           if (data.list && Array.isArray(data.list) && data.list.length > 0) {
@@ -805,13 +807,13 @@ export const useEbookStore = defineStore('ebook', () => {
         return false;
       }
       
-      const result = await wails.refreshToken(
+      const result = await api.refreshToken(
         refreshToken,
         baidupanApiConfig.clientId,
         baidupanApiConfig.clientSecret
       );
       
-      const data = JSON.parse(result);
+      const data = result;
       
       if (data.error) {
         console.error('刷新百度网盘令牌失败:', data.error);
@@ -889,8 +891,8 @@ export const useEbookStore = defineStore('ebook', () => {
     }
 
     try {
-      const result = await wails.verifyToken(userConfig.value.storage.baidupan.accessToken)
-      const data = JSON.parse(result)
+      const result = await api.verifyToken(userConfig.value.storage.baidupan.accessToken)
+      const data = result
       console.log('verifyToken 返回数据:', data)
       if (data.errno === 0 || !data.error) {
         const userInfo = {
@@ -961,14 +963,14 @@ export const useEbookStore = defineStore('ebook', () => {
       // });
       
       const fileArrayBuffer = await file.arrayBuffer();
-      const fileBytes = new Uint8Array(fileArrayBuffer);
+      const fileBytes = Array.from(new Uint8Array(fileArrayBuffer));
       
       // console.log('文件转换为字节数组成功，长度:', fileBytes.length);
       
-      const result = await wails.uploadFile(file.name, fileBytes, accessToken);
-      // console.log('Go服务器返回结果:', result);
+      const result = await api.uploadFile(file.name, fileBytes, accessToken);
+      // console.log('后端服务器返回结果:', result);
       
-      const uploadResult = JSON.parse(result);
+      const uploadResult = result;
       // console.log('解析后的上传结果:', uploadResult);
       
       // 处理文件已存在的情况（error_code: 31061）
@@ -1102,7 +1104,7 @@ export const useEbookStore = defineStore('ebook', () => {
       console.log('下载文件 - 目录:', dirPath, '文件名:', fileName);
       
       // 先获取文件列表
-      const result = await wails.getFileList(
+      const result = await api.getFileList(
         accessToken,
         dirPath,
         1,
@@ -1111,7 +1113,7 @@ export const useEbookStore = defineStore('ebook', () => {
         'list',
         1
       );
-      const fileListData = JSON.parse(result);
+      const fileListData = result;
       
       if (fileListData.error || !fileListData.list) {
         console.log('获取文件列表失败或为空:', fileListData);
@@ -1129,7 +1131,7 @@ export const useEbookStore = defineStore('ebook', () => {
       }
       
       // 获取下载链接
-      const downloadResult = await wails.getFileList(
+      const downloadResult = await api.getFileList(
         accessToken,
         dirPath,
         1,
@@ -1179,7 +1181,7 @@ export const useEbookStore = defineStore('ebook', () => {
       console.log('搜索目录:', searchDir);
       
       // 阶段1：获取文件列表（获取 fsid）
-      const fileListResult = await wails.getFileList(
+      const fileListData = await api.getFileList(
         accessToken,
         searchDir,
         1,
@@ -1188,7 +1190,6 @@ export const useEbookStore = defineStore('ebook', () => {
         'list',
         1
       );
-      const fileListData = JSON.parse(fileListResult);
       console.log('获取文件列表响应:', fileListData);
       
       if (fileListData.error_code) {
@@ -1212,8 +1213,7 @@ export const useEbookStore = defineStore('ebook', () => {
       console.log('获取到 fsid:', fsid);
       
       // 阶段2：查询文件信息（获取 dlink）
-      const fileInfoResult = await wails.getFileInfo(accessToken, fsid.toString());
-      const fileInfoData = JSON.parse(fileInfoResult);
+      const fileInfoData = await api.getFileInfo(accessToken, fsid.toString());
       console.log('获取文件信息响应:', fileInfoData);
       
       if (fileInfoData.error_code || fileInfoData.errno) {
@@ -1236,16 +1236,17 @@ export const useEbookStore = defineStore('ebook', () => {
       console.log('获取到 dlink:', dlink);
       
       // 阶段3：下载文件（使用后端下载，避免 CORS 问题）
-      const fileData = await wails.downloadFile(dlink, accessToken);
+      const downloadResult = await api.downloadFile(dlink, accessToken);
       
-      console.log('下载的文件数据类型:', typeof fileData, '长度:', fileData?.length);
+      console.log('下载响应:', downloadResult);
       
-      if (!fileData || fileData.length === 0) {
-        console.error('下载文件失败，文件数据为空');
+      if (!downloadResult.success || !downloadResult.data || downloadResult.data.length === 0) {
+        console.error('下载文件失败:', downloadResult.error || '文件数据为空');
         return false;
       }
       
-      const arrayBuffer = fileData instanceof ArrayBuffer ? fileData : fileData.buffer.slice(0);
+      // 后端返回的是数组格式，转换为 ArrayBuffer
+      const arrayBuffer = new Uint8Array(downloadResult.data).buffer;
       
       // 获取文件名和扩展名
       const ext = fileName.split('.').pop()?.toLowerCase() || 'epub';
@@ -1357,7 +1358,7 @@ export const useEbookStore = defineStore('ebook', () => {
       const searchDir = rootPath || `/apps/${AppName}`;
       console.log('开始加载百度网盘书籍，目录:', searchDir);
       
-      const result = await wails.getFileList(
+      const result = await api.getFileList(
         accessToken,
         searchDir,
         1,
@@ -1366,7 +1367,7 @@ export const useEbookStore = defineStore('ebook', () => {
         'list',
         1
       );
-      const data = JSON.parse(result);
+      const data = result;
       // console.log('百度网盘文件列表:', data);
       
       if (data.list && Array.isArray(data.list) && data.list.length > 0) {
@@ -1446,7 +1447,7 @@ export const useEbookStore = defineStore('ebook', () => {
       
       const { accessToken } = userConfig.value.storage.baidupan;
       
-      const result = await wails.getFileList(
+      const result = await api.getFileList(
         accessToken,
         path,
         1,
@@ -1456,7 +1457,7 @@ export const useEbookStore = defineStore('ebook', () => {
         0
       );
       
-      const data = JSON.parse(result);
+      const data = result;
       console.log('获取文件列表响应:', data);
       
       if (data.error) {

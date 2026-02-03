@@ -1,0 +1,35 @@
+{
+  "name": "neat-reader",
+  "version": "1.0.0",
+  "description": "一个简洁优雅的电子书阅读器桌面应用",
+  "main": "electron/main.js",
+  "scripts": {
+    "postinstall": "cd frontend && npm install && cd ../backend && npm install",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:electron": "cross-env NODE_ENV=development electron .",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\" \"wait-on http://localhost:5173 && npm run dev:electron\"",
+    "build:frontend": "cd frontend && npm run build",
+    "build:backend": "cd backend && npm install --production",
+    "build": "npm run build:frontend && npm run build:backend && electron-builder",
+    "build:win": "npm run build:frontend && npm run build:backend && electron-builder --win",
+    "build:mac": "npm run build:frontend && npm run build:backend && electron-builder --mac",
+    "build:linux": "npm run build:frontend && npm run build:backend && electron-builder --linux"
+  },
+  "keywords": [
+    "ebook",
+    "reader",
+    "epub",
+    "pdf",
+    "electron"
+  ],
+  "author": "Neat Reader",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "wait-on": "^7.2.0"
+  }
+}

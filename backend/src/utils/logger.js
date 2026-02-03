@@ -1,0 +1,30 @@
+// 日志工具
+const logger = {
+  info: (message, ...args) => {
+    console.log(`[INFO] ${new Date().toISOString()} - ${message}`, ...args)
+  },
+  
+  error: (message, ...args) => {
+    console.error(`[ERROR] ${new Date().toISOString()} - ${message}`, ...args)
+  },
+  
+  warn: (message, ...args) => {
+    console.warn(`[WARN] ${new Date().toISOString()} - ${message}`, ...args)
+  },
+  
+  debug: (message, ...args) => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[DEBUG] ${new Date().toISOString()} - ${message}`, ...args)
+    }
+  },
+  
+  request: (method, url, duration) => {
+    console.log(`[REQUEST] ${method} ${url} - ${duration}ms`)
+  },
+  
+  response: (statusCode, duration) => {
+    console.log(`[RESPONSE] Status: ${statusCode} - ${duration}ms`)
+  }
+}
+
+module.exports = logger
