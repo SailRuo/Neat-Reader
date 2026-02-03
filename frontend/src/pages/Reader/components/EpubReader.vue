@@ -150,27 +150,38 @@ const initialize = async () => {
     // 注册内容钩子
     rendition.hooks.content.register((contents: any) => {
       const colors = themeColors[props.theme as keyof typeof themeColors]
+      const marginValue = marginMap[props.margin] || '40px'
       const alignValue = alignmentMap[props.alignment] || 'justify'
       
       const doc = contents.document
       if (doc && doc.body) {
-        doc.body.style.backgroundColor = colors.bg
-        doc.body.style.color = colors.text
-        doc.body.style.fontSize = `${props.fontSize}px`
-        doc.body.style.lineHeight = `${props.lineHeight}`
-        doc.body.style.textAlign = alignValue
-        doc.body.style.margin = '0'
-        doc.body.style.padding = '0'
-        
+        // 设置 html 和 body 的基础样式
         if (doc.documentElement) {
           doc.documentElement.style.backgroundColor = colors.bg
           doc.documentElement.style.padding = '0'
           doc.documentElement.style.margin = '0'
         }
         
+        doc.body.style.backgroundColor = colors.bg
+        doc.body.style.color = colors.text
+        doc.body.style.fontSize = `${props.fontSize}px`
+        doc.body.style.lineHeight = `${props.lineHeight}`
+        doc.body.style.textAlign = alignValue
+        doc.body.style.margin = '0'
+        doc.body.style.padding = props.pageMode === 'page' ? marginValue : `${marginValue} 0`
+        doc.body.style.boxSizing = 'border-box'
+        
+        // 设置所有元素的颜色
         const allElements = doc.body.querySelectorAll('*')
         allElements.forEach((el: any) => {
           el.style.color = colors.text
+        })
+        
+        console.log('✅ 内容钩子应用样式:', {
+          theme: props.theme,
+          fontSize: props.fontSize,
+          lineHeight: props.lineHeight,
+          margin: marginValue
         })
       }
       
@@ -608,39 +619,54 @@ const cleanup = () => {
 }
 
 // 监听属性变化
-watch([() => props.theme, () => props.fontSize, () => props.lineHeight, () => props.margin, () => props.alignment], () => {
+watch([() => props.theme, () => props.fontSize, () => props.lineHeight, () => props.margin, () => props.alignment], async () => {
   if (!rendition || !containerRef.value) return
   
-  console.log('📐 [Watch] 样式属性变化，重新应用样式')
+  console.log('📐 [Watch] 样式属性变化')
   
-  // 重新应用样式
-  applyStyles()
-  
-  // 使用 epub.js 的 themes.update 方法强制更新所有视图
-  nextTick(() => {
-    try {
-      // 获取当前位置
-      const currentLocation = rendition.currentLocation()
-      
-      // 清除所有现有主题
-      rendition.themes.default({})
-      
-      // 重新应用样式
-      applyStyles()
-      
-      // 强制重新渲染当前位置
-      if (currentLocation && currentLocation.start) {
-        setTimeout(() => {
-          rendition.display(currentLocation.start.cfi).then(() => {
-            console.log('✅ 样式已应用并重新渲染')
+  try {
+    // 保存当前位置
+    const currentLocation = rendition.currentLocation()
+    const currentCfi = currentLocation?.start?.cfi
+    
+    // 应用新样式到 themes
+    applyStyles()
+    
+    // 直接操作当前所有 iframe
+    const colors = themeColors[props.theme as keyof typeof themeColors]
+    const marginValue = marginMap[props.margin] || '40px'
+    
+    rendition.views().forEach((view: any) => {
+      if (view?.iframe?.contentDocument) {
+        const doc = view.iframe.contentDocument
+        if (doc.body && doc.documentElement) {
+          doc.documentElement.style.background = colors.bg
+          doc.body.style.background = colors.bg
+          doc.body.style.color = colors.text
+          doc.body.style.fontSize = `${props.fontSize}px`
+          doc.body.style.lineHeight = `${props.lineHeight}`
+          doc.body.style.padding = props.pageMode === 'page' ? marginValue : `${marginValue} 0`
+          
+          doc.querySelectorAll('*').forEach((el: any) => {
+            el.style.color = colors.text
           })
-        }, 100)
+        }
       }
-    } catch (error) {
-      console.error('重新应用样式失败:', error)
+    })
+    
+    // 触发重新布局（不改变位置）
+    await rendition.resize()
+    
+    // 恢复位置
+    if (currentCfi) {
+      await rendition.display(currentCfi)
     }
-  })
-}, { deep: true })
+    
+    console.log('✅ 样式已更新')
+  } catch (error) {
+    console.error('更新样式失败:', error)
+  }
+})
 
 watch(() => props.pageMode, () => {
   reinitialize()
