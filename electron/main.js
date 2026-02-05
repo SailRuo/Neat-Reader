@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
 const path = require('path')
 
 // 判断是否为开发环境
@@ -65,6 +65,18 @@ ipcMain.handle('fs:readFile', async (event, filePath) => {
   } catch (error) {
     console.error('读取文件失败:', error)
     throw error
+  }
+})
+
+// IPC 处理：在外部浏览器中打开 URL
+ipcMain.handle('shell:openExternal', async (event, url) => {
+  try {
+    console.log('打开外部链接:', url)
+    await shell.openExternal(url)
+    return { success: true }
+  } catch (error) {
+    console.error('打开外部链接失败:', error)
+    return { success: false, error: error.message }
   }
 })
 

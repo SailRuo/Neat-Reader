@@ -3,6 +3,7 @@ interface ElectronAPI {
   openDirectory: () => Promise<string>
   openFile: (filters?: any[]) => Promise<string>
   readFile: (filePath: string) => Promise<number[]>
+  openExternal: (url: string) => Promise<{ success: boolean; error?: string }>
 }
 
 declare global {
@@ -40,5 +41,13 @@ export const electronApi = {
       throw new Error('Electron API 不可用')
     }
     return window.electron!.readFile(filePath)
+  },
+  
+  // 在外部浏览器中打开 URL
+  async openExternal(url: string): Promise<{ success: boolean; error?: string }> {
+    if (!isElectron()) {
+      throw new Error('Electron API 不可用')
+    }
+    return window.electron!.openExternal(url)
   }
 }

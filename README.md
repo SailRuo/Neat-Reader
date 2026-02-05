@@ -172,17 +172,39 @@ npm run build:linux        # 仅 Linux
 
 ## 🔧 配置说明
 
-### 百度网盘 API 配置
+### 百度网盘授权配置
 
-在 `frontend/src/stores/ebook.ts` 中配置：
+#### 如何获取授权
 
-```typescript
-const baidupanApiConfig = {
-  clientId: 'your_app_key',        // 百度网盘 App Key
-  clientSecret: 'your_app_secret', // 百度网盘 App Secret
-  redirectUri: 'http://localhost:8080/callback'
-}
-```
+1. **打开授权页面**
+   - 在应用的"设置"页面，点击"获取授权"按钮
+   - 或直接访问：https://openapi.baidu.com/oauth/2.0/authorize?response_type=code&client_id=hq9yQ9w9kR4YHj1kyYafLygVocobh7Sf&redirect_uri=https://alistgo.com/tool/baidu/callback&scope=basic,netdisk&qrcode=1
+
+2. **获取授权信息**
+   - 授权页面会显示以下信息：
+     - **App Key (Client ID)**: 应用密钥
+     - **App Secret (Client Secret)**: 应用密钥
+     - **Refresh Token**: 刷新令牌
+   
+3. **填写授权信息**
+   - 在设置页面填入上述三个信息
+   - 点击"获取 access_token"按钮
+   - 系统会自动验证并连接百度网盘
+
+4. **授权成功**
+   - 授权成功后会显示您的百度网盘账号信息
+   - 可以开始使用云同步功能
+
+#### 取消授权
+
+在设置页面点击"取消授权"按钮即可断开百度网盘连接。
+
+#### 默认配置
+
+应用已预配置以下信息（可在授权页面获取）：
+- Client ID: `hq9yQ9w9kR4YHj1kyYafLygVocobh7Sf`
+- Client Secret: `YH2VpZcFJHYNnV6vLfHQXDBhcE7ZChyE`
+- Redirect URI: `https://alistgo.com/tool/baidu/callback`
 
 ### 端口修改
 

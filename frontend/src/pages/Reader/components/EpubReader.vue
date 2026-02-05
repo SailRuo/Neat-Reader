@@ -13,7 +13,6 @@ const props = defineProps<{
   fontSize: number
   lineHeight: number
   pageMode: 'page' | 'scroll'
-  margin: string
   alignment: string
   initialProgress?: number
 }>()
@@ -44,13 +43,6 @@ const themeColors = {
   sepia: { bg: '#f4ecd8', text: '#5b4636' },
   green: { bg: '#e8f5e9', text: '#2d5a3d' },
   dark: { bg: '#1a1a1a', text: '#e8e8e8' }  // 更亮的文本颜色，提高对比度
-}
-
-// 边距映射
-const marginMap: Record<string, string> = {
-  '小': '20px',
-  '中': '40px',
-  '大': '60px'
 }
 
 // 对齐映射
@@ -108,16 +100,12 @@ const initialize = async () => {
     const width = containerRef.value.clientWidth
     const height = containerRef.value.clientHeight
     
-    // 根据边距调整渲染区域尺寸
-    const marginValue = marginMap[props.margin] || '40px'
-    const marginPx = parseInt(marginValue)
-    
     // 内联渲染模式的配置
     const renderConfig: any = {
-      width: width,  // 使用完整宽度
-      height: height, // 使用完整高度
-      spread: 'none', // 强制单页显示
-      minSpreadWidth: 0, // 禁用双页展开
+      width: width,
+      height: height,
+      spread: 'none',
+      minSpreadWidth: 0,
       allowScriptedContent: true,
       allowPopups: false,
       snap: false
@@ -125,7 +113,6 @@ const initialize = async () => {
     
     console.log('📐 [初始化] 渲染器配置:', {
       容器尺寸: `${width}x${height}`,
-      边距: marginValue,
       渲染尺寸: `${renderConfig.width}x${renderConfig.height}`,
       spread: renderConfig.spread
     })
@@ -150,7 +137,6 @@ const initialize = async () => {
     // 注册内容钩子
     rendition.hooks.content.register((contents: any) => {
       const colors = themeColors[props.theme as keyof typeof themeColors]
-      const marginValue = marginMap[props.margin] || '40px'
       const alignValue = alignmentMap[props.alignment] || 'justify'
       
       const doc = contents.document
@@ -168,7 +154,7 @@ const initialize = async () => {
         doc.body.style.lineHeight = `${props.lineHeight}`
         doc.body.style.textAlign = alignValue
         doc.body.style.margin = '0'
-        doc.body.style.padding = props.pageMode === 'page' ? marginValue : `${marginValue} 0`
+        doc.body.style.padding = '0'
         doc.body.style.boxSizing = 'border-box'
         
         // 设置所有元素的颜色
@@ -181,7 +167,7 @@ const initialize = async () => {
           theme: props.theme,
           fontSize: props.fontSize,
           lineHeight: props.lineHeight,
-          margin: marginValue
+          pageMode: props.pageMode
         })
       }
       
@@ -297,12 +283,10 @@ const applyStyles = () => {
   
   try {
     const colors = themeColors[props.theme as keyof typeof themeColors]
-    const marginValue = marginMap[props.margin] || '40px'
     const alignValue = alignmentMap[props.alignment] || 'justify'
     
     console.log('🎨 [applyStyles] 应用样式:', {
       theme: props.theme,
-      margin: marginValue,
       fontSize: props.fontSize,
       lineHeight: props.lineHeight,
       pageMode: props.pageMode
@@ -313,13 +297,19 @@ const applyStyles = () => {
     
     // 使用 override 方法强制覆盖 epub.js 的默认样式
     const styles: any = {
+      'html': {
+        'padding': '0 !important',
+        'margin': '0 !important',
+        'background': `${colors.bg} !important`
+      },
       'body': {
         'background': `${colors.bg} !important`,
         'color': `${colors.text} !important`,
         'font-size': `${props.fontSize}px !important`,
         'line-height': `${props.lineHeight} !important`,
-        'margin': '0 !important',
         'text-align': `${alignValue} !important`,
+        'margin': '0 !important',
+        'padding': '0 !important',
         'overflow-x': 'hidden !important',
         'box-sizing': 'border-box !important'
       },
@@ -347,30 +337,6 @@ const applyStyles = () => {
       },
       '*': {
         'color': `${colors.text} !important`
-      }
-    }
-    
-    // 翻页模式和滚动模式都使用 body padding 实现边距
-    styles['html'] = {
-      'padding': '0 !important',
-      'margin': '0 !important',
-      'background': `${colors.bg} !important`
-    }
-    
-    if (props.pageMode === 'page') {
-      // 翻页模式：使用 body padding 实现边距
-      styles['body']['padding'] = `${marginValue} !important`
-    } else {
-      // 滚动模式：给块级元素添加左右 margin
-      styles['body']['padding-top'] = `${marginValue} !important`
-      styles['body']['padding-bottom'] = `${marginValue} !important`
-      styles['body']['padding-left'] = '0 !important'
-      styles['body']['padding-right'] = '0 !important'
-      
-      styles['p, div, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre'] = {
-        'margin-left': `${marginValue} !important`,
-        'margin-right': `${marginValue} !important`,
-        'box-sizing': 'border-box !important'
       }
     }
     
@@ -619,34 +585,34 @@ const cleanup = () => {
 }
 
 // 监听属性变化
-watch([() => props.theme, () => props.fontSize, () => props.lineHeight, () => props.margin, () => props.alignment], async () => {
+watch([() => props.theme, () => props.fontSize, () => props.lineHeight, () => props.alignment], async () => {
   if (!rendition || !containerRef.value) return
   
   console.log('📐 [Watch] 样式属性变化')
   
   try {
-    // 保存当前位置
-    const currentLocation = rendition.currentLocation()
-    const currentCfi = currentLocation?.start?.cfi
-    
     // 应用新样式到 themes
     applyStyles()
     
-    // 直接操作当前所有 iframe
+    // 直接操作当前所有 iframe，避免闪烁
     const colors = themeColors[props.theme as keyof typeof themeColors]
-    const marginValue = marginMap[props.margin] || '40px'
+    const alignValue = alignmentMap[props.alignment] || 'justify'
     
     rendition.views().forEach((view: any) => {
       if (view?.iframe?.contentDocument) {
         const doc = view.iframe.contentDocument
         if (doc.body && doc.documentElement) {
+          // 设置背景色（防止闪烁）
           doc.documentElement.style.background = colors.bg
           doc.body.style.background = colors.bg
           doc.body.style.color = colors.text
           doc.body.style.fontSize = `${props.fontSize}px`
           doc.body.style.lineHeight = `${props.lineHeight}`
-          doc.body.style.padding = props.pageMode === 'page' ? marginValue : `${marginValue} 0`
+          doc.body.style.textAlign = alignValue
+          doc.body.style.margin = '0'
+          doc.body.style.padding = '0'
           
+          // 更新所有元素的颜色
           doc.querySelectorAll('*').forEach((el: any) => {
             el.style.color = colors.text
           })
@@ -654,15 +620,7 @@ watch([() => props.theme, () => props.fontSize, () => props.lineHeight, () => pr
       }
     })
     
-    // 触发重新布局（不改变位置）
-    await rendition.resize()
-    
-    // 恢复位置
-    if (currentCfi) {
-      await rendition.display(currentCfi)
-    }
-    
-    console.log('✅ 样式已更新')
+    console.log('✅ 样式已更新（无闪烁）')
   } catch (error) {
     console.error('更新样式失败:', error)
   }

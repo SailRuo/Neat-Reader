@@ -9,8 +9,12 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import localforage from 'localforage'
 
-// 设置 PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+// 设置 PDF.js worker - 使用本地 worker 文件避免 CSP 问题
+// 注意：需要从 node_modules 复制 worker 文件到 public 目录
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url
+).toString()
 
 const props = defineProps<{
   bookId: string

@@ -8,7 +8,7 @@
           <div class="sidebar-header">
             <div class="logo">
               <img src="/src/assets/icons/appicon.png" alt="Logo" class="logo-icon" style="width: 48px; height: 48px;" />
-              <h1 class="logo-text">Drive Reader</h1>
+              <h1 class="logo-text">Reader</h1>
             </div>
           </div>
 
@@ -242,8 +242,6 @@
             v-else-if="selectedCategory === 'settings'"
             :baidupan-user="ebookStore.baidupanUser"
             :view-mode="viewMode"
-            @cancel-baidupan-auth="cancelBaidupanAuth"
-            @show-baidupan-auth-dialog="showBaidupanAuthDialog"
             @update-view-mode="updateViewMode"
           />
         </section>
@@ -506,7 +504,8 @@ const saveBaidupanAuth = async () => {
             baidupan: {
               appKey: baidupanForm.value.appKey,
               secretKey: baidupanForm.value.secretKey,
-              refreshToken: baidupanForm.value.refreshToken,
+              // 使用新的 refresh_token（百度 API 每次刷新都会返回新的）
+              refreshToken: data.refresh_token || baidupanForm.value.refreshToken,
               accessToken: data.access_token,
               expiration: Date.now() + (data.expires_in * 1000),
               rootPath: '',

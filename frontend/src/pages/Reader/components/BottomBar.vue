@@ -61,21 +61,6 @@
         </div>
       </div>
       
-      <!-- 页边距 -->
-      <div class="control-group">
-        <label>页边距</label>
-        <div class="segment-options">
-          <button
-            v-for="m in margins"
-            :key="m"
-            :class="['segment-btn', { active: margin === m }]"
-            @click="handleMarginChange(m)"
-          >
-            {{ m }}
-          </button>
-        </div>
-      </div>
-      
       <!-- 模式 -->
       <div class="control-group">
         <label>模式</label>
@@ -109,7 +94,6 @@ const props = defineProps<{
   fontSize: number
   lineHeight: number
   pageMode: string
-  margin: string
   alignment: string
 }>()
 
@@ -119,7 +103,6 @@ const emit = defineEmits<{
   'update:fontSize': [value: number]
   'update:lineHeight': [value: number]
   'update:pageMode': [value: 'page' | 'scroll']
-  'update:margin': [value: string]
   'update:alignment': [value: string]
 }>()
 
@@ -131,7 +114,6 @@ const themes = [
 ]
 
 const lineHeights = [1.2, 1.5, 1.8, 2.0]
-const margins = ['小', '中', '大']
 
 const tempProgress = ref(props.progress)
 
@@ -141,11 +123,6 @@ const handleProgressInput = (e: Event) => {
 
 const handleProgressChange = () => {
   emit('update:progress', tempProgress.value)
-}
-
-const handleMarginChange = (m: string) => {
-  console.log('页边距变化:', m)
-  emit('update:margin', m)
 }
 </script>
 
@@ -265,7 +242,7 @@ const handleMarginChange = (m: string) => {
 
 .controls-section {
   display: grid;
-  grid-template-columns: auto repeat(4, minmax(0, 1fr));
+  grid-template-columns: auto repeat(3, minmax(0, 1fr));
   gap: 16px;
   padding: 0 8px;
   align-items: start;

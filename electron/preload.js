@@ -9,5 +9,8 @@ contextBridge.exposeInMainWorld('electron', {
   openFile: (filters) => ipcRenderer.invoke('dialog:openFile', filters),
   
   // 读取文件
-  readFile: (filePath) => ipcRenderer.invoke('fs:readFile', filePath)
+  readFile: (filePath) => ipcRenderer.invoke('fs:readFile', filePath),
+  
+  // 在外部浏览器中打开 URL
+  openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url)
 })

@@ -14,7 +14,7 @@
               <div class="setting-info">
                 <span class="setting-label">授权状态</span>
                 <span class="setting-desc" v-if="baidupanUser">已连接：{{ baidupanUser.baidu_name }}</span>
-                <span class="setting-desc" v-else>配置百度网盘信息以获取access_token</span>
+                <span class="setting-desc" v-else>点击"获取授权"按钮打开授权页面获取密钥信息</span>
               </div>
               <div class="setting-control">
                 <div class="baidupan-status">
@@ -26,6 +26,13 @@
 
             <div class="setting-row" v-if="!baidupanUser">
               <div class="setting-info" style="width: 100%;">
+                <button 
+                  class="btn btn-secondary" 
+                  style="width: 100%; margin-bottom: 12px;"
+                  @click="getAuthorization"
+                >
+                  获取授权
+                </button>
                 <input 
                   type="text" 
                   class="form-control" 
@@ -54,14 +61,7 @@
                   @click="refreshAccessToken" 
                   :disabled="!baiduClientId || !baiduClientSecret || !refreshToken || isLoading"
                 >
-                  {{ isLoading ? '获取中...' : '获取access_token' }}
-                </button>
-                <button 
-                  class="btn btn-secondary" 
-                  style="width: 100%; margin-top: 12px;"
-                  @click="getAuthorization"
-                >
-                  获取授权
+                  {{ isLoading ? '获取中...' : '获取 access_token' }}
                 </button>
               </div>
             </div>
@@ -158,14 +158,63 @@ const handlePaste = (event: ClipboardEvent) => {
 }
 
 const getAuthorization = () => {
-  const clientId = baiduClientId.value
-  const redirectUri = 'http://localhost:8080/callback'
-  const scope = 'basic,netdisk'
-  const state = Date.now().toString()
+  console.log('=== 开始获取授权 ===')
+  console.log('当前环境:', window.location.href)
   
-  const authUrl = `https://openapi.baidu.com/oauth/2.0/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${state}`
+  // 打开授权页面（显示密钥信息）
+  const infoUrl = 'https://openapi.baidu.com/oauth/2.0/authorize?response_type=code&client_id=hq9yQ9w9kR4YHj1kyYafLygVocobh7Sf&redirect_uri=https://alistgo.com/tool/baidu/callback&scope=basic,netdisk&qrcode=1'
+  console.log('尝试打开信息页面:', infoUrl)
   
-  window.open(authUrl, '_blank', 'width=800,height=600')
+  try {
+    // 检查是否在 Electron 环境
+    if (window.electron) {
+      console.log('检测到 Electron 环境，使用 shell.openExternal')
+      window.electron.openExternal(infoUrl)
+      console.log('✓ 已调用 Electron openExternal')
+    } else {
+      console.log('非 Electron 环境，使用 window.open')
+      const infoWindow = window.open(infoUrl, '_blank', 'width=800,height=600,noopener,noreferrer')
+      if (infoWindow) {
+        console.log('✓ 信息窗口打开成功')
+      } else {
+        console.error('✗ 信息窗口被阻止')
+        dialogStore.showErrorDialog('窗口被阻止', '请在浏览器设置中允许弹出窗口，或手动访问授权页面')
+      }
+    }
+    
+    // 同时打开百度授权窗口
+    const clientId = baiduClientId.value
+    const redirectUri = 'https://alistgo.com/tool/baidu/callback'
+    const scope = 'basic,netdisk'
+    const authUrl = `https://openapi.baidu.com/oauth/2.0/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&display=popup`
+    
+    console.log('准备打开授权窗口:', authUrl)
+    
+    setTimeout(() => {
+      console.log('打开授权窗口...')
+      try {
+        if (window.electron) {
+          console.log('使用 Electron openExternal 打开授权窗口')
+          window.electron.openExternal(authUrl)
+          console.log('✓ 已调用 Electron openExternal')
+        } else {
+          const authWindow = window.open(authUrl, '_blank', 'width=600,height=500,noopener,noreferrer')
+          if (authWindow) {
+            console.log('✓ 授权窗口打开成功')
+          } else {
+            console.error('✗ 授权窗口被阻止')
+          }
+        }
+      } catch (error) {
+        console.error('打开授权窗口失败:', error)
+      }
+    }, 500)
+  } catch (error) {
+    console.error('获取授权过程出错:', error)
+    dialogStore.showErrorDialog('打开失败', '无法打开授权页面，请手动访问')
+  }
+  
+  console.log('=== 获取授权完成 ===')
 }
 
 const refreshAccessToken = async () => {
@@ -181,6 +230,10 @@ const refreshAccessToken = async () => {
     
     if (!data.error && data.access_token) {
       inputAccessToken.value = data.access_token
+      // 更新 refresh_token（百度 API 每次刷新都会返回新的 refresh_token）
+      if (data.refresh_token) {
+        refreshToken.value = data.refresh_token
+      }
       verifyAndConnect()
     } else {
       dialogStore.showErrorDialog('获取失败', data.error || '未知错误')
@@ -243,9 +296,18 @@ const disconnect = async () => {
       }
     }
   })
+  
+  // 清空输入框
   refreshToken.value = ''
-  baiduClientId.value = ''
-  baiduClientSecret.value = ''
+  inputAccessToken.value = ''
+  
+  // 重置为默认值
+  baiduClientId.value = 'hq9yQ9w9kR4YHj1kyYafLygVocobh7Sf'
+  baiduClientSecret.value = 'YH2VpZcFJHYNnV6vLfHQXDBhcE7ZChyE'
+  
+  // 立即刷新用户信息状态
+  await ebookStore.fetchBaidupanUserInfo(true)
+  
   dialogStore.showSuccessDialog('已取消授权')
 }
 

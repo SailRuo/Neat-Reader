@@ -23,7 +23,6 @@
         :font-size="fontSize"
         :line-height="lineHeight"
         :page-mode="pageMode"
-        :margin="margin"
         :alignment="alignment"
         :initial-progress="progress"
         @ready="handleReaderReady"
@@ -61,14 +60,12 @@
       :font-size="fontSize"
       :line-height="lineHeight"
       :page-mode="pageMode"
-      :margin="margin"
       :alignment="alignment"
       @update:progress="handleUpdateProgress"
       @update:theme="theme = $event as 'light' | 'sepia' | 'dark' | 'green'"
       @update:font-size="fontSize = $event"
       @update:line-height="lineHeight = $event"
       @update:page-mode="handlePageModeChange"
-      @update:margin="margin = $event"
       @update:alignment="alignment = $event"
     />
     
@@ -193,7 +190,6 @@ const theme = ref<'light' | 'sepia' | 'dark' | 'green'>('light')
 const fontSize = ref(18)
 const lineHeight = ref(1.5)
 const pageMode = ref<'page' | 'scroll'>('page')
-const margin = ref('中')
 const alignment = ref('两端对齐')
 const brightness = ref(100)
 
@@ -557,8 +553,7 @@ const saveUserConfig = async () => {
 }
 
 // 监听配置变化
-watch([theme, fontSize, lineHeight, margin, alignment, brightness], () => {
-  console.log('配置变化 - 页边距:', margin.value)
+watch([theme, fontSize, lineHeight, alignment, brightness], () => {
   saveUserConfig()
 })
 
