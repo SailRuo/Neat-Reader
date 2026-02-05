@@ -60,14 +60,18 @@ const addHighlight = (cfi: string, color: string, note: any) => {
     console.log('🎨 添加高亮:', { cfi, color, noteId: note.id })
     
     // 使用 epub.js 的 annotations 功能
-    rendition.annotations.add('highlight', cfi, {
-      fill: color,
-      'fill-opacity': '0.3',
-      'mix-blend-mode': 'multiply'
-    }, null, 'hl', {
-      'data-note-id': note.id,
-      'class': 'epub-highlight'
-    })
+    rendition.annotations.add(
+      'highlight',
+      cfi,
+      { noteId: note.id },
+      null,
+      'epub-highlight',
+      {
+        fill: color,
+        fillOpacity: '0.3',
+        mixBlendMode: 'multiply'
+      }
+    )
     
     console.log('✅ 高亮添加成功')
   } catch (error) {
@@ -147,13 +151,16 @@ const alignmentMap: Record<string, string> = {
      }
    }
  
+   // 翻页模式：使用 scrolled-continuous 流来实现逐页翻页
+   // 这样 next/prev 会按视口高度滚动，而不是跳章节
    return {
-     width,
-     height,
-     flow: 'paginated',
-     manager: 'default',
+     width: width,
+     height: height,
+     flow: 'scrolled-continuous',
+     manager: 'continuous',
      spread: 'none',
-     minSpreadWidth: 999999
+     minSpreadWidth: width + 1,
+     overflow: 'hidden'
    }
  }
 
@@ -221,9 +228,16 @@ const initialize = async () => {
     rendition = bookInstance.renderTo(containerRef.value, renderConfig)
     console.log('✅ 渲染器创建成功')
 
+    // 强制设置为单页显示，禁用双页模式
     try {
       rendition.spread('none')
+      // 设置 minSpreadWidth 确保永远不会显示双页
+      if (rendition.settings) {
+        rendition.settings.minSpreadWidth = renderConfig.width + 1
+      }
+      console.log('✅ 设置为单页显示模式')
     } catch (e) {
+      console.warn('⚠️ 设置单页显示失败:', e)
     }
     
     // 应用完整的样式
@@ -289,7 +303,9 @@ const applyStyles = () => {
         'padding': '0 !important',
         'margin': '0 !important',
         'background': `${colors.bg} !important`,
-        'width': '100% !important'
+        'width': '100% !important',
+        'height': '100% !important',
+        'overflow': 'hidden !important'
       },
       'body': {
         'background': `${colors.bg} !important`,
@@ -298,10 +314,11 @@ const applyStyles = () => {
         'line-height': `${props.lineHeight} !important`,
         'text-align': `${alignValue} !important`,
         'margin': '0 !important',
-        'padding': '20px 40px !important',
-        'overflow-x': 'hidden !important',
+        'padding': '40px 60px !important',
+        'overflow': 'hidden !important',
         'box-sizing': 'border-box !important',
-        'column-gap': '0 !important',
+        'width': '100% !important',
+        'height': '100% !important',
         'font-family': 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif !important'
       },
       'p': {
@@ -386,7 +403,7 @@ const setupContentHooks = (contents: any) => {
   
   console.log('🔗 设置内容钩子...')
   
-  // 点击事件处理
+  // 点击事件处理 - 只用于控制栏显示/隐藏和高亮点击
   doc.addEventListener('click', (e: MouseEvent) => {
     const target = e.target as HTMLElement
     
@@ -405,22 +422,32 @@ const setupContentHooks = (contents: any) => {
     const anchor = target.closest('a')
     if (anchor) return
 
+    // 点击内容区域，触发控制栏显示/隐藏
     emit('click')
   })
   
-  // 滚轮事件处理（翻页）
+  // 滚轮事件处理（翻页）- 只在翻页模式下启用
+  let wheelTimeout: ReturnType<typeof setTimeout> | null = null
+  
   doc.addEventListener('wheel', (e: WheelEvent) => {
     if (props.pageMode !== 'page') return
     if (!rendition || !isReady) return
 
     e.preventDefault()
     
+    // 防抖处理，避免过快翻页
+    if (wheelTimeout) return
+    
+    wheelTimeout = setTimeout(() => {
+      wheelTimeout = null
+    }, 150)
+    
     if (e.deltaY > 0) {
       // 向下滚动 - 下一页
-      rendition.next()
+      nextPage()
     } else if (e.deltaY < 0) {
       // 向上滚动 - 上一页
-      rendition.prev()
+      prevPage()
     }
   }, { passive: false })
   
@@ -431,13 +458,13 @@ const setupContentHooks = (contents: any) => {
         case 'ArrowLeft':
         case 'PageUp':
           e.preventDefault()
-          rendition.prev()
+          prevPage()
           break
         case 'ArrowRight':
         case 'PageDown':
         case ' ':
           e.preventDefault()
-          rendition.next()
+          nextPage()
           break
       }
     }
@@ -484,6 +511,30 @@ const setupContentHooks = (contents: any) => {
   console.log('✅ 内容钩子设置完成')
 }
 
+// 下一页 - 按视口高度滚动
+const nextPage = () => {
+  if (!rendition || !isReady) return
+  
+  try {
+    // 在 scrolled-continuous 模式下，next() 会滚动一个视口高度
+    rendition.next()
+  } catch (error) {
+    console.warn('翻页失败:', error)
+  }
+}
+
+// 上一页 - 按视口高度滚动
+const prevPage = () => {
+  if (!rendition || !isReady) return
+  
+  try {
+    // 在 scrolled-continuous 模式下，prev() 会滚动一个视口高度
+    rendition.prev()
+  } catch (error) {
+    console.warn('翻页失败:', error)
+  }
+}
+
 // 绑定事件
 const bindEvents = () => {
   if (!rendition) return
@@ -494,13 +545,21 @@ const bindEvents = () => {
   rendition.on('rendered', (section: any) => {
     console.log('📄 章节渲染完成:', section.href)
 
+    // 强制单页显示
     if (props.pageMode === 'page') {
       try {
         rendition.spread('none')
+        // 再次确保 minSpreadWidth 设置正确
+        if (rendition.settings && containerRef.value) {
+          rendition.settings.minSpreadWidth = containerRef.value.clientWidth + 1
+        }
+        console.log('✅ 强制单页显示')
       } catch (e) {
+        console.warn('⚠️ 强制单页显示失败:', e)
       }
     }
 
+    // 重新应用主题
     try {
       if (currentThemeKey) {
         rendition.themes.select(currentThemeKey)
@@ -522,7 +581,15 @@ const bindEvents = () => {
   rendition.on('relocated', (location: any) => {
     if (!location || !location.start) return
     
-    console.log('📍 位置变化:', location)
+    console.log('📍 位置变化:', {
+      href: location.start.href,
+      cfi: location.start.cfi,
+      page: location.start.displayed?.page,
+      total: location.start.displayed?.total,
+      atStart: location.atStart,
+      atEnd: location.atEnd,
+      fullLocation: location
+    })
     
     // 更新进度
     let progress = 0
@@ -791,7 +858,20 @@ const resize = () => {
   if (!rendition || !containerRef.value) return
   const width = containerRef.value.clientWidth
   const height = containerRef.value.clientHeight
+  
+  // 更新 minSpreadWidth 确保单页显示
+  if (rendition.settings) {
+    rendition.settings.minSpreadWidth = width + 1
+  }
+  
   rendition.resize(width, height)
+  
+  // 再次强制单页模式
+  try {
+    rendition.spread('none')
+  } catch (e) {
+    console.warn('resize 时设置单页失败:', e)
+  }
 }
 
 defineExpose({
@@ -816,13 +896,25 @@ onMounted(() => {
     if (rendition && containerRef.value) {
       const width = containerRef.value.clientWidth
       const height = containerRef.value.clientHeight
+      
+      // 更新 minSpreadWidth
+      if (rendition.settings) {
+        rendition.settings.minSpreadWidth = width + 1
+      }
+      
       rendition.resize(width, height)
+      
+      // 强制单页
+      try {
+        rendition.spread('none')
+      } catch (e) {
+      }
     }
   }
   
   window.addEventListener('resize', handleResize)
   
-  // 监听键盘事件（全局）
+  // 键盘事件（全局）
   const handleKeydown = (e: KeyboardEvent) => {
     if (!rendition || !isReady) return
     
@@ -831,13 +923,13 @@ onMounted(() => {
         case 'ArrowLeft':
         case 'PageUp':
           e.preventDefault()
-          rendition.prev()
+          prevPage()
           break
         case 'ArrowRight':
         case 'PageDown':
         case ' ':
           e.preventDefault()
-          rendition.next()
+          nextPage()
           break
         case 'Home':
           e.preventDefault()
@@ -964,9 +1056,20 @@ onBeforeUnmount(() => {
 
 .epub-reader.mode-page :deep(.epub-container) {
   overflow: hidden !important;
+  width: 100% !important;
+  height: 100% !important;
 }
 
 .epub-reader.mode-page :deep(iframe) {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  border: none !important;
+}
+
+/* 确保内容居中 */
+.epub-reader.mode-page :deep(.epub-container > div) {
   width: 100% !important;
   height: 100% !important;
 }

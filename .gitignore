@@ -50,3 +50,6 @@ wails.json.bak
 *.test
 *.out
 vendor/
+/.kiro/
+/.trae/
+/.trae/
