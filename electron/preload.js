@@ -12,5 +12,8 @@ contextBridge.exposeInMainWorld('electron', {
   readFile: (filePath) => ipcRenderer.invoke('fs:readFile', filePath),
   
   // 在外部浏览器中打开 URL
-  openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url)
+  openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
+  
+  // 打开授权窗口并监听重定向
+  openAuthWindow: (authUrl) => ipcRenderer.invoke('auth:openWindow', authUrl)
 })

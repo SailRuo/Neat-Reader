@@ -23,29 +23,35 @@ const message = ref('正在处理授权，请稍候...')
 
 const handleCallback = async () => {
   try {
+    console.log('=== Callback 页面：开始处理授权回调 ===')
+    console.log('当前URL:', window.location.href)
+    
     // 从URL中获取授权码
     const urlParams = new URLSearchParams(window.location.search)
     const code = urlParams.get('code')
+    
+    console.log('提取到的code:', code)
     
     if (!code) {
       throw new Error('未获取到授权码')
     }
     
-    // 发送消息给主窗口
+    // 尝试发送消息给主窗口
+    console.log('尝试发送code给主窗口...')
     if (window.opener) {
-      window.opener.postMessage({ code }, window.location.origin)
+      console.log('✓ 检测到 window.opener，发送 postMessage')
+      window.opener.postMessage({ type: 'baidu-auth-code', code }, window.location.origin)
+    } else if (window.parent !== window) {
+      console.log('✓ 检测到父窗口，发送 postMessage')
+      window.parent.postMessage({ type: 'baidu-auth-code', code }, window.location.origin)
     } else {
-      // 如果没有opener，尝试发送给父窗口
-      if (window.parent !== window) {
-        window.parent.postMessage({ code }, window.location.origin)
-      } else {
-        // 存储授权码到localStorage，以便主应用获取
-        localStorage.setItem('baidupan_auth_code', code)
-      }
+      console.log('✗ 未检测到父窗口，存储到 localStorage')
+      // 存储授权码到localStorage，以便主应用获取
+      localStorage.setItem('baidupan_auth_code', code)
     }
     
     status.value = 'success'
-    message.value = '授权成功！窗口将在3秒后自动关闭...'
+    message.value = `授权成功！授权码: ${code}\n\n窗口将在3秒后自动关闭...`
     
     // 3秒后自动关闭窗口
     setTimeout(() => {

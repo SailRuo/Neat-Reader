@@ -32,47 +32,26 @@
               <input 
                 type="text" 
                 class="form-control" 
-                v-model="baiduClientId" 
-                placeholder="百度网盘 App Key" 
-                style="width: 100%; margin-bottom: 12px;"
-              >
-              <input 
-                type="text" 
-                class="form-control" 
-                v-model="baiduClientSecret" 
-                placeholder="百度网盘 App Secret" 
-                style="width: 100%; margin-bottom: 12px;"
-              >
-              <input 
-                type="text" 
-                class="form-control" 
                 v-model="refreshToken" 
-                placeholder="Refresh Token" 
+                placeholder="Refresh Token（授权后自动填入或手动粘贴）" 
                 style="width: 100%; margin-bottom: 12px;"
               >
               <button 
                 class="btn btn-primary" 
                 style="width: 100%;"
                 @click="refreshAccessToken"
-                :disabled="!baiduClientId || !baiduClientSecret || !refreshToken || isLoading"
+                :disabled="!refreshToken || isLoading"
               >
-                {{ isLoading ? '获取中...' : '获取 access_token' }}
+                {{ isLoading ? '获取中...' : '连接百度网盘' }}
               </button>
             </div>
           </div>
           
           <div class="setting-row" v-else>
             <div class="setting-info" style="width: 100%;">
-              <div class="user-info">
-                <img :src="baidupanUser.avatar_url" class="user-avatar" alt="头像">
-                <div class="user-detail">
-                  <span class="user-name">{{ baidupanUser.baidu_name }}</span>
-                  <span class="user-vip">{{ baidupanUser.vip_type === 2 ? '超级会员' : baidupanUser.vip_type === 1 ? '普通会员' : '普通用户' }}</span>
-                </div>
-              </div>
               <button 
                 class="btn btn-danger" 
-                style="width: 100%; margin-top: 12px;"
+                style="width: 100%;"
                 @click="disconnect"
               >
                 取消授权
@@ -145,81 +124,161 @@ defineEmits<{
 }>()
 
 const storageConfig = computed(() => ebookStore.userConfig.storage)
-const baiduClientId = ref('hq9yQ9w9kR4YHj1kyYafLygVocobh7Sf')
-const baiduClientSecret = ref('YH2VpZcFJHYNnV6vLfHQXDBhcE7ZChyE')
 const refreshToken = ref('')
 const inputAccessToken = ref('')
 const isLoading = ref(false)
 
 const getAuthorization = () => {
   console.log('=== 开始获取授权 ===')
-  console.log('当前环境:', window.location.href)
+  console.log('当前环境检测:')
+  console.log('- window.electron 存在:', !!window.electron)
+  console.log('- window.location.href:', window.location.href)
   
-  // 打开授权页面（显示密钥信息）
-  const infoUrl = 'https://openapi.baidu.com/oauth/2.0/authorize?response_type=code&client_id=hq9yQ9w9kR4YHj1kyYafLygVocobh7Sf&redirect_uri=https://alistgo.com/tool/baidu/callback&scope=basic,netdisk&qrcode=1'
-  console.log('尝试打开信息页面:', infoUrl)
+  // 使用固定的百度授权URL（alist提供的）
+  const authUrl = 'https://openapi.baidu.com/oauth/2.0/authorize?response_type=code&client_id=hq9yQ9w9kR4YHj1kyYafLygVocobh7Sf&redirect_uri=https://alistgo.com/tool/baidu/callback&scope=basic,netdisk&qrcode=1'
+  
+  console.log('授权URL:', authUrl)
   
   try {
-    // 检查是否在 Electron 环境
     if (window.electron) {
-      console.log('检测到 Electron 环境，使用 shell.openExternal')
-      window.electron.openExternal(infoUrl)
-      console.log('✓ 已调用 Electron openExternal')
+      // Electron环境：使用内置窗口处理授权
+      console.log('✓ 检测到Electron环境，使用内置窗口处理授权')
+      console.log('调用 window.electron.openAuthWindow...')
+      
+      window.electron.openAuthWindow(authUrl).then((result) => {
+        console.log('openAuthWindow 返回结果:', result)
+        if (result.success && result.code) {
+          console.log('✓ 获取到授权码:', result.code)
+          // 使用alist API获取token
+          handleAuthCodeViaAlist(result.code)
+        } else {
+          console.error('✗ 授权失败:', result.error)
+          dialogStore.showErrorDialog('授权失败', result.error || '用户取消授权')
+        }
+      }).catch((error) => {
+        console.error('✗ 授权窗口Promise异常:', error)
+        dialogStore.showErrorDialog('授权失败', '无法打开授权窗口: ' + error.message)
+      })
     } else {
-      console.log('非 Electron 环境，使用 window.open')
-      const infoWindow = window.open(infoUrl, '_blank', 'width=800,height=600,noopener,noreferrer')
-      if (infoWindow) {
-        console.log('✓ 信息窗口打开成功')
+      // 浏览器环境：使用外部浏览器并监听postMessage
+      console.log('✓ 浏览器环境，使用外部浏览器打开授权页面')
+      
+      // 添加 postMessage 监听器
+      const messageHandler = (event: MessageEvent) => {
+        console.log('收到 postMessage:', event.data)
+        
+        // 验证消息来源
+        if (event.origin !== window.location.origin) {
+          console.warn('忽略来自不同源的消息:', event.origin)
+          return
+        }
+        
+        // 检查消息类型
+        if (event.data && event.data.type === 'baidu-auth-code' && event.data.code) {
+          console.log('✓ 收到授权码:', event.data.code)
+          
+          // 移除监听器
+          window.removeEventListener('message', messageHandler)
+          
+          // 使用alist API获取token
+          handleAuthCodeViaAlist(event.data.code)
+        }
+      }
+      
+      // 添加监听器
+      window.addEventListener('message', messageHandler)
+      console.log('✓ 已添加 postMessage 监听器')
+      
+      // 打开授权窗口
+      const newWindow = window.open(authUrl, '_blank', 'width=800,height=600')
+      if (newWindow) {
+        console.log('✓ 外部浏览器窗口打开成功')
+        dialogStore.showDialog({
+          title: '授权提示',
+          message: '请在打开的页面中完成授权，授权成功后会自动获取授权信息',
+          type: 'info'
+        })
       } else {
-        console.error('✗ 信息窗口被阻止')
-        dialogStore.showErrorDialog('窗口被阻止', '请在浏览器设置中允许弹出窗口，或手动访问授权页面')
+        console.error('✗ 外部浏览器窗口被阻止')
+        window.removeEventListener('message', messageHandler)
+        dialogStore.showErrorDialog('窗口被阻止', '请允许弹出窗口')
       }
     }
-    
-    // 同时打开百度授权窗口
-    const clientId = baiduClientId.value
-    const redirectUri = 'https://alistgo.com/tool/baidu/callback'
-    const scope = 'basic,netdisk'
-    const authUrl = `https://openapi.baidu.com/oauth/2.0/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&display=popup`
-    
-    console.log('准备打开授权窗口:', authUrl)
-    
-    setTimeout(() => {
-      console.log('打开授权窗口...')
-      try {
-        if (window.electron) {
-          console.log('使用 Electron openExternal 打开授权窗口')
-          window.electron.openExternal(authUrl)
-          console.log('✓ 已调用 Electron openExternal')
-        } else {
-          const authWindow = window.open(authUrl, '_blank', 'width=600,height=500,noopener,noreferrer')
-          if (authWindow) {
-            console.log('✓ 授权窗口打开成功')
-          } else {
-            console.error('✗ 授权窗口被阻止')
-          }
-        }
-      } catch (error) {
-        console.error('打开授权窗口失败:', error)
-      }
-    }, 500)
   } catch (error) {
-    console.error('获取授权过程出错:', error)
-    dialogStore.showErrorDialog('打开失败', '无法打开授权页面，请手动访问')
+    console.error('✗ 获取授权过程异常:', error)
+    console.error('异常详情:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    })
+    dialogStore.showErrorDialog('打开失败', '无法打开授权页面: ' + error.message)
   }
   
-  console.log('=== 获取授权完成 ===')
+  console.log('=== 获取授权函数执行完成 ===')
 }
 
-const refreshAccessToken = async () => {
-  if (!baiduClientId.value || !baiduClientSecret.value || !refreshToken.value) return
+// 通过alist API处理授权码
+const handleAuthCodeViaAlist = async (code: string) => {
+  console.log('=== 开始通过alist API处理授权码 ===')
+  console.log('授权码:', code)
   isLoading.value = true
   
   try {
+    console.log('准备调用后端API: /api/baidu/alist-token')
+    
+    // 调用后端代理alist API
+    const response = await fetch(`/api/baidu/alist-token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ code })
+    })
+    
+    console.log('后端API响应状态:', response.status, response.statusText)
+    
+    const data = await response.json()
+    console.log('后端API响应数据:', data)
+    
+    if (!data.error && data.access_token && data.refresh_token) {
+      console.log('✓ 成功获取token')
+      console.log('- access_token:', data.access_token ? '已获取' : '未获取')
+      console.log('- refresh_token:', data.refresh_token ? '已获取' : '未获取')
+      
+      inputAccessToken.value = data.access_token
+      refreshToken.value = data.refresh_token
+      
+      console.log('开始自动验证并连接...')
+      // 自动验证并连接
+      verifyAndConnect()
+    } else {
+      console.error('✗ 获取Token失败:', data.error || '响应数据格式错误')
+      dialogStore.showErrorDialog('获取Token失败', data.error || '未知错误')
+    }
+  } catch (error) {
+    console.error('✗ 调用alist API异常:', error)
+    console.error('异常详情:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    })
+    dialogStore.showErrorDialog('获取Token失败', '网络错误，请重试: ' + error.message)
+  } finally {
+    isLoading.value = false
+    console.log('=== alist API处理完成 ===')
+  }
+}
+
+const refreshAccessToken = async () => {
+  if (!refreshToken.value) return
+  isLoading.value = true
+  
+  try {
+    // 使用固定的alist配置
     const data = await api.refreshToken(
       refreshToken.value,
-      baiduClientId.value,
-      baiduClientSecret.value
+      'hq9yQ9w9kR4YHj1kyYafLygVocobh7Sf', // alist固定的client_id
+      'YH2VpZcFJHYNnV6vLfHQXDBhcE7ZChyE'  // alist固定的client_secret
     )
     
     if (!data.error && data.access_token) {
@@ -294,10 +353,6 @@ const disconnect = async () => {
   // 清空输入框
   refreshToken.value = ''
   inputAccessToken.value = ''
-  
-  // 重置为默认值
-  baiduClientId.value = 'hq9yQ9w9kR4YHj1kyYafLygVocobh7Sf'
-  baiduClientSecret.value = 'YH2VpZcFJHYNnV6vLfHQXDBhcE7ZChyE'
   
   // 立即刷新用户信息状态
   await ebookStore.fetchBaidupanUserInfo(true)

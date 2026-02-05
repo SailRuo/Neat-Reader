@@ -1,5 +1,13 @@
 <template>
-  <div ref="containerRef" class="epub-reader" :class="`mode-${pageMode}`"></div>
+  <div ref="containerRef" class="epub-reader" :class="`mode-${pageMode}`" @click="emit('click')">
+    <!-- 如果初始化失败，显示错误信息 -->
+    <div v-if="initError" class="error-display">
+      <div class="error-icon">📚</div>
+      <h3>{{ initError.title }}</h3>
+      <p>{{ initError.message }}</p>
+      <button @click="retryInitialize" class="retry-btn">重试</button>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -31,6 +39,80 @@ let bookInstance: any = null
 let rendition: any = null
 let isReady = false
 let resourceErrorHandler: ((event: PromiseRejectionEvent) => void) | null = null
+ let currentThemeKey = 'user'
+
+// 错误状态
+const initError = ref<{title: string, message: string} | null>(null)
+
+// 笔记相关状态 - 从父组件接收
+const notes = ref<any[]>([])
+
+// 接收笔记数据的方法
+const setNotes = (notesList: any[]) => {
+  notes.value = notesList
+}
+
+// 高亮相关功能
+const addHighlight = (cfi: string, color: string, note: any) => {
+  if (!rendition) return
+  
+  try {
+    console.log('🎨 添加高亮:', { cfi, color, noteId: note.id })
+    
+    // 使用 epub.js 的 annotations 功能
+    rendition.annotations.add('highlight', cfi, {
+      fill: color,
+      'fill-opacity': '0.3',
+      'mix-blend-mode': 'multiply'
+    }, null, 'hl', {
+      'data-note-id': note.id,
+      'class': 'epub-highlight'
+    })
+    
+    console.log('✅ 高亮添加成功')
+  } catch (error) {
+    console.warn('添加高亮失败:', error)
+  }
+}
+
+// 恢复高亮
+const restoreHighlights = (contents: any) => {
+  if (!notes.value || notes.value.length === 0) return
+  
+  console.log('🎨 恢复高亮，笔记数量:', notes.value.length)
+  
+  notes.value.forEach(note => {
+    if (note.cfi) {
+      try {
+        // 检查当前内容是否包含这个 CFI
+        const doc = contents.document
+        if (doc) {
+          addHighlight(note.cfi, note.color, note)
+        }
+      } catch (error) {
+        console.warn('恢复高亮失败:', error)
+      }
+    }
+  })
+}
+
+// 移除高亮
+const removeHighlight = (cfi: string) => {
+  if (!rendition) return
+  
+  try {
+    rendition.annotations.remove(cfi, 'highlight')
+    console.log('🗑️ 高亮已移除:', cfi)
+  } catch (error) {
+    console.warn('移除高亮失败:', error)
+  }
+}
+
+// 重试初始化
+const retryInitialize = () => {
+  initError.value = null
+  initialize()
+}
 
 // 环境检测：检查是否在 Electron 环境中运行
 const isElectronEnvironment = (): boolean => {
@@ -51,228 +133,138 @@ const alignmentMap: Record<string, string> = {
   '两端对齐': 'justify'
 }
 
+ const getRenderConfig = () => {
+   const width = containerRef.value?.clientWidth || 800
+   const height = containerRef.value?.clientHeight || 600
+ 
+   if (props.pageMode === 'scroll') {
+     return {
+       width,
+       height,
+       flow: 'scrolled-doc',
+       manager: 'continuous',
+       spread: 'none'
+     }
+   }
+ 
+   return {
+     width,
+     height,
+     flow: 'paginated',
+     manager: 'default',
+     spread: 'none',
+     minSpreadWidth: 999999
+   }
+ }
+
+const waitForContainerSize = async () => {
+  for (let i = 0; i < 30; i++) {
+    await nextTick()
+    await new Promise(resolve => setTimeout(resolve, 16))
+    const el = containerRef.value
+    if (!el) continue
+    if (el.clientWidth > 0 && el.clientHeight > 0) return
+  }
+}
+
 // 初始化阅读器
 const initialize = async () => {
+  console.log('🚀 [EpubReader] 开始初始化...')
+  
   if (!containerRef.value) {
-    console.error('容器元素不存在')
+    console.error('❌ 容器元素不存在')
+    initError.value = { title: '初始化失败', message: '容器元素不存在' }
     return
   }
   
-  // 检查容器尺寸
-  if (containerRef.value.clientWidth === 0 || containerRef.value.clientHeight === 0) {
-    console.error('容器尺寸为 0，无法初始化阅读器')
-    return
-  }
+  // 清除之前的错误状态
+  initError.value = null
   
-  // 添加全局错误处理，捕获 epub.js 内部的资源加载错误
-  resourceErrorHandler = (event: PromiseRejectionEvent) => {
-    const error = event.reason
-    if (error && error.message && error.message.includes('File not found in the epub')) {
-      event.preventDefault()
-    }
-  }
-  window.addEventListener('unhandledrejection', resourceErrorHandler)
+  // 确保容器有基本样式
+  containerRef.value.style.width = '100%'
+  containerRef.value.style.height = '100%'
+  containerRef.value.style.position = 'relative'
+  containerRef.value.style.overflow = props.pageMode === 'scroll' ? 'auto' : 'hidden'
+  
+  // 等待容器准备就绪
+  await waitForContainerSize()
+  
+  console.log('📐 容器尺寸:', containerRef.value.clientWidth, 'x', containerRef.value.clientHeight)
   
   try {
     // 加载书籍内容
+    console.log('📖 开始加载书籍内容...')
     const content = await localforage.getItem<ArrayBuffer>(`ebook_content_${props.bookId}`)
     if (!content) {
-      console.error(`无法加载书籍内容，书籍ID:`, props.bookId)
+      console.error(`❌ 无法加载书籍内容，书籍ID:`, props.bookId)
+      initError.value = { title: '内容加载失败', message: '书籍文件可能已损坏或丢失，请重新导入' }
       return
     }
     
+    console.log('✅ 书籍内容加载成功，大小:', content.byteLength, 'bytes')
+    
     // 创建书籍实例
+    console.log('📚 创建 EPUB 实例...')
     bookInstance = ePub(content)
     
-    // 拦截 Archive 的资源请求错误
-    if (bookInstance.archive) {
-      const originalCreateUrl = bookInstance.archive.createUrl.bind(bookInstance.archive)
-      bookInstance.archive.createUrl = async function(url: string, options: any) {
-        try {
-          return await originalCreateUrl(url, options)
-        } catch (error: any) {
-          return 'data:text/css;base64,'
-        }
-      }
-    }
+    // 等待书籍准备就绪
+    console.log('⏳ 等待书籍准备就绪...')
+    await bookInstance.ready
+    console.log('✅ 书籍准备就绪')
     
-    // 创建渲染器
-    const width = containerRef.value.clientWidth
-    const height = containerRef.value.clientHeight
+    // 创建渲染器 - 使用最简单的配置
+    console.log('🎨 创建渲染器...')
+    const renderConfig = getRenderConfig()
     
-    // 内联渲染模式的配置
-    const renderConfig: any = {
-      width: width,
-      height: height,
-      spread: 'none',
-      minSpreadWidth: 0,
-      allowScriptedContent: true,
-      allowPopups: false,
-      snap: false
-    }
-    
-    console.log('📐 [初始化] 渲染器配置:', {
-      容器尺寸: `${width}x${height}`,
-      渲染尺寸: `${renderConfig.width}x${renderConfig.height}`,
-      spread: renderConfig.spread
-    })
-    
-    // 根据页面模式选择合适的配置
-    if (props.pageMode === 'page') {
-      renderConfig.flow = 'paginated'
-      renderConfig.manager = 'default'
-    } else {
-      renderConfig.flow = 'scrolled'
-      renderConfig.manager = 'continuous'
-    }
+    console.log('📐 渲染器配置:', renderConfig)
     
     rendition = bookInstance.renderTo(containerRef.value, renderConfig)
+    console.log('✅ 渲染器创建成功')
+
+    try {
+      rendition.spread('none')
+    } catch (e) {
+    }
     
-    // 应用样式（包含边距）
+    // 应用完整的样式
     applyStyles()
     
-    // 应用样式
-    applyStyles()
-    
-    // 注册内容钩子
-    rendition.hooks.content.register((contents: any) => {
-      const colors = themeColors[props.theme as keyof typeof themeColors]
-      const alignValue = alignmentMap[props.alignment] || 'justify'
-      
-      const doc = contents.document
-      if (doc && doc.body) {
-        // 设置 html 和 body 的基础样式
-        if (doc.documentElement) {
-          doc.documentElement.style.backgroundColor = colors.bg
-          doc.documentElement.style.padding = '0'
-          doc.documentElement.style.margin = '0'
-        }
-        
-        doc.body.style.backgroundColor = colors.bg
-        doc.body.style.color = colors.text
-        doc.body.style.fontSize = `${props.fontSize}px`
-        doc.body.style.lineHeight = `${props.lineHeight}`
-        doc.body.style.textAlign = alignValue
-        doc.body.style.margin = '0'
-        doc.body.style.padding = '0'
-        doc.body.style.boxSizing = 'border-box'
-        
-        // 设置所有元素的颜色
-        const allElements = doc.body.querySelectorAll('*')
-        allElements.forEach((el: any) => {
-          el.style.color = colors.text
-        })
-        
-        console.log('✅ 内容钩子应用样式:', {
-          theme: props.theme,
-          fontSize: props.fontSize,
-          lineHeight: props.lineHeight,
-          pageMode: props.pageMode
-        })
-      }
-      
-      setupContentHooks(contents)
-      
-      if (doc) {
-        doc.addEventListener('error', (e: Event) => {
-          const target = e.target as HTMLElement
-          if (target.tagName === 'LINK' && target.getAttribute('rel') === 'stylesheet') {
-            e.stopPropagation()
-            e.preventDefault()
-          }
-        }, true)
-      }
-    })
-    
+    // 绑定事件
     bindEvents()
     
-    // 先加载目录
+    // 显示第一页
+    console.log('📖 显示内容...')
+    await rendition.display()
+    console.log('✅ 内容显示完成')
+    
+    // 生成位置索引（用于进度计算）
+    console.log('📍 生成位置索引...')
     try {
-      const nav = await bookInstance.loaded.navigation
-      const chapters = nav.toc.map((item: any) => ({
-        title: item.label || item.title || '未知章节',
-        href: item.href
-      }))
-      
-      await bookInstance.ready
-      
-      // 尝试从缓存加载位置索引
-      const cachedLocations = await localforage.getItem<string>(`locations_${props.bookId}`)
-      
-      if (cachedLocations) {
-        // 使用缓存的位置索引
-        console.log('使用缓存的位置索引')
-        bookInstance.locations.load(cachedLocations)
-      } else {
-        // 第一次打开，异步生成位置索引（不阻塞显示）
-        console.log('首次打开，异步生成位置索引...')
-        bookInstance.locations.generate(1000).then((locations: any) => {
-          // 保存位置索引到缓存
-          const locationsString = bookInstance.locations.save()
-          localforage.setItem(`locations_${props.bookId}`, locationsString)
-          console.log('位置索引生成并缓存成功')
-        }).catch((err: Error) => {
-          console.warn('生成位置索引失败:', err)
-        })
-      }
-      
-      isReady = true
-      
-      // 如果有保存的进度，直接跳转到该位置
-      if (props.initialProgress && props.initialProgress > 0) {
-        const cfi = bookInstance.locations.cfiFromPercentage(props.initialProgress / 100)
-        if (cfi) {
-          await rendition.display(cfi)
-        } else {
-          await rendition.display()
-        }
-      } else {
-        await rendition.display()
-      }
-      
-      emit('ready', { chapters })
-    } catch (err) {
-      console.warn('加载目录失败:', err)
-      await rendition.display()
-      isReady = true
-      emit('ready', { chapters: [] })
+      await bookInstance.locations.generate(1024)
+      console.log('✅ 位置索引生成完成，总位置数:', bookInstance.locations.length())
+    } catch (error) {
+      console.warn('⚠️ 位置索引生成失败，将使用章节索引作为备用:', error)
     }
+    
+    isReady = true
+
+    if (props.initialProgress !== undefined && props.initialProgress > 0) {
+      try {
+        goToProgress(props.initialProgress)
+      } catch (e) {
+      }
+    }
+    
+    // 发送章节信息
+    const chapters = bookInstance.navigation?.toc || []
+    emit('ready', { chapters })
+    
+    console.log('🎉 EPUB 阅读器初始化完成')
     
   } catch (error) {
-    console.error('初始化 EPUB 阅读器失败:', error)
-    
-    if (containerRef.value) {
-      containerRef.value.innerHTML = `
-        <div style="
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          height: 100%;
-          padding: 40px;
-          text-align: center;
-          color: #666;
-        ">
-          <div style="font-size: 48px; margin-bottom: 20px;">📚</div>
-          <h3 style="margin: 0 0 10px 0; color: #333;">无法加载 EPUB 内容</h3>
-          <button 
-            onclick="location.reload()" 
-            style="
-              padding: 10px 24px;
-              background: #4a90e2;
-              color: white;
-              border: none;
-              border-radius: 6px;
-              cursor: pointer;
-              font-size: 14px;
-            "
-          >
-            重新加载
-          </button>
-        </div>
-      `
-    }
-    
+    console.error('❌ 初始化 EPUB 阅读器失败:', error)
+    const errorMessage = error instanceof Error ? error.message : '未知错误'
+    initError.value = { title: '初始化失败', message: errorMessage }
     emit('ready', { chapters: [], error: 'Failed to initialize EPUB reader' })
   }
 }
@@ -285,22 +277,19 @@ const applyStyles = () => {
     const colors = themeColors[props.theme as keyof typeof themeColors]
     const alignValue = alignmentMap[props.alignment] || 'justify'
     
-    console.log('🎨 [applyStyles] 应用样式:', {
+    console.log('🎨 应用样式:', {
       theme: props.theme,
       fontSize: props.fontSize,
       lineHeight: props.lineHeight,
       pageMode: props.pageMode
     })
     
-    // 清除所有现有样式
-    rendition.themes.default({})
-    
-    // 使用 override 方法强制覆盖 epub.js 的默认样式
     const styles: any = {
       'html': {
         'padding': '0 !important',
         'margin': '0 !important',
-        'background': `${colors.bg} !important`
+        'background': `${colors.bg} !important`,
+        'width': '100% !important'
       },
       'body': {
         'background': `${colors.bg} !important`,
@@ -309,155 +298,247 @@ const applyStyles = () => {
         'line-height': `${props.lineHeight} !important`,
         'text-align': `${alignValue} !important`,
         'margin': '0 !important',
-        'padding': '0 !important',
+        'padding': '20px 40px !important',
         'overflow-x': 'hidden !important',
-        'box-sizing': 'border-box !important'
+        'box-sizing': 'border-box !important',
+        'column-gap': '0 !important',
+        'font-family': 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif !important'
       },
       'p': {
         'color': `${colors.text} !important`,
         'text-align': `${alignValue} !important`,
+        'line-height': `${props.lineHeight} !important`,
+        'margin': '0.5em 0 !important',
         'overflow-wrap': 'break-word !important',
         'word-wrap': 'break-word !important'
       },
-      'div, span, li, td, th': {
+      'div': {
         'color': `${colors.text} !important`,
+        'line-height': `${props.lineHeight} !important`,
         'overflow-wrap': 'break-word !important',
         'word-wrap': 'break-word !important'
+      },
+      'span, li, td, th': {
+        'color': `${colors.text} !important`,
+        'line-height': `${props.lineHeight} !important`
       },
       'h1, h2, h3, h4, h5, h6': {
-        'color': `${colors.text} !important`
+        'color': `${colors.text} !important`,
+        'line-height': '1.4 !important',
+        'margin': '1em 0 0.5em 0 !important'
       },
       'a': {
         'color': `${colors.text} !important`,
-        'opacity': '0.8'
+        'opacity': '0.8',
+        'text-decoration': 'underline'
       },
       'img': {
         'max-width': '100% !important',
-        'height': 'auto !important'
+        'height': 'auto !important',
+        'display': 'block !important',
+        'margin': '1em auto !important'
       },
-      '*': {
-        'color': `${colors.text} !important`
+      'blockquote': {
+        'color': `${colors.text} !important`,
+        'border-left': `3px solid ${colors.text}33 !important`,
+        'padding-left': '1em !important',
+        'margin': '1em 0 !important',
+        'font-style': 'italic'
+      },
+      'code': {
+        'background': `${colors.text}11 !important`,
+        'color': `${colors.text} !important`,
+        'padding': '0.2em 0.4em !important',
+        'border-radius': '3px !important',
+        'font-family': 'Monaco, Consolas, monospace !important'
+      },
+      'pre': {
+        'background': `${colors.text}11 !important`,
+        'color': `${colors.text} !important`,
+        'padding': '1em !important',
+        'border-radius': '6px !important',
+        'overflow-x': 'auto !important',
+        'font-family': 'Monaco, Consolas, monospace !important'
       }
     }
-    
-    // 使用 override 而不是 register，强制覆盖默认样式
-    Object.keys(styles).forEach(selector => {
-      rendition.themes.override(selector, styles[selector])
-    })
-    
+
+    currentThemeKey = `user_${props.theme}_${props.fontSize}_${props.lineHeight}_${alignValue}`
+    rendition.themes.register(currentThemeKey, styles)
+    rendition.themes.select(currentThemeKey)
+
     console.log('✅ 样式已应用到 rendition.themes')
   } catch (error) {
     console.error('应用自定义主题失败:', error)
   }
 }
 
-// 设置内容钩子
+// 设置内容钩子 - 完整版本
 const setupContentHooks = (contents: any) => {
   const doc = contents.document
   const win = contents.window
-  
-  // 阻止默认滚轮行为（翻页模式）
-  if (props.pageMode === 'page') {
-    doc.addEventListener('wheel', (e: WheelEvent) => {
-      e.preventDefault()
-      if (e.deltaY > 0) {
-        rendition.next()
-      } else {
-        rendition.prev()
-      }
-    }, { passive: false })
+
+  try {
+    const root = doc?.documentElement
+    if (root && root.getAttribute('data-neat-reader-hooks') === '1') return
+    root?.setAttribute('data-neat-reader-hooks', '1')
+  } catch (e) {
   }
   
-  // 点击事件
+  console.log('🔗 设置内容钩子...')
+  
+  // 点击事件处理
   doc.addEventListener('click', (e: MouseEvent) => {
     const target = e.target as HTMLElement
-    if (target.tagName !== 'A') {
-      emit('click')
+    
+    // 检查是否点击了高亮
+    if (target.classList.contains('epub-highlight')) {
+      const noteId = target.getAttribute('data-note-id')
+      if (noteId) {
+        const note = notes.value.find(n => n.id === noteId)
+        if (note) {
+          emit('highlight-clicked', note)
+          return
+        }
+      }
+    }
+    
+    const anchor = target.closest('a')
+    if (anchor) return
+
+    emit('click')
+  })
+  
+  // 滚轮事件处理（翻页）
+  doc.addEventListener('wheel', (e: WheelEvent) => {
+    if (props.pageMode !== 'page') return
+    if (!rendition || !isReady) return
+
+    e.preventDefault()
+    
+    if (e.deltaY > 0) {
+      // 向下滚动 - 下一页
+      rendition.next()
+    } else if (e.deltaY < 0) {
+      // 向上滚动 - 上一页
+      rendition.prev()
+    }
+  }, { passive: false })
+  
+  // 键盘事件处理
+  doc.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (props.pageMode === 'page') {
+      switch (e.key) {
+        case 'ArrowLeft':
+        case 'PageUp':
+          e.preventDefault()
+          rendition.prev()
+          break
+        case 'ArrowRight':
+        case 'PageDown':
+        case ' ':
+          e.preventDefault()
+          rendition.next()
+          break
+      }
     }
   })
   
-  // 鼠标释放时检查是否有选中文本
-  let mouseDownTime = 0
-  doc.addEventListener('mousedown', () => {
-    mouseDownTime = Date.now()
-  })
+  // 文本选择事件
+  let selectionTimeout: ReturnType<typeof setTimeout> | null = null
   
-  doc.addEventListener('mouseup', () => {
-    // 确保鼠标已经释放一段时间，避免拖动选择时触发
-    const mouseUpTime = Date.now()
-    const selectionDuration = mouseUpTime - mouseDownTime
+  const handleSelection = () => {
+    if (selectionTimeout) {
+      clearTimeout(selectionTimeout)
+    }
     
-    setTimeout(() => {
+    selectionTimeout = setTimeout(() => {
       const selection = win.getSelection()
-      const text = selection?.toString().trim()
-      
-      // 只有在选择时间超过100ms且有文本时才触发（避免单击触发）
-      if (text && text.length > 0 && selectionDuration > 100) {
+      if (selection && selection.toString().trim().length > 0) {
         try {
-          const range = selection?.getRangeAt(0)
-          if (range) {
-            // 尝试多种方式获取 CFI
-            let cfi = ''
-            
-            // 方法1：使用 rendition.epubcfi
-            if (rendition.epubcfi && contents.cfiBase) {
-              try {
-                cfi = rendition.epubcfi.generateCfiFromRange(range, contents.cfiBase)
-              } catch (e) {
-                console.warn('方法1获取CFI失败:', e)
-              }
-            }
-            
-            // 方法2：使用当前位置的 CFI
-            if (!cfi && rendition.currentLocation) {
-              try {
-                const location = rendition.currentLocation()
-                cfi = location?.start?.cfi || ''
-              } catch (e) {
-                console.warn('方法2获取CFI失败:', e)
-              }
-            }
-            
-            // 方法3：使用 bookInstance 的 CFI 生成器
-            if (!cfi && bookInstance && bookInstance.getRange) {
-              try {
-                const cfiRange = bookInstance.getRange(range)
-                cfi = cfiRange?.toString() || ''
-              } catch (e) {
-                console.warn('方法3获取CFI失败:', e)
-              }
-            }
-            
-            console.log('选中文本:', text)
-            console.log('生成的CFI:', cfi)
-            
-            // 即使没有 CFI 也触发事件，使用时间戳作为备用 ID
-            if (!cfi) {
-              cfi = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-              console.warn('无法生成CFI，使用临时ID:', cfi)
-            }
-            
+          const range = selection.getRangeAt(0)
+          const cfi = rendition.getRange(range).toString()
+          const text = selection.toString().trim()
+          
+          if (text.length > 0 && cfi) {
+            console.log('📝 文本被选中:', { text, cfi })
             emit('text-selected', { text, cfi })
           }
-        } catch (err) {
-          console.error('文本选择处理失败:', err)
+        } catch (error) {
+          console.warn('获取选中文本的 CFI 失败:', error)
         }
       }
-    }, 150)
+    }, 300)
+  }
+  
+  doc.addEventListener('mouseup', handleSelection)
+  doc.addEventListener('touchend', handleSelection)
+  
+  // 防止默认的上下文菜单
+  doc.addEventListener('contextmenu', (e: MouseEvent) => {
+    const selection = win.getSelection()
+    if (!selection || selection.toString().trim().length === 0) {
+      e.preventDefault()
+    }
   })
+  
+  console.log('✅ 内容钩子设置完成')
 }
 
 // 绑定事件
 const bindEvents = () => {
   if (!rendition) return
   
+  console.log('🔗 绑定阅读器事件...')
+  
+  // 内容渲染完成事件
+  rendition.on('rendered', (section: any) => {
+    console.log('📄 章节渲染完成:', section.href)
+
+    if (props.pageMode === 'page') {
+      try {
+        rendition.spread('none')
+      } catch (e) {
+      }
+    }
+
+    try {
+      if (currentThemeKey) {
+        rendition.themes.select(currentThemeKey)
+      }
+    } catch (e) {
+    }
+    
+    // 为新渲染的内容设置钩子
+    const contents = rendition.getContents()
+    contents.forEach((content: any) => {
+      setupContentHooks(content)
+      
+      // 恢复高亮
+      restoreHighlights(content)
+    })
+  })
+  
+  // 位置变化事件
   rendition.on('relocated', (location: any) => {
     if (!location || !location.start) return
     
+    console.log('📍 位置变化:', location)
+    
     // 更新进度
     let progress = 0
-    if (isReady && bookInstance.locations) {
-      progress = Math.floor(bookInstance.locations.percentageFromCfi(location.start.cfi) * 100)
+    if (isReady && bookInstance.locations && bookInstance.locations.length() > 0) {
+      try {
+        progress = Math.floor(bookInstance.locations.percentageFromCfi(location.start.cfi) * 100)
+      } catch (error) {
+        console.warn('计算进度失败:', error)
+        // 使用章节索引作为备用进度计算
+        const spineIndex = bookInstance.spine.items.findIndex((item: any) => 
+          item.href === location.start.href || location.start.href.includes(item.href)
+        )
+        if (spineIndex !== -1) {
+          progress = Math.floor((spineIndex / bookInstance.spine.length) * 100)
+        }
+      }
     }
     
     emit('progress-change', {
@@ -514,26 +595,76 @@ const bindEvents = () => {
       }
     }
   })
+  
+  // 选择变化事件
+  rendition.on('selected', (cfiRange: string, contents: any) => {
+    console.log('📝 文本选择事件:', cfiRange)
+    
+    const selection = contents.window.getSelection()
+    if (selection && selection.toString().trim().length > 0) {
+      const text = selection.toString().trim()
+      emit('text-selected', { text, cfi: cfiRange })
+    }
+  })
+  
+  // 键盘事件
+  rendition.on('keyup', (e: KeyboardEvent) => {
+    if (props.pageMode === 'page') {
+      switch (e.key) {
+        case 'ArrowLeft':
+        case 'PageUp':
+          e.preventDefault()
+          rendition.prev()
+          break
+        case 'ArrowRight':
+        case 'PageDown':
+        case ' ':
+          e.preventDefault()
+          rendition.next()
+          break
+      }
+    }
+  })
+  
+  console.log('✅ 事件绑定完成')
 }
 
 // 跳转到进度
 const goToProgress = (progress: number) => {
-  if (!rendition || !isReady || !bookInstance.locations) return
+  if (!rendition || !isReady) {
+    console.warn('渲染器未就绪')
+    return
+  }
+  
+  if (!bookInstance.locations || bookInstance.locations.length() === 0) {
+    console.warn('位置索引未生成，无法跳转')
+    return
+  }
   
   const cfi = bookInstance.locations.cfiFromPercentage(progress / 100)
   if (cfi) {
+    console.log('📍 跳转到进度:', progress, '%', 'CFI:', cfi)
     rendition.display(cfi)
+  } else {
+    console.warn('无法生成 CFI，进度:', progress)
   }
 }
 
 // 跳转到位置
 const goToLocation = (location: any) => {
-  if (!rendition) return
+  if (!rendition) {
+    console.warn('渲染器未就绪')
+    return
+  }
+  
+  console.log('📍 跳转到位置:', location)
   
   if (location.cfi) {
     rendition.display(location.cfi)
   } else if (location.href) {
     rendition.display(location.href)
+  } else {
+    console.warn('无效的位置信息:', location)
   }
 }
 
@@ -588,180 +719,58 @@ const cleanup = () => {
 watch([() => props.theme, () => props.fontSize, () => props.lineHeight, () => props.alignment], async () => {
   if (!rendition || !containerRef.value) return
   
-  console.log('📐 [Watch] 样式属性变化')
+  console.log('📐 [Watch] 样式属性变化:', {
+    fontSize: props.fontSize,
+    lineHeight: props.lineHeight,
+    theme: props.theme,
+    alignment: props.alignment
+  })
   
   try {
-    // 应用新样式到 themes
-    applyStyles()
-    
-    // 直接操作当前所有 iframe，避免闪烁
     const colors = themeColors[props.theme as keyof typeof themeColors]
     const alignValue = alignmentMap[props.alignment] || 'justify'
     
-    rendition.views().forEach((view: any) => {
-      if (view?.iframe?.contentDocument) {
-        const doc = view.iframe.contentDocument
-        if (doc.body && doc.documentElement) {
-          // 设置背景色（防止闪烁）
-          doc.documentElement.style.background = colors.bg
-          doc.body.style.background = colors.bg
-          doc.body.style.color = colors.text
-          doc.body.style.fontSize = `${props.fontSize}px`
-          doc.body.style.lineHeight = `${props.lineHeight}`
-          doc.body.style.textAlign = alignValue
-          doc.body.style.margin = '0'
-          doc.body.style.padding = '0'
-          
-          // 更新所有元素的颜色
-          doc.querySelectorAll('*').forEach((el: any) => {
-            el.style.color = colors.text
-          })
-        }
+    // 应用新样式到 themes
+    applyStyles()
+    
+    // 直接更新当前所有已渲染的内容
+    const contents = rendition.getContents()
+    contents.forEach((content: any) => {
+      const doc = content.document
+      if (doc && doc.body) {
+        // 更新 body 样式
+        doc.body.style.backgroundColor = colors.bg
+        doc.body.style.color = colors.text
+        doc.body.style.fontSize = `${props.fontSize}px`
+        doc.body.style.lineHeight = props.lineHeight.toString()
+        doc.body.style.textAlign = alignValue
+        
+        // 更新段落样式
+        doc.querySelectorAll('p').forEach((p: any) => {
+          p.style.color = colors.text
+          p.style.lineHeight = props.lineHeight.toString()
+          p.style.textAlign = alignValue
+        })
+        
+        // 更新其他文本元素
+        doc.querySelectorAll('div, span, li, td, th, h1, h2, h3, h4, h5, h6').forEach((el: any) => {
+          el.style.color = colors.text
+          el.style.lineHeight = props.lineHeight.toString()
+        })
+        
+        // 更新链接样式
+        doc.querySelectorAll('a').forEach((a: any) => {
+          a.style.color = colors.text
+          a.style.opacity = '0.8'
+        })
       }
     })
     
-    console.log('✅ 样式已更新（无闪烁）')
+    console.log('✅ 样式已更新（无需重新渲染）')
   } catch (error) {
     console.error('更新样式失败:', error)
   }
 })
-
-watch(() => props.pageMode, () => {
-  reinitialize()
-})
-
-// 高亮存储
-const highlights = new Map<string, string>()
-const highlightNotes = new Map<string, any>() // 存储 CFI 到笔记的映射
-
-// 添加高亮到 DOM
-const applyHighlightToContent = (content: any, cfi: string, color: string) => {
-  try {
-    const range = content.range(cfi)
-    if (!range) {
-      return false
-    }
-    
-    // 检查是否已经有高亮
-    const existingHighlight = content.document.querySelector(`[data-highlight-cfi="${cfi}"]`)
-    if (existingHighlight) {
-      return true
-    }
-    
-    // 创建高亮元素
-    const mark = content.document.createElement('mark')
-    mark.style.backgroundColor = color
-    mark.style.opacity = '0.4'
-    mark.style.mixBlendMode = 'multiply'
-    mark.style.cursor = 'pointer'
-    mark.style.border = 'none'
-    mark.style.padding = '0'
-    mark.setAttribute('data-highlight-cfi', cfi)
-    mark.setAttribute('data-highlight-color', color)
-    
-    // 添加点击事件
-    mark.addEventListener('click', (e: Event) => {
-      e.stopPropagation()
-      const noteData = highlightNotes.get(cfi)
-      if (noteData) {
-        emit('highlight-clicked', noteData)
-      }
-    })
-    
-    // 使用更安全的方法包裹内容
-    try {
-      const fragment = range.extractContents()
-      mark.appendChild(fragment)
-      range.insertNode(mark)
-      return true
-    } catch (e) {
-      console.error('应用高亮失败:', e)
-      return false
-    }
-  } catch (error) {
-    console.warn('应用高亮到内容失败:', error)
-    return false
-  }
-}
-
-// 添加高亮
-const addHighlight = (cfi: string, color: string, note?: any) => {
-  if (!rendition) {
-    console.warn('渲染器未就绪，无法添加高亮')
-    return
-  }
-  
-  try {
-    highlights.set(cfi, color)
-    if (note) {
-      highlightNotes.set(cfi, note)
-    }
-    
-    const contents = rendition.getContents()
-    let applied = false
-    
-    contents.forEach((content: any) => {
-      if (applyHighlightToContent(content, cfi, color)) {
-        applied = true
-      }
-    })
-    
-    if (!applied) {
-      console.warn('高亮未能应用到当前页面，CFI:', cfi)
-    }
-  } catch (error) {
-    console.error('添加高亮失败:', error)
-  }
-}
-
-// 移除高亮
-const removeHighlight = (cfi: string) => {
-  if (!rendition) return
-  
-  try {
-    highlights.delete(cfi)
-    highlightNotes.delete(cfi)
-    
-    const contents = rendition.getContents()
-    contents.forEach((content: any) => {
-      const highlightElement = content.document.querySelector(`[data-highlight-cfi="${cfi}"]`)
-      if (highlightElement) {
-        const parent = highlightElement.parentNode
-        while (highlightElement.firstChild) {
-          parent.insertBefore(highlightElement.firstChild, highlightElement)
-        }
-        parent.removeChild(highlightElement)
-      }
-    })
-  } catch (error) {
-    console.error('移除高亮失败:', error)
-  }
-}
-
-// 恢复所有高亮
-const restoreHighlights = (notes: any[]) => {
-  if (!rendition || !notes || notes.length === 0) {
-    return
-  }
-  
-  notes.forEach(note => {
-    if (note.cfi && note.color) {
-      highlights.set(note.cfi, note.color)
-      highlightNotes.set(note.cfi, note)
-    }
-  })
-  
-  setTimeout(() => {
-    const contents = rendition.getContents()
-    notes.forEach(note => {
-      if (note.cfi && note.color) {
-        contents.forEach((content: any) => {
-          applyHighlightToContent(content, note.cfi, note.color)
-        })
-      }
-    })
-  }, 500)
-}
 
 // 清除文本选区
 const clearSelection = () => {
@@ -778,16 +787,24 @@ const clearSelection = () => {
 }
 
 // 暴露方法
+const resize = () => {
+  if (!rendition || !containerRef.value) return
+  const width = containerRef.value.clientWidth
+  const height = containerRef.value.clientHeight
+  rendition.resize(width, height)
+}
+
 defineExpose({
   goToProgress,
   goToLocation,
   goToChapter,
   getCurrentLocation,
   reinitialize,
+  resize,
+  clearSelection,
   addHighlight,
   removeHighlight,
-  restoreHighlights,
-  clearSelection
+  setNotes
 })
 
 // 生命周期
@@ -795,19 +812,65 @@ onMounted(() => {
   initialize()
   
   // 监听窗口大小改变
-  window.addEventListener('resize', () => {
+  const handleResize = () => {
     if (rendition && containerRef.value) {
       const width = containerRef.value.clientWidth
       const height = containerRef.value.clientHeight
       rendition.resize(width, height)
     }
+  }
+  
+  window.addEventListener('resize', handleResize)
+  
+  // 监听键盘事件（全局）
+  const handleKeydown = (e: KeyboardEvent) => {
+    if (!rendition || !isReady) return
+    
+    if (props.pageMode === 'page') {
+      switch (e.key) {
+        case 'ArrowLeft':
+        case 'PageUp':
+          e.preventDefault()
+          rendition.prev()
+          break
+        case 'ArrowRight':
+        case 'PageDown':
+        case ' ':
+          e.preventDefault()
+          rendition.next()
+          break
+        case 'Home':
+          e.preventDefault()
+          if (bookInstance.spine) {
+            rendition.display(bookInstance.spine.first().href)
+          }
+          break
+        case 'End':
+          e.preventDefault()
+          if (bookInstance.spine) {
+            rendition.display(bookInstance.spine.last().href)
+          }
+          break
+      }
+    }
+  }
+  
+  document.addEventListener('keydown', handleKeydown)
+  
+  // 清理函数存储
+  const cleanupResize = () => window.removeEventListener('resize', handleResize)
+  const cleanupKeydown = () => document.removeEventListener('keydown', handleKeydown)
+  
+  // 在组件卸载时清理
+  onBeforeUnmount(() => {
+    cleanupResize()
+    cleanupKeydown()
+    cleanup()
   })
 })
 
 onBeforeUnmount(() => {
   cleanup()
-  // 移除窗口大小监听
-  window.removeEventListener('resize', () => {})
 })
 </script>
 
@@ -822,6 +885,51 @@ onBeforeUnmount(() => {
   bottom: 0;
   overflow: hidden;
   box-sizing: border-box;
+}
+
+.error-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 40px;
+  text-align: center;
+  color: #666;
+  background: var(--background-color, #ffffff);
+}
+
+.error-icon {
+  font-size: 48px;
+  margin-bottom: 20px;
+}
+
+.error-display h3 {
+  margin: 0 0 10px 0;
+  color: #333;
+  font-size: 18px;
+}
+
+.error-display p {
+  margin: 0 0 20px 0;
+  color: #666;
+  max-width: 400px;
+  line-height: 1.5;
+}
+
+.retry-btn {
+  padding: 10px 24px;
+  background: #4a90e2;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+.retry-btn:hover {
+  background: #357abd;
 }
 
 /* 内联模式下的内容容器样式 */
@@ -839,11 +947,27 @@ onBeforeUnmount(() => {
 
 .epub-reader.mode-scroll :deep(.epub-container) {
   overflow-x: hidden !important;
-  max-width: 100% !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.epub-reader.mode-scroll :deep(iframe) {
+  width: 100% !important;
+  margin: 0 !important;
 }
 
 /* 翻页模式下隐藏滚动条 */
 .epub-reader.mode-page :deep(.epub-view) {
   overflow: hidden !important;
+}
+
+.epub-reader.mode-page :deep(.epub-container) {
+  overflow: hidden !important;
+}
+
+.epub-reader.mode-page :deep(iframe) {
+  width: 100% !important;
+  height: 100% !important;
 }
 </style>

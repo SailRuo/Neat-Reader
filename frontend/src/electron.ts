@@ -4,6 +4,7 @@ interface ElectronAPI {
   openFile: (filters?: any[]) => Promise<string>
   readFile: (filePath: string) => Promise<number[]>
   openExternal: (url: string) => Promise<{ success: boolean; error?: string }>
+  openAuthWindow: (authUrl: string) => Promise<{ success: boolean; code?: string; error?: string }>
 }
 
 declare global {
@@ -49,5 +50,13 @@ export const electronApi = {
       throw new Error('Electron API 不可用')
     }
     return window.electron!.openExternal(url)
+  },
+  
+  // 打开授权窗口并监听重定向
+  async openAuthWindow(authUrl: string): Promise<{ success: boolean; code?: string; error?: string }> {
+    if (!isElectron()) {
+      throw new Error('Electron API 不可用')
+    }
+    return window.electron!.openAuthWindow(authUrl)
   }
 }

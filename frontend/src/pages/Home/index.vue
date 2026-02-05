@@ -273,7 +273,7 @@
         <Icons.UploadCloud :size="18" class="menu-icon" />
         <span class="menu-text">上传到百度网盘</span>
       </div>
-      <div class="menu-item" @click="showCategoryManageDialog">
+      <div class="menu-item" @click.stop="showCategoryManageDialog">
         <Icons.Folder :size="18" class="menu-icon" />
         <span class="menu-text">分类管理</span>
       </div>
@@ -738,98 +738,6 @@ const handleUploadToBaidupan = async (book: any) => {
 // 处理删除书籍
 const handleRemoveBook = (book: any) => {
   if (!book) return
-  const targetBook = book
-  closeContextMenu()
-  removeBook(targetBook)
-}
-
-// 上传到百度网盘
-const uploadToBaidupan = async (book: any) => {
-  if (!book) return
-  
-  try {
-    // 显示上传进度对话框
-    dialogStore.showDialog({
-      title: '正在上传',
-      message: `正在将《${book.title}》上传到百度网盘...`,
-      type: 'info',
-      buttons: []
-    })
-    
-    const result = await ebookStore.uploadLocalBookToBaidupan(book)
-    
-    dialogStore.closeDialog()
-    
-    if (result) {
-      dialogStore.showSuccessDialog('上传到百度网盘成功')
-    } else {
-      dialogStore.showErrorDialog('上传到百度网盘失败', '请检查网络连接或授权状态')
-    }
-  } catch (error) {
-    dialogStore.closeDialog()
-    console.error('上传到百度网盘失败:', error)
-    const errorMessage = error instanceof Error ? error.message : '上传失败，请重试'
-    dialogStore.showErrorDialog('上传到百度网盘失败', errorMessage)
-  } finally {
-    closeContextMenu()
-  }
-}
-
-// 从百度网盘下载
-const handleDownloadFromBaidupan = async (book: any) => {
-  if (!book || !book.baidupanPath) return
-  
-  try {
-    // 设置下载状态
-    book.downloading = true
-    
-    const result = await ebookStore.downloadFromBaidupan(book.baidupanPath)
-    
-    if (result) {
-      // 刷新书籍列表
-      await ebookStore.loadBooks()
-    } else {
-      dialogStore.showErrorDialog('下载失败', '请检查网络连接或授权状态')
-    }
-  } catch (error) {
-    console.error('从百度网盘下载失败:', error)
-    const errorMessage = error instanceof Error ? error.message : '下载失败，请重试'
-    dialogStore.showErrorDialog('下载失败', errorMessage)
-  } finally {
-    book.downloading = false
-  }
-}
-
-// 处理存储徽章点击
-const handleStorageBadgeClick = async (book: any) => {
-  if (!book) return
-  
-  if (book.storageType === 'local') {
-    await handleUploadToBaidupan(book)
-  } else if (book.storageType === 'baidupan') {
-    await handleDownloadFromBaidupan(book)
-  }
-}
-
-// 获取存储徽章标题
-const getStorageBadgeTitle = (storageType: string) => {
-  switch (storageType) {
-    case 'local':
-      return '未上传到百度网盘，点击上传'
-    case 'synced':
-      return '已上传到百度网盘'
-    case 'baidupan':
-      return '仅在百度网盘，点击下载到本地'
-    default:
-      return ''
-  }
-}
-
-// 删除书籍
-const removeBook = async (book: any) => {
-  if (!book) return;
-  
-  // 立即将需要删除的对象锁定在局部变量中，防止被 closeContextMenu 影响
   const targetBookId = book.id;
   const targetTitle = book.title;
   const targetStorage = book.storageType;
@@ -913,6 +821,7 @@ const closeAddCategoryDialog = () => {
 // 显示分类管理对话框
 const showCategoryManageDialog = () => {
   showCategoryManage.value = true
+  document.removeEventListener('click', closeContextMenuHandler)
   closeContextMenu(false)
 }
 
@@ -973,6 +882,81 @@ const performSearch = async () => {
 const clearSearch = () => {
   searchKeyword.value = ''
   searchResults.value = []
+}
+
+// 获取存储类型标题
+const getStorageBadgeTitle = (storageType: string) => {
+  const titles: Record<string, string> = {
+    'local': '本地存储',
+    'synced': '已同步到云端',
+    'baidupan': '点击下载到本地'
+  }
+  return titles[storageType] || '未知'
+}
+
+// 处理存储徽章点击
+const handleStorageBadgeClick = async (book: any) => {
+  if (book.storageType === 'baidupan') {
+    // 云端书籍，下载到本地
+    try {
+      dialogStore.showDialog({
+        title: '正在下载',
+        message: `正在从百度网盘下载《${book.title}》...`,
+        type: 'info',
+        buttons: []
+      })
+      
+      const result = await ebookStore.downloadFromBaidupan(book.baidupanPath || book.path)
+      
+      dialogStore.closeDialog()
+      
+      if (result) {
+        dialogStore.showSuccessDialog('下载成功')
+      } else {
+        dialogStore.showErrorDialog('下载失败', '请检查网络连接或授权状态')
+      }
+    } catch (error) {
+      dialogStore.closeDialog()
+      console.error('下载失败:', error)
+      const errorMessage = error instanceof Error ? error.message : '下载失败，请重试'
+      dialogStore.showErrorDialog('下载失败', errorMessage)
+    }
+  } else if (book.storageType === 'local') {
+    // 本地书籍，上传到云端
+    await uploadToBaidupan(book)
+  }
+}
+
+// 上传到百度网盘
+const uploadToBaidupan = async (book: any) => {
+  if (!isBaidupanAuthorized.value) {
+    dialogStore.showErrorDialog('未授权', '请先授权百度网盘')
+    return
+  }
+  
+  try {
+    dialogStore.showDialog({
+      title: '正在上传',
+      message: `正在上传《${book.title}》到百度网盘...`,
+      type: 'info',
+      buttons: []
+    })
+    
+    const result = await ebookStore.uploadToBaidupan(book.id)
+    
+    dialogStore.closeDialog()
+    
+    if (result) {
+      dialogStore.showSuccessDialog('上传成功')
+    } else {
+      dialogStore.showErrorDialog('上传失败', '请检查网络连接或授权状态')
+    }
+  } catch (error) {
+    dialogStore.closeDialog()
+    console.error('上传失败:', error)
+    const errorMessage = error instanceof Error ? error.message : '上传失败，请重试'
+    dialogStore.showErrorDialog('上传失败', errorMessage)
+  }
 }
 
 // 获取分类名称

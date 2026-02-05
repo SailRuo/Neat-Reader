@@ -14,11 +14,6 @@ const router = createRouter({
       component: () => import('./pages/Reader/index.vue')
     },
     {
-      path: '/settings',
-      name: 'Settings',
-      component: () => import('./pages/Settings/index.vue')
-    },
-    {
       path: '/file-manager',
       name: 'FileManager',
       component: () => import('./pages/FileManager/index.vue')

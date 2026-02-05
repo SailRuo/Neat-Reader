@@ -15,6 +15,79 @@ router.post('/token', async (req, res) => {
   }
 })
 
+// 直接代理百度API获取token（避免CORS）
+router.post('/token-direct', async (req, res) => {
+  try {
+    const { code, clientId, clientSecret, redirectUri } = req.body
+    
+    // 直接调用百度API
+    const axios = require('axios')
+    const params = new URLSearchParams()
+    params.append('grant_type', 'authorization_code')
+    params.append('code', code)
+    params.append('client_id', clientId)
+    params.append('client_secret', clientSecret)
+    params.append('redirect_uri', redirectUri)
+    
+    const response = await axios.post(
+      'https://openapi.baidu.com/oauth/2.0/token',
+      params,
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
+      }
+    )
+    
+    res.json(response.data)
+  } catch (error) {
+    logger.error('[API] 直接获取令牌失败:', error.message)
+    if (error.response) {
+      res.status(error.response.status).json(error.response.data)
+    } else {
+      res.status(500).json({ error: error.message })
+    }
+  }
+})
+
+// 通过alist API获取token
+router.post('/alist-token', async (req, res) => {
+  try {
+    const { code } = req.body
+    
+    if (!code) {
+      return res.status(400).json({ error: '缺少授权码' })
+    }
+    
+    logger.info(`[AlistToken] 通过alist API获取token, code: ${code}`)
+    
+    // 调用alist API
+    const axios = require('axios')
+    const response = await axios.get(
+      `https://api.alistgo.com/alist/baidu/get_refresh_token?code=${code}`,
+      {
+        timeout: 30000
+      }
+    )
+    
+    logger.info('[AlistToken] alist API响应:', response.data)
+    
+    if (response.data && response.data.access_token && response.data.refresh_token) {
+      res.json(response.data)
+    } else {
+      res.status(400).json({ error: 'alist API返回数据格式错误' })
+    }
+  } catch (error) {
+    logger.error('[AlistToken] 通过alist获取令牌失败:', error.message)
+    if (error.response) {
+      logger.error('[AlistToken] alist API错误响应:', error.response.data)
+      res.status(error.response.status).json(error.response.data)
+    } else {
+      res.status(500).json({ error: error.message })
+    }
+  }
+})
+
 // 刷新令牌
 router.post('/refresh', async (req, res) => {
   try {

@@ -14,7 +14,7 @@
     />
     
     <!-- 阅读内容区 -->
-    <div class="reader-content" ref="contentRef">
+    <div class="reader-content" ref="contentRef" :style="{ top: contentTop + 'px', bottom: contentBottom + 'px' }">
       <EpubReader
         v-if="book?.format === 'epub'"
         ref="epubReaderRef"
@@ -185,6 +185,9 @@ const pdfReaderRef = ref<any>(null)
 const contentRef = ref<HTMLElement | null>(null)
 const noteTextareaRef = ref<HTMLTextAreaElement | null>(null)
 
+const contentTop = ref(0)
+const contentBottom = ref(0)
+
 // 阅读设置
 const theme = ref<'light' | 'sepia' | 'dark' | 'green'>('light')
 const fontSize = ref(18)
@@ -225,6 +228,24 @@ const highlightColors = [
 // 内容点击处理 - 切换控制栏显示/隐藏
 const handleContentClick = () => {
   showControls.value = !showControls.value
+  nextTick(() => {
+    updateContentInsets()
+    const reader = book.value?.format === 'epub' ? epubReaderRef.value : pdfReaderRef.value
+    reader?.resize?.()
+  })
+}
+
+const updateContentInsets = () => {
+  if (!showControls.value) {
+    contentTop.value = 0
+    contentBottom.value = 0
+    return
+  }
+
+  const topEl = document.querySelector('.top-bar') as HTMLElement | null
+  const bottomEl = document.querySelector('.bottom-bar') as HTMLElement | null
+  contentTop.value = topEl ? Math.ceil(topEl.getBoundingClientRect().height) : 0
+  contentBottom.value = bottomEl ? Math.ceil(bottomEl.getBoundingClientRect().height) : 0
 }
 
 // 侧边栏切换
@@ -238,12 +259,22 @@ const handleReaderReady = (data: any) => {
     chapters.value = data.chapters
   }
   
+  // 将笔记传递给 EPUB 阅读器
+  if (book.value?.format === 'epub' && epubReaderRef.value && epubReaderRef.value.setNotes) {
+    epubReaderRef.value.setNotes(notes.value)
+  }
+  
   // 延迟隐藏加载动画，确保内容已渲染
   setTimeout(() => {
     isLoading.value = false
+
+    nextTick(() => {
+      updateContentInsets()
+      const reader = book.value?.format === 'epub' ? epubReaderRef.value : pdfReaderRef.value
+      reader?.resize?.()
+    })
     
-    // 恢复高亮
-    restoreHighlights()
+    // 阅读器就绪后的处理
   }, 500)
 }
 
@@ -370,6 +401,19 @@ const handleSaveNote = async () => {
   }
 }
 
+// 在阅读器中添加高亮
+const addHighlightToReader = (note: any) => {
+  const reader = epubReaderRef.value
+  if (reader && reader.addHighlight && note.cfi) {
+    try {
+      reader.addHighlight(note.cfi, note.color, note)
+      console.log('✅ 高亮已添加到阅读器:', note.id)
+    } catch (error) {
+      console.warn('⚠️ 添加高亮失败:', error)
+    }
+  }
+}
+
 // 清除文本选区
 const clearTextSelection = () => {
   const reader = epubReaderRef.value
@@ -383,25 +427,8 @@ const clearTextSelection = () => {
   }
 }
 
-// 在阅读器中添加高亮
-const addHighlightToReader = (note: any) => {
-  const reader = epubReaderRef.value
-  if (reader && reader.addHighlight) {
-    reader.addHighlight(note.cfi, note.color, note)
-  }
-}
-
 // 删除笔记
 const handleDeleteNote = async (noteId: string) => {
-  const note = notes.value.find(n => n.id === noteId)
-  if (note) {
-    // 从阅读器中移除高亮
-    const reader = epubReaderRef.value
-    if (reader && reader.removeHighlight) {
-      reader.removeHighlight(note.cfi)
-    }
-  }
-  
   notes.value = notes.value.filter(n => n.id !== noteId)
   
   try {
@@ -456,14 +483,11 @@ const loadNotes = async () => {
   const savedNotes = await localforage.getItem<any[]>(`notes_${book.value.id}`)
   if (savedNotes) {
     notes.value = savedNotes
-  }
-}
-
-// 恢复高亮（在阅读器就绪后调用）
-const restoreHighlights = () => {
-  const reader = epubReaderRef.value
-  if (reader && reader.restoreHighlights && notes.value.length > 0) {
-    reader.restoreHighlights(notes.value)
+    
+    // 如果 EPUB 阅读器已经准备好，传递笔记
+    if (book.value.format === 'epub' && epubReaderRef.value && epubReaderRef.value.setNotes) {
+      epubReaderRef.value.setNotes(notes.value)
+    }
   }
 }
 
@@ -553,47 +577,83 @@ const saveUserConfig = async () => {
 }
 
 // 监听配置变化
-watch([theme, fontSize, lineHeight, alignment, brightness], () => {
+watch([theme, fontSize, lineHeight, pageMode, alignment, brightness], () => {
   saveUserConfig()
 })
 
 // 生命周期
 onMounted(async () => {
   const bookId = route.params.id as string
+  console.log('🚀 阅读器页面加载，书籍ID:', bookId)
+  
   book.value = ebookStore.getBookById(bookId)
   
   if (!book.value) {
+    console.error('❌ 未找到书籍信息')
     router.push('/')
     return
   }
   
-  // 快速检查书籍内容是否存在
-  const contentExists = await localforage.getItem(`ebook_content_${bookId}`)
-  if (!contentExists) {
-    console.error('书籍内容不存在')
-    alert('书籍内容加载失败，请重新导入')
+  console.log('📚 书籍信息:', {
+    id: book.value.id,
+    title: book.value.title,
+    format: book.value.format,
+    storageType: book.value.storageType
+  })
+  
+  // 详细检查书籍内容是否存在
+  try {
+    const contentExists = await localforage.getItem(`ebook_content_${bookId}`)
+    if (!contentExists) {
+      console.error('❌ 书籍内容不存在，键名:', `ebook_content_${bookId}`)
+      
+      // 检查是否是云端书籍需要下载
+      if (book.value.storageType === 'baidupan') {
+        console.log('📥 检测到云端书籍，需要先下载')
+        alert('该书籍尚未下载到本地，请先在首页下载后再阅读')
+      } else {
+        console.log('💾 本地书籍内容丢失')
+        alert('书籍内容加载失败，文件可能已损坏，请重新导入')
+      }
+      
+      router.push('/')
+      return
+    }
+    
+    console.log('✅ 书籍内容存在，大小:', contentExists instanceof ArrayBuffer ? contentExists.byteLength : 'unknown')
+  } catch (error) {
+    console.error('❌ 检查书籍内容时出错:', error)
+    alert('检查书籍内容时出错，请重试')
     router.push('/')
     return
   }
   
   // 立即加载用户配置（同步操作）
   loadUserConfig()
+  console.log('⚙️ 用户配置加载完成')
   
   // 立即加载笔记
   loadNotes()
+  console.log('📝 笔记加载完成')
   
   // 同步加载阅读进度（阻塞，确保进度在阅读器初始化前加载）
   const savedProgress = await ebookStore.loadReadingProgress(bookId)
-  console.log('加载的进度数据:', savedProgress)
+  console.log('📖 加载的进度数据:', savedProgress)
   if (savedProgress) {
     progress.value = Math.floor(savedProgress.position * 100)
     currentChapterIndex.value = savedProgress.chapterIndex || 0
     currentChapterTitle.value = savedProgress.chapterTitle || ''
     readingTime.value = savedProgress.readingTime || 0
-    console.log('设置进度为:', progress.value)
+    console.log('📍 设置进度为:', progress.value, '%')
   } else {
-    console.log('没有找到保存的进度')
+    console.log('📍 没有找到保存的进度，从头开始')
   }
+  
+  console.log('🎉 阅读器页面初始化完成')
+
+  nextTick(() => {
+    updateContentInsets()
+  })
 })
 
 onBeforeUnmount(async () => {
@@ -643,6 +703,23 @@ onBeforeUnmount(async () => {
   right: 0;
   bottom: 0;
   overflow: hidden;
+  transition: background-color 0.3s ease;
+}
+
+.theme-light .reader-content {
+  background: #ffffff;
+}
+
+.theme-sepia .reader-content {
+  background: #f4ecd8;
+}
+
+.theme-green .reader-content {
+  background: #e8f5e9;
+}
+
+.theme-dark .reader-content {
+  background: #1a1a1a;
 }
 
 .floating-info {

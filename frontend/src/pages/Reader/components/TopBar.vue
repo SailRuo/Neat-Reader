@@ -1,5 +1,5 @@
 <template>
-  <div class="top-bar" :class="`theme-${theme}`">
+  <div class="top-bar" :class="`theme-${theme}`" @click.stop>
     <div class="left-section">
       <button class="icon-btn" @click="$emit('back')" title="返回">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">

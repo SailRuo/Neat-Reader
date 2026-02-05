@@ -1,5 +1,5 @@
 <template>
-  <div class="bottom-bar" :class="`theme-${theme}`">
+  <div class="bottom-bar" :class="`theme-${theme}`" @click.stop>
     <div class="progress-section">
       <div class="progress-header">
         <span>阅读进度</span>
