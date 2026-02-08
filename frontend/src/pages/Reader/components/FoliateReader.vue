@@ -212,21 +212,33 @@ const tryRestoreProgress = async () => {
   if (hasRestoredProgress.value) return
   hasRestoredProgress.value = true
 
+  console.log('🎯 开始恢复Foliate进度 - CFI:', props.initialCfi, '进度百分比:', props.initialProgress)
+  
   const cfi = (props.initialCfi || '').trim()
   if (cfi && view.value) {
+    console.log('📋 使用CFI恢复进度:', cfi)
     try {
       await view.value.goTo(cfi)
+      console.log('✅ CFI恢复成功')
       return
-    } catch { }
+    } catch (err) {
+      console.log('⚠️ CFI恢复失败:', err)
+    }
 
     try {
       await view.value.goTo({ cfi })
+      console.log('✅ CFI对象恢复成功')
       return
-    } catch { }
+    } catch (err) {
+      console.log('⚠️ CFI对象恢复失败:', err)
+    }
   }
 
   if (props.initialProgress && props.initialProgress > 0) {
+    console.log('📈 使用进度百分比恢复:', props.initialProgress)
     await goToProgress(props.initialProgress)
+  } else {
+    console.log('ℹ️ 未找到恢复数据，保持在开头')
   }
 }
 
@@ -342,6 +354,8 @@ const handleRelocate = (location: any) => {
   // 提取可序列化的数据，避免 IndexedDB 克隆错误
   const { section, fraction, tocItem, cfi } = location
   
+  console.log('🔄 位置变化事件触发 - 分数:', fraction, 'CFI:', cfi)
+  
   // 更新章节（确保 section 是数字）
   if (section !== undefined) {
     const sectionIndex = typeof section === 'number' ? section : (typeof section === 'object' && section.current !== undefined ? section.current : 0)
@@ -358,8 +372,13 @@ const handleRelocate = (location: any) => {
   }
   
   // 更新进度
-  if (fraction !== undefined) {
-    progress.value = Math.round(fraction * 100)
+  if (fraction !== undefined && typeof fraction === 'number' && !isNaN(fraction) && fraction >= 0) {
+    // 处理分数异常值（负数或过大）
+    const normalizedFraction = Math.min(1, Math.max(0, fraction));
+    progress.value = Math.round(normalizedFraction * 100);
+    console.log('📈 进度更新:', progress.value, '分数:', fraction, '标准化后分数:', normalizedFraction);
+  } else if (fraction !== undefined) {
+    console.warn('⚠️ 检测到异常分数值:', fraction, '使用当前进度:', progress.value);
   }
   
   // 发送进度变化事件（只传递可序列化的数据）
@@ -562,9 +581,11 @@ const prevPage = async () => {
 const goToProgress = async (targetProgress: number) => {
   if (!view.value) return
 
+  console.log('🔄 开始跳转到进度:', targetProgress, '转换为分数:', targetProgress / 100)
   try {
     const fraction = targetProgress / 100
     await view.value.goToFraction(fraction)
+    console.log('✅ 跳转到进度成功:', targetProgress)
   } catch (err) {
     console.error('跳转失败:', err)
   }

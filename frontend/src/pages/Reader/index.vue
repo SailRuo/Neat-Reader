@@ -203,7 +203,15 @@ const handleReaderReady = (data: any) => {
 
 // 进度变化
 const handleProgressChange = (data: any) => {
-  progress.value = data.progress
+  console.log('🔄 进度变化事件 - 接收数据:', data)
+  
+  // 验证进度值是否有效
+  if (typeof data.progress === 'number' && !isNaN(data.progress) && data.progress >= 0 && data.progress <= 100) {
+    progress.value = data.progress
+  } else {
+    console.warn('⚠️ 接收到无效的进度值:', data.progress, '使用当前值:', progress.value)
+  }
+  
   currentPage.value = data.currentPage || 1
   totalPages.value = data.totalPages || 1
   
@@ -212,9 +220,12 @@ const handleProgressChange = (data: any) => {
   
   // 保存进度
   if (isRestoringProgress.value) {
+    console.log('🔄 检查进度恢复状态 - 当前:', progress.value, '目标:', restoreTargetProgress.value, '差值:', Math.abs(progress.value - restoreTargetProgress.value))
     if (progress.value > 0 && Math.abs(progress.value - restoreTargetProgress.value) <= 2) {
+      console.log('✅ 进度恢复完成，目标:', restoreTargetProgress.value, '当前:', progress.value)
       isRestoringProgress.value = false
     } else {
+      console.log('🔄 仍在恢复进度，当前:', progress.value, '目标:', restoreTargetProgress.value)
       return
     }
   }
@@ -287,6 +298,12 @@ const saveProgress = async () => {
   const reader = book.value.format === 'epub' ? foliateReaderRef.value : pdfReaderRef.value
   if (!reader || !reader.getCurrentLocation) return
   
+  // 验证进度值是否有效
+  if (isNaN(progress.value) || progress.value < 0 || progress.value > 100) {
+    console.warn('⚠️ 进度值无效，跳过保存:', progress.value)
+    return
+  }
+  
   const location = reader.getCurrentLocation()
   
   // 确保所有数据都是可序列化的，使用 toRaw 去除 Vue 响应式代理
@@ -302,6 +319,7 @@ const saveProgress = async () => {
     deviceName: String(ebookStore.deviceInfo.name)
   }
 
+  console.log('💾 保存进度:', progressData.position * 100, '%, CFI:', progressData.cfi)
   await ebookStore.saveReadingProgress(progressData)
 }
 

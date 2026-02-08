@@ -1,4 +1,4 @@
-<template>
+我<template>
   <div class="pdf-reader" @wheel="handleWheel" @click="$emit('click')">
     <canvas ref="canvasRef" class="pdf-canvas"></canvas>
   </div>
@@ -223,8 +223,10 @@ const handleWheel = (e: WheelEvent) => {
 
 // 跳转到进度
 const goToProgress = (progress: number) => {
+  console.log('🔄 开始跳转到进度:', progress, '总页数:', totalPages)
   // 修正计算，防止由于浮点数精度问题导致的页面偏移
   const pageNum = Math.max(1, Math.min(totalPages, Math.ceil((progress / 100) * totalPages - 1e-10)))
+  console.log('📊 跳转计算得出的页码:', pageNum, '进度:', progress)
   renderPage(pageNum)
 }
 
