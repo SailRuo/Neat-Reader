@@ -24,6 +24,7 @@
         :font-size="fontSize"
         :line-height="lineHeight"
         :initial-progress="progress"
+        :initial-cfi="initialCfi"
         @ready="handleReaderReady"
         @progress-change="handleProgressChange"
         @chapter-change="handleChapterChange"
@@ -69,6 +70,8 @@
       :chapters="chapters"
       :current-chapter-index="currentChapterIndex"
       :theme="theme"
+      :tts="tts"
+      :current-page-text="currentPageText"
       @close="activeSidebar = null"
       @navigate="handleNavigate"
     />
@@ -79,7 +82,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, nextTick, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useEbookStore } from '../../stores/ebook'
 import localforage from 'localforage'
@@ -89,6 +92,7 @@ import BottomBar from './components/BottomBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import FoliateReader from './components/FoliateReader.vue'
 import PdfReader from './components/PdfReader.vue'
+import { useTextToSpeech } from './composables/useTextToSpeech'
 
 const route = useRoute()
 const router = useRouter()
@@ -123,12 +127,42 @@ const currentChapterTitle = ref('')
 const chapters = ref<any[]>([]) // 初始化为空数组
 const readingTime = ref(0)
 
+const initialCfi = ref('')
+
+const isRestoringProgress = ref(false)
+const restoreTargetProgress = ref(0)
+
+// 初始化 TTS
+const tts = useTextToSpeech()
+
+// 获取当前页面文本（用于 TTS）- 使用 ref 而不是 computed
+const currentPageText = ref('')
+
+// 更新当前页面文本（带重试机制）
+const updateCurrentPageText = (retryCount = 0) => {
+  const reader = book.value?.format === 'epub' ? foliateReaderRef.value : pdfReaderRef.value
+  if (!reader || !reader.getCurrentPageText) {
+    currentPageText.value = ''
+    return
+  }
+  const text = reader.getCurrentPageText()
+  
+  // 如果文本为空且还有重试次数，延迟重试
+  if (!text && retryCount < 3) {
+    setTimeout(() => {
+      updateCurrentPageText(retryCount + 1)
+    }, 500)
+    return
+  }
+  
+  currentPageText.value = text
+}
+
 // 暂时移除的功能（后续恢复）
 // const notes = ref<any[]>([])
 // const showNoteDialog = ref(false)
 // const selectedText = ref('')
 // const searchResults = ref<any[]>([])
-// const currentPageText = ref('')
 
 // 内容点击处理 - 切换控制栏显示/隐藏
 const handleContentClick = () => {
@@ -137,11 +171,17 @@ const handleContentClick = () => {
 
 // 侧边栏切换
 const handleToggleSidebar = (type: 'contents' | 'search' | 'notes' | 'tts') => {
-  // 暂时只支持目录
-  if (type === 'contents') {
-    activeSidebar.value = activeSidebar.value === type ? null : type
+  // 支持目录和 TTS
+  if (type === 'contents' || type === 'tts') {
+    const wasOpen = activeSidebar.value === type
+    activeSidebar.value = wasOpen ? null : type
+    
+    // 如果打开 TTS 侧边栏，立即更新文本
+    if (!wasOpen && type === 'tts') {
+      updateCurrentPageText()
+    }
   } else {
-    console.log('该功能暂未实现:', type)
+    // ignore
   }
 }
 
@@ -154,6 +194,10 @@ const handleReaderReady = (data: any) => {
   // 延迟隐藏加载动画，确保内容已渲染
   setTimeout(() => {
     isLoading.value = false
+    // 延迟更新当前页面文本，等待章节完全加载
+    setTimeout(() => {
+      updateCurrentPageText()
+    }, 500)
   }, 500)
 }
 
@@ -163,7 +207,18 @@ const handleProgressChange = (data: any) => {
   currentPage.value = data.currentPage || 1
   totalPages.value = data.totalPages || 1
   
+  // 更新当前页面文本
+  updateCurrentPageText()
+  
   // 保存进度
+  if (isRestoringProgress.value) {
+    if (progress.value > 0 && Math.abs(progress.value - restoreTargetProgress.value) <= 2) {
+      isRestoringProgress.value = false
+    } else {
+      return
+    }
+  }
+
   saveProgress()
 }
 
@@ -171,6 +226,9 @@ const handleProgressChange = (data: any) => {
 const handleChapterChange = (data: any) => {
   currentChapterIndex.value = data.index
   currentChapterTitle.value = data.title
+  
+  // 更新当前页面文本
+  updateCurrentPageText()
 }
 
 // 更新进度
@@ -178,6 +236,33 @@ const handleUpdateProgress = (newProgress: number) => {
   const reader = book.value?.format === 'epub' ? foliateReaderRef.value : pdfReaderRef.value
   if (reader && reader.goToProgress) {
     reader.goToProgress(newProgress)
+  }
+}
+
+const handleKeyDown = (e: KeyboardEvent) => {
+  const reader = book.value?.format === 'epub' ? foliateReaderRef.value : pdfReaderRef.value
+  if (!reader) return
+
+  switch(e.key) {
+    case 'ArrowLeft':
+    case 'PageUp':
+      e.preventDefault()
+      reader.prevPage?.()
+      break
+    case 'ArrowRight':
+    case 'PageDown':
+    case ' ': // 空格键
+      e.preventDefault()
+      reader.nextPage?.()
+      break
+    case 'Home':
+      e.preventDefault()
+      handleUpdateProgress(0)
+      break
+    case 'End':
+      e.preventDefault()
+      handleUpdateProgress(100)
+      break
   }
 }
 
@@ -203,7 +288,6 @@ const saveProgress = async () => {
   if (!reader || !reader.getCurrentLocation) return
   
   const location = reader.getCurrentLocation()
-  console.log('📍 获取到的位置信息:', location)
   
   // 确保所有数据都是可序列化的，使用 toRaw 去除 Vue 响应式代理
   const progressData = {
@@ -217,9 +301,7 @@ const saveProgress = async () => {
     deviceId: String(ebookStore.deviceInfo.id),
     deviceName: String(ebookStore.deviceInfo.name)
   }
-  
-  console.log('💾 准备保存的进度数据:', progressData)
-  
+
   await ebookStore.saveReadingProgress(progressData)
 }
 
@@ -264,7 +346,6 @@ watch([theme, fontSize, lineHeight, brightness], () => {
 // 生命周期
 onMounted(async () => {
   const bookId = route.params.id as string
-  console.log('🚀 阅读器页面加载，书籍ID:', bookId)
   
   book.value = ebookStore.getBookById(bookId)
   
@@ -274,13 +355,6 @@ onMounted(async () => {
     return
   }
   
-  console.log('📚 书籍信息:', {
-    id: book.value.id,
-    title: book.value.title,
-    format: book.value.format,
-    storageType: book.value.storageType
-  })
-  
   // 详细检查书籍内容是否存在
   try {
     const contentExists = await localforage.getItem(`ebook_content_${bookId}`)
@@ -289,18 +363,14 @@ onMounted(async () => {
       
       // 检查是否是云端书籍需要下载
       if (book.value.storageType === 'baidupan') {
-        console.log('📥 检测到云端书籍，需要先下载')
         alert('该书籍尚未下载到本地，请先在首页下载后再阅读')
       } else {
-        console.log('💾 本地书籍内容丢失')
         alert('书籍内容加载失败，文件可能已损坏，请重新导入')
       }
       
       router.push('/')
       return
     }
-    
-    console.log('✅ 书籍内容存在，大小:', contentExists instanceof ArrayBuffer ? contentExists.byteLength : 'unknown')
   } catch (error) {
     console.error('❌ 检查书籍内容时出错:', error)
     alert('检查书籍内容时出错，请重试')
@@ -310,57 +380,32 @@ onMounted(async () => {
   
   // 立即加载用户配置（同步操作）
   loadUserConfig()
-  console.log('⚙️ 用户配置加载完成')
   
   // 同步加载阅读进度（阻塞，确保进度在阅读器初始化前加载）
   const savedProgress = await ebookStore.loadReadingProgress(bookId)
-  console.log('📖 加载的进度数据:', savedProgress)
   if (savedProgress) {
     progress.value = Math.floor(savedProgress.position * 100)
     currentChapterIndex.value = savedProgress.chapterIndex || 0
     currentChapterTitle.value = savedProgress.chapterTitle || ''
     readingTime.value = savedProgress.readingTime || 0
-    console.log('📍 设置进度为:', progress.value, '%')
-  } else {
-    console.log('📍 没有找到保存的进度，从头开始')
-  }
-  
-  console.log('🎉 阅读器页面初始化完成')
-  
-  // 添加键盘快捷键支持
-  const handleKeyDown = (e: KeyboardEvent) => {
-    const reader = book.value?.format === 'epub' ? foliateReaderRef.value : pdfReaderRef.value
-    if (!reader) return
-    
-    switch(e.key) {
-      case 'ArrowLeft':
-      case 'PageUp':
-        e.preventDefault()
-        reader.prevPage?.()
-        break
-      case 'ArrowRight':
-      case 'PageDown':
-      case ' ': // 空格键
-        e.preventDefault()
-        reader.nextPage?.()
-        break
-      case 'Home':
-        e.preventDefault()
-        handleUpdateProgress(0)
-        break
-      case 'End':
-        e.preventDefault()
-        handleUpdateProgress(100)
-        break
+
+    initialCfi.value = savedProgress.cfi || ''
+
+    if (progress.value > 0) {
+      isRestoringProgress.value = true
+      restoreTargetProgress.value = progress.value
     }
+  } else {
+    // start from beginning
   }
-  
+})
+
+onMounted(() => {
   window.addEventListener('keydown', handleKeyDown)
-  
-  // 清理函数
-  onBeforeUnmount(() => {
-    window.removeEventListener('keydown', handleKeyDown)
-  })
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleKeyDown)
 })
 
 onBeforeUnmount(async () => {

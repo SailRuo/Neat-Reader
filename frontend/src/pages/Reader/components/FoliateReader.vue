@@ -28,6 +28,7 @@ const props = defineProps<{
   fontSize: number
   lineHeight: number
   initialProgress?: number
+  initialCfi?: string
 }>()
 
 // Emits
@@ -54,8 +55,57 @@ const progress = ref(0)
 const currentPage = ref(1)
 const totalPages = ref(1)
 
+const hasRestoredProgress = ref(false)
+
 const relocateListener = (e: any) => handleRelocate(e.detail)
 const loadListener = (e: any) => handleLoad(e.detail.doc, e.detail.index)
+
+const bindDocClickForwarding = (doc: Document) => {
+  const docAny = doc as any
+  if (docAny._neatReaderClickForwarder) return
+
+  const handler = (e: MouseEvent) => {
+    // 忽略链接点击
+    const target = e.target as HTMLElement | null
+    if (target?.closest?.('a')) return
+
+    // 忽略文本选择
+    const selection = doc.getSelection ? doc.getSelection() : window.getSelection()
+    const selectedText = selection ? selection.toString() : ''
+    if (selectedText && selectedText.length > 0) return
+
+    emit('click')
+  }
+
+  doc.addEventListener('click', handler, true)
+  docAny._neatReaderClickForwarder = handler
+}
+
+// 绑定 iframe 内滚轮事件转发（用于滚轮翻页）
+const bindDocWheelForwarding = (doc: Document) => {
+  const docAny = doc as any
+  if (docAny._neatReaderWheelForwarder) return
+
+  const handler = (e: WheelEvent) => {
+    if (!view.value) return
+    
+    // 阻止默认滚动行为
+    e.preventDefault()
+    e.stopPropagation()
+    
+    // 根据滚动方向翻页
+    if (e.deltaY > 0) {
+      // 向下滚动 = 下一页
+      nextPage()
+    } else if (e.deltaY < 0) {
+      // 向上滚动 = 上一页
+      prevPage()
+    }
+  }
+
+  doc.addEventListener('wheel', handler, { passive: false, capture: true })
+  docAny._neatReaderWheelForwarder = handler
+}
 
 const cleanupView = () => {
   if (viewerRef.value && (viewerRef.value as any)._wheelHandler) {
@@ -66,6 +116,9 @@ const cleanupView = () => {
     viewerRef.value.removeEventListener('click', (viewerRef.value as any)._clickHandler, true)
     delete (viewerRef.value as any)._clickHandler
   }
+
+  currentChapterDocs.clear()
+  currentChapterTexts.value.clear()
 
   if (view.value) {
     try {
@@ -102,7 +155,6 @@ const initialize = async () => {
 
   try {
     cleanupView()
-    console.log('📚 开始加载书籍...')
     
     // 加载书籍内容
     const content = await localforage.getItem<ArrayBuffer>(`ebook_content_${props.bookId}`)
@@ -111,71 +163,93 @@ const initialize = async () => {
       return
     }
 
-    console.log('📚 书籍内容加载完成，大小:', content.byteLength)
-
     // 转换为 File 对象
     const file = new File([content], 'book.epub', { type: 'application/epub+zip' })
-    console.log('📦 File 对象创建完成')
 
     // 动态导入 Foliate-js
-    console.log('📥 开始导入 Foliate 库...')
     const { View } = await import('@ray-d-song/foliate-js/view.js')
-    console.log('✅ Foliate 库导入完成')
 
     // 创建视图元素
     view.value = document.createElement('foliate-view')
-    console.log('🎨 视图元素创建完成')
     
     // 监听事件
     view.value.addEventListener('relocate', relocateListener)
     view.value.addEventListener('load', loadListener)
-    console.log('👂 事件监听器已添加')
 
     // 添加到容器
     viewerRef.value.appendChild(view.value)
-    console.log('📍 视图已添加到容器')
 
     // 打开书籍
-    console.log('📖 开始打开书籍...')
     await view.value.open(file)
-    console.log('✅ 书籍打开完成')
 
     // 初始化视图（不跳转到初始进度，让它自然加载）
-    console.log('🚀 开始初始化视图...')
     await view.value.init({
-      lastLocation: null, // 先不跳转，等加载完成后再跳转
+      lastLocation: null,
       showTextStart: false
     })
-    console.log('✅ 视图初始化完成')
 
     // 应用主题和样式
     applyTheme()
-    console.log('🎨 主题已应用')
 
     // 添加点击事件监听到 Foliate 内部
     addClickListener()
-    console.log('👆 点击监听器已添加')
 
     isReady.value = true
-    console.log('✅ Foliate 阅读器初始化完成')
-    
-    // 延迟跳转到初始进度，避免阻塞初始化
-    if (props.initialProgress && props.initialProgress > 0) {
-      setTimeout(() => {
-        console.log('⏩ 跳转到初始进度:', props.initialProgress)
-        goToProgress(props.initialProgress)
-      }, 500)
-    }
+
+    // 延迟恢复进度，避免阻塞初始化
+    setTimeout(() => {
+      tryRestoreProgress()
+    }, 500)
 
   } catch (err) {
-    console.error('❌ 初始化失败:', err)
+    console.error('❌ [Foliate] 初始化失败:', err)
     error.value = err instanceof Error ? err.message : '未知错误'
   }
 }
 
+const tryRestoreProgress = async () => {
+  if (!isReady.value) return
+  if (hasRestoredProgress.value) return
+  hasRestoredProgress.value = true
+
+  const cfi = (props.initialCfi || '').trim()
+  if (cfi && view.value) {
+    try {
+      await view.value.goTo(cfi)
+      return
+    } catch { }
+
+    try {
+      await view.value.goTo({ cfi })
+      return
+    } catch { }
+  }
+
+  if (props.initialProgress && props.initialProgress > 0) {
+    await goToProgress(props.initialProgress)
+  }
+}
+
+// 存储当前可见章节的文本内容
+const currentChapterTexts = ref<Map<number, string>>(new Map())
+
+// 存储已加载章节的 Document（用于样式更新/文本获取）
+const currentChapterDocs = new Map<number, Document>()
+
 // 章节加载完成
 const handleLoad = (doc: Document, index: number) => {
-  console.log('📄 章节加载:', index)
+  // 记录章节 Document（用于后续样式/文本更新）
+  currentChapterDocs.set(index, doc)
+
+  // 保存章节文本内容（用于 TTS）
+  try {
+    const bodyText = doc.body?.innerText || doc.body?.textContent || ''
+    if (bodyText.trim()) {
+      currentChapterTexts.value.set(index, bodyText.trim())
+    }
+  } catch (e) {
+    console.warn('⚠️ [章节文本] 保存失败:', e)
+  }
 
   try {
     const styleEl = doc.getElementById('neat-reader-foliate-style') as HTMLStyleElement | null
@@ -188,6 +262,8 @@ const handleLoad = (doc: Document, index: number) => {
           max-width: none !important;
           margin: 0 !important;
           padding: 0 !important;
+          font-size: ${props.fontSize}px !important;
+          line-height: ${props.lineHeight} !important;
         }
         body {
           box-sizing: border-box !important;
@@ -195,15 +271,59 @@ const handleLoad = (doc: Document, index: number) => {
         * {
           max-width: none !important;
         }
+        p, div, span, li, td, th {
+          font-size: inherit !important;
+          line-height: inherit !important;
+        }
         img, svg, video, canvas, table, pre, code {
           max-width: 100% !important;
           height: auto !important;
         }
       `
       doc.head.appendChild(style)
+    } else {
+      // 更新已存在的样式（用于响应字号/行高变化）
+      styleEl.textContent = `
+        html, body {
+          width: 100% !important;
+          max-width: none !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          font-size: ${props.fontSize}px !important;
+          line-height: ${props.lineHeight} !important;
+        }
+        body {
+          box-sizing: border-box !important;
+        }
+        * {
+          max-width: none !important;
+        }
+        p, div, span, li, td, th {
+          font-size: inherit !important;
+          line-height: inherit !important;
+        }
+        img, svg, video, canvas, table, pre, code {
+          max-width: 100% !important;
+          height: auto !important;
+        }
+      `
     }
   } catch (e) {
-    console.warn('⚠️ 章节样式注入失败:', e)
+    console.warn('⚠️ [样式] 注入失败:', e)
+  }
+
+  // 将 iframe 内点击转发到外层，用于切换控制栏显示/隐藏
+  try {
+    bindDocClickForwarding(doc)
+  } catch (e) {
+    console.warn('⚠️ [点击] 转发绑定失败:', e)
+  }
+
+  // 将 iframe 内滚轮事件转发到外层，用于滚轮翻页
+  try {
+    bindDocWheelForwarding(doc)
+  } catch (e) {
+    console.warn('⚠️ [滚轮] 转发绑定失败:', e)
   }
   
   // 第一次加载时获取目录
@@ -219,8 +339,6 @@ const handleLoad = (doc: Document, index: number) => {
 
 // 位置变化
 const handleRelocate = (location: any) => {
-  console.log('📍 位置变化:', location)
-  
   // 提取可序列化的数据，避免 IndexedDB 克隆错误
   const { section, fraction, tocItem, cfi } = location
   
@@ -263,12 +381,12 @@ const applyTheme = () => {
   view.value.renderer.setAttribute('flow', 'paginated')
   view.value.renderer.setAttribute('gap', '0')
   view.value.renderer.setAttribute('max-column-count', '1')
-  view.value.renderer.setAttribute('margin', '40 60 40 60')
+  view.value.renderer.setAttribute('margin', '0')
   
   // 使用正确的 CSS 变量名（带下划线前缀）
   view.value.renderer.style.setProperty('--_gap', '0')
   view.value.renderer.style.setProperty('--_max-column-count', '1')
-  view.value.renderer.style.setProperty('--_margin', '40 60 40 60')
+  view.value.renderer.style.setProperty('--_margin', '0')
   view.value.renderer.style.setProperty('--_max-column-width', '100%')
   view.value.renderer.style.setProperty('--_column-width', '100%')
   
@@ -276,7 +394,9 @@ const applyTheme = () => {
   view.value.renderer.style.setProperty('--bg', colors.background)
   view.value.renderer.style.setProperty('--fg', colors.color)
   
-  // 应用字体大小和行高
+  // 应用字体大小和行高（使用 CSS 变量传递到 iframe 内）
+  view.value.renderer.style.setProperty('--user-font-size', `${props.fontSize}px`)
+  view.value.renderer.style.setProperty('--user-line-height', `${props.lineHeight}`)
   view.value.renderer.style.fontSize = `${props.fontSize}px`
   view.value.renderer.style.lineHeight = `${props.lineHeight}`
   
@@ -369,7 +489,6 @@ const applyTheme = () => {
           }
         `
         shadowRoot.appendChild(style)
-        console.log('✅ Shadow DOM 样式已注入（Grid 单列布局）')
         
         // 直接查找并隐藏 header 和 footer 元素
         setTimeout(() => {
@@ -379,30 +498,18 @@ const applyTheme = () => {
             header.style.display = 'none'
             header.style.visibility = 'hidden'
             header.style.height = '0'
-            console.log('✅ Header 已隐藏')
           }
           if (footer) {
             footer.style.display = 'none'
             footer.style.visibility = 'hidden'
             footer.style.height = '0'
-            console.log('✅ Footer 已隐藏')
           }
         }, 200)
-        
-        // 调试：打印 Shadow DOM 结构
-        console.log('🔍 Shadow DOM 结构:', shadowRoot.innerHTML.substring(0, 500))
       }
     } catch (err) {
       console.warn('⚠️ 无法访问 Shadow DOM:', err)
     }
   }, 100)
-  
-  console.log('🎨 主题配置:', {
-    flow: 'paginated',
-    margin: '10 20',
-    fontSize: props.fontSize,
-    lineHeight: props.lineHeight
-  })
 }
 
 // 添加点击监听器到 Foliate 内部
@@ -410,20 +517,15 @@ const addClickListener = () => {
   if (!viewerRef.value) return
 
   const handleContainerClick = (e: MouseEvent) => {
-    console.log('🖱️ 检测到点击事件')
-    
     // 获取事件路径（包括 Shadow DOM）
     const path = (e.composedPath ? e.composedPath() : []) as any[]
-    console.log('📍 事件路径长度:', path.length)
 
     // 检查是否点击了链接
     for (const node of path) {
       if (node && node.tagName === 'A') {
-        console.log('🔗 点击了链接，不触发')
         return
       }
       if (node && typeof node.closest === 'function' && node.closest('a')) {
-        console.log('🔗 点击了链接内部，不触发')
         return
       }
     }
@@ -435,30 +537,24 @@ const addClickListener = () => {
     const selectedText = selection ? selection.toString() : ''
     
     if (selectedText && selectedText.length > 0) {
-      console.log('🔤 有选中文本，不触发')
       return
     }
 
-    console.log('✅ 触发控制栏切换')
     emit('click')
   }
 
   viewerRef.value.addEventListener('click', handleContainerClick, true)
   ;(viewerRef.value as any)._clickHandler = handleContainerClick
-  
-  console.log('✅ 点击监听器已绑定到 viewerRef')
 }
 
 // 翻页
 const nextPage = async () => {
   if (!view.value) return
-  console.log('👉 下一页')
   await view.value.next()
 }
 
 const prevPage = async () => {
   if (!view.value) return
-  console.log('👈 上一页')
   await view.value.prev()
 }
 
@@ -514,17 +610,82 @@ watch(() => props.theme, () => {
 })
 
 // 监听字体大小变化
-watch(() => props.fontSize, () => {
+watch(() => props.fontSize, (newSize, oldSize) => {
   if (view.value?.renderer) {
+    view.value.renderer.style.setProperty('--user-font-size', `${props.fontSize}px`)
     view.value.renderer.style.fontSize = `${props.fontSize}px`
+    
+    // 更新所有已加载章节的样式
+    updateAllIframeStyles()
   }
 })
 
 // 监听行高变化
-watch(() => props.lineHeight, () => {
+watch(() => props.lineHeight, (newHeight, oldHeight) => {
   if (view.value?.renderer) {
+    view.value.renderer.style.setProperty('--user-line-height', `${props.lineHeight}`)
     view.value.renderer.style.lineHeight = `${props.lineHeight}`
+    
+    // 更新所有已加载章节的样式
+    updateAllIframeStyles()
   }
+})
+
+// 更新所有已加载章节文档的样式（旧名保留，避免改动调用点）
+const updateAllIframeStyles = () => {
+  const docs = Array.from(currentChapterDocs.entries())
+  if (docs.length === 0) return
+
+  docs.forEach(([index, doc]) => {
+    try {
+      const styleEl = doc.getElementById('neat-reader-foliate-style') as HTMLStyleElement | null
+      const css = `
+        html, body {
+          width: 100% !important;
+          max-width: none !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          font-size: ${props.fontSize}px !important;
+          line-height: ${props.lineHeight} !important;
+        }
+        body {
+          box-sizing: border-box !important;
+        }
+        * {
+          max-width: none !important;
+        }
+        p, div, span, li, td, th {
+          font-size: inherit !important;
+          line-height: inherit !important;
+        }
+        img, svg, video, canvas, table, pre, code {
+          max-width: 100% !important;
+          height: auto !important;
+        }
+      `
+
+      if (styleEl) {
+        styleEl.textContent = css
+        return
+      }
+
+      const style = doc.createElement('style')
+      style.id = 'neat-reader-foliate-style'
+      style.textContent = css
+      doc.head.appendChild(style)
+    } catch (e) {
+      console.warn(`⚠️ [样式更新] 章节 ${index} 更新失败:`, e)
+    }
+  })
+}
+
+watch(() => props.initialProgress, () => {
+  // saved progress may be loaded after reader mounts
+  void tryRestoreProgress()
+})
+
+watch(() => props.initialCfi, () => {
+  void tryRestoreProgress()
 })
 
 // 生命周期
@@ -552,16 +713,31 @@ onMounted(async () => {
   // 添加滚轮监听到整个容器（使用 passive: false 以便可以阻止默认行为）
   if (viewerRef.value) {
     viewerRef.value.addEventListener('wheel', handleWheel, { passive: false })
-    console.log('✅ 滚轮翻页监听已添加')
     
     // 保存引用以便清理
     ;(viewerRef.value as any)._wheelHandler = handleWheel
   }
 })
 
+// 获取当前页面文本（用于 TTS）
+const getCurrentPageText = (): string => {
+  const sectionIndex = currentChapterIndex.value
+
+  const cachedText = currentChapterTexts.value.get(sectionIndex)
+  if (cachedText && cachedText.trim()) {
+    return cachedText.trim()
+  }
+
+  const doc = currentChapterDocs.get(sectionIndex)
+  if (doc?.body) {
+    const bodyText = doc.body.innerText || doc.body.textContent || ''
+    return bodyText.trim()
+  }
+  return ''
+}
+
 onBeforeUnmount(() => {
   cleanupView()
-  console.log('🧹 Foliate 视图已清理')
 })
 
 // 暴露方法
@@ -570,7 +746,8 @@ defineExpose({
   prevPage,
   goToProgress,
   goToChapter,
-  getCurrentLocation
+  getCurrentLocation,
+  getCurrentPageText
 })
 </script>
 

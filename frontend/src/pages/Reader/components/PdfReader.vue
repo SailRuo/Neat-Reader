@@ -66,8 +66,9 @@ const initialize = async () => {
     
     // 恢复到保存的进度
     if (props.initialProgress && props.initialProgress > 0) {
-      const pageNum = Math.ceil((props.initialProgress / 100) * totalPages)
-      await renderPage(Math.max(1, Math.min(pageNum, totalPages)))
+      // 修正计算，防止由于浮点数精度问题导致的页面偏移
+      const pageNum = Math.max(1, Math.min(totalPages, Math.ceil((props.initialProgress / 100) * totalPages - 1e-10)))
+      await renderPage(pageNum)
       console.log('📍 恢复到页面:', pageNum)
     } else {
       await renderPage(1)
@@ -222,8 +223,9 @@ const handleWheel = (e: WheelEvent) => {
 
 // 跳转到进度
 const goToProgress = (progress: number) => {
-  const pageNum = Math.ceil((progress / 100) * totalPages)
-  renderPage(Math.max(1, Math.min(pageNum, totalPages)))
+  // 修正计算，防止由于浮点数精度问题导致的页面偏移
+  const pageNum = Math.max(1, Math.min(totalPages, Math.ceil((progress / 100) * totalPages - 1e-10)))
+  renderPage(pageNum)
 }
 
 // 获取当前位置

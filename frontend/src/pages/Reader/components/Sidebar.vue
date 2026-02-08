@@ -219,6 +219,7 @@ const emit = defineEmits<{
 // TTS 功能 - 使用父组件传入的实例
 const ttsState = computed(() => {
   if (!props.tts) {
+    console.log('⚠️ [Sidebar] TTS 实例不存在')
     return {
       isPlaying: false,
       isPaused: false,
@@ -227,6 +228,12 @@ const ttsState = computed(() => {
       totalSegments: 0
     }
   }
+  
+  console.log('✅ [Sidebar] TTS 状态:', {
+    isPlaying: props.tts.isPlaying.value,
+    isPaused: props.tts.isPaused.value,
+    isLoadingSegments: props.tts.isLoadingSegments.value
+  })
   
   return {
     isPlaying: props.tts.isPlaying.value,
@@ -240,6 +247,15 @@ const ttsState = computed(() => {
 // 本地状态
 const localSearchQuery = ref('')
 const hasSearched = ref(false)
+
+// 检查 TTS 和 currentPageText
+onMounted(() => {
+  console.log('🔍 [Sidebar] 挂载时检查:')
+  console.log('  - type:', props.type)
+  console.log('  - tts 实例:', props.tts ? '存在' : '不存在')
+  console.log('  - currentPageText 长度:', props.currentPageText?.length || 0)
+  console.log('  - currentPageText 前50字:', props.currentPageText?.substring(0, 50))
+})
 
 const title = computed(() => {
   const titles: Record<string, string> = {
