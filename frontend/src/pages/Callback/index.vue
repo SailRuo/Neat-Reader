@@ -29,25 +29,37 @@ const handleCallback = async () => {
     // 从URL中获取授权码
     const urlParams = new URLSearchParams(window.location.search)
     const code = urlParams.get('code')
+    const state = urlParams.get('state')
     
     console.log('提取到的code:', code)
+    console.log('提取到的state:', state)
     
     if (!code) {
       throw new Error('未获取到授权码')
     }
     
+    // 判断是百度网盘还是 Qwen 的回调
+    const isQwenCallback = window.location.pathname.includes('qwen-callback')
+    const messageType = isQwenCallback ? 'qwen-auth-code' : 'baidu-auth-code'
+    
+    console.log('回调类型:', isQwenCallback ? 'Qwen' : '百度网盘')
+    
     // 尝试发送消息给主窗口
     console.log('尝试发送code给主窗口...')
     if (window.opener) {
       console.log('✓ 检测到 window.opener，发送 postMessage')
-      window.opener.postMessage({ type: 'baidu-auth-code', code }, window.location.origin)
+      window.opener.postMessage({ type: messageType, code, state }, window.location.origin)
     } else if (window.parent !== window) {
       console.log('✓ 检测到父窗口，发送 postMessage')
-      window.parent.postMessage({ type: 'baidu-auth-code', code }, window.location.origin)
+      window.parent.postMessage({ type: messageType, code, state }, window.location.origin)
     } else {
       console.log('✗ 未检测到父窗口，存储到 localStorage')
       // 存储授权码到localStorage，以便主应用获取
-      localStorage.setItem('baidupan_auth_code', code)
+      const storageKey = isQwenCallback ? 'qwen_auth_code' : 'baidupan_auth_code'
+      localStorage.setItem(storageKey, code)
+      if (state) {
+        localStorage.setItem(`${storageKey}_state`, state)
+      }
     }
     
     status.value = 'success'

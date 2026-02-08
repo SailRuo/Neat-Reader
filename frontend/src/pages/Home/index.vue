@@ -252,6 +252,11 @@
     <button v-if="selectedCategory !== 'settings'" class="floating-add-btn" @click="triggerFileImport">
       <Icons.Plus :size="24" />
     </button>
+
+    <!-- AI 对话按钮 -->
+    <button v-if="selectedCategory !== 'settings'" class="floating-chat-btn" @click="showChatWindow = true">
+      <Icons.MessageCircle :size="24" />
+    </button>
     
     <!-- 隐藏的文件输入框 -->
     <input 
@@ -261,6 +266,9 @@
       style="display: none"
       accept=".epub,.pdf,.txt"
     />
+
+    <!-- AI 对话窗口 -->
+    <ChatWindow v-model:visible="showChatWindow" />
 
     <!-- 右键菜单 -->
     <div 
@@ -415,6 +423,7 @@ import dayjs from 'dayjs'
 import { useEbookStore } from '../../stores/ebook'
 import { useDialogStore } from '../../stores/dialog'
 import SettingsPanel from '../../components/SettingsPanel/index.vue'
+import ChatWindow from '../../components/ChatWindow/index.vue'
 import * as Icons from 'lucide-vue-next'
 import { api } from '../../api/adapter'
 
@@ -428,6 +437,7 @@ const viewMode = ref<'grid' | 'list'>('grid')
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const searchKeyword = ref('')
 const selectedCategory = ref('all')
+const showChatWindow = ref(false)
 
 // 右键菜单相关
 const showMenu = ref(false)
@@ -2166,6 +2176,36 @@ body {
 
 .floating-add-btn:active {
   transform: scale(1.05) rotate(90deg);
+}
+
+/* AI 对话按钮 */
+.floating-chat-btn {
+  position: fixed;
+  bottom: 2rem;
+  right: 6.5rem;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #10B981, #059669);
+  color: white;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+  transition: all 0.2s ease;
+  z-index: 50;
+}
+
+.floating-chat-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.5);
+  background: linear-gradient(135deg, #059669, #047857);
+}
+
+.floating-chat-btn:active {
+  transform: scale(1.05);
 }
 
 /* 右键菜单 */

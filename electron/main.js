@@ -14,6 +14,7 @@ function createWindow() {
     minWidth: 1024,
     minHeight: 768,
     backgroundColor: '#f5f7fa',
+    autoHideMenuBar: true, // 隐藏菜单栏（File, Edit, View 等）
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -97,11 +98,21 @@ ipcMain.handle('auth:openWindow', async (event, authUrl) => {
         webPreferences: {
           nodeIntegration: false,
           contextIsolation: true,
-          webSecurity: true
+          webSecurity: false,  // 🔧 关闭 webSecurity 以允许授权页面加载外部资源
+          allowRunningInsecureContent: true,  // 允许加载混合内容
+          enableRemoteModule: false
         }
       })
       
       console.log('✓ 授权窗口创建成功')
+      
+      // 🔍 打开开发者工具以便调试
+      authWindow.webContents.openDevTools()
+      
+      // 监听控制台消息
+      authWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+        console.log(`[授权窗口控制台] ${message}`)
+      })
       
       // 加载授权URL
       console.log('加载授权URL...')
@@ -112,9 +123,14 @@ ipcMain.handle('auth:openWindow', async (event, authUrl) => {
       authWindow.webContents.on('will-redirect', (event, navigationUrl) => {
         console.log('检测到页面重定向:', navigationUrl)
         
-        // 检查是否是回调URL
-        if (navigationUrl.includes('alistgo.com/tool/baidu/callback')) {
-          console.log('✓ 检测到回调URL，开始解析参数')
+        // 检查是否是回调URL（支持百度网盘和 Qwen）
+        const isBaiduCallback = navigationUrl.includes('alistgo.com/tool/baidu/callback')
+        const isQwenCallback = navigationUrl.includes('qwen-callback') || navigationUrl.includes('localhost:5173/#/qwen-callback')
+        
+        if (isBaiduCallback || isQwenCallback) {
+          const callbackType = isBaiduCallback ? '百度网盘' : 'Qwen'
+          console.log(`✓ 检测到 ${callbackType} 回调URL，开始解析参数`)
+          
           try {
             const url = new URL(navigationUrl)
             const code = url.searchParams.get('code')

@@ -62,6 +62,77 @@
       </section>
 
       <section class="setting-section">
+        <h3 class="section-title">Qwen AI</h3>
+        <div class="setting-card">
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">授权状态</span>
+              <span class="setting-desc" v-if="qwenAccessToken">已授权，可以使用 Qwen AI 功能</span>
+              <span class="setting-desc" v-else>点击"获取授权"按钮完成 OAuth 授权</span>
+            </div>
+            <div class="setting-control">
+              <span v-if="qwenAccessToken" class="status connected">已授权</span>
+              <span v-else class="status disconnected">未授权</span>
+            </div>
+          </div>
+          
+          <div class="setting-row" v-if="!qwenAccessToken">
+            <div class="setting-info" style="width: 100%;">
+              <button 
+                class="btn btn-primary" 
+                style="width: 100%; margin-bottom: 12px;"
+                @click="startQwenAuth"
+                :disabled="isQwenLoading"
+              >
+                {{ isQwenLoading ? '授权中...' : '获取 Qwen 授权' }}
+              </button>
+              <p style="font-size: 12px; color: #999; margin: 0;">
+                使用 Device Code Flow 授权（RFC 8628）
+              </p>
+              <p v-if="qwenUserCode" style="font-size: 14px; color: #4A90E2; margin: 8px 0 0 0; font-weight: 600;">
+                用户码: {{ qwenUserCode }}
+              </p>
+            </div>
+          </div>
+          
+          <div class="setting-row" v-else>
+            <div class="setting-info" style="width: 100%;">
+              <button 
+                class="btn btn-secondary" 
+                style="width: 100%; margin-bottom: 12px;"
+                @click="testQwenAPI"
+                :disabled="isQwenTesting"
+              >
+                {{ isQwenTesting ? '测试中...' : '测试 Qwen API' }}
+              </button>
+              <button 
+                class="btn btn-danger" 
+                style="width: 100%;"
+                @click="disconnectQwen"
+              >
+                取消授权
+              </button>
+            </div>
+          </div>
+          
+          <!-- 测试结果显示 -->
+          <div class="setting-row" v-if="qwenTestResult">
+            <div class="setting-info" style="width: 100%;">
+              <div class="test-result">
+                <div class="test-result-header">
+                  <span class="test-result-label">测试结果</span>
+                  <span class="test-result-badge success">成功</span>
+                </div>
+                <div class="test-result-content">
+                  {{ qwenTestResult }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="setting-section">
         <h3 class="section-title">外观</h3>
         <div class="setting-card">
           <div class="setting-row">
@@ -104,10 +175,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useEbookStore } from '../../stores/ebook'
 import { useDialogStore } from '../../stores/dialog'
 import { api } from '../../api/adapter'
+import * as qwenAPI from '../../api/qwen'
 
 const ebookStore = useEbookStore()
 const dialogStore = useDialogStore()
@@ -127,6 +199,33 @@ const storageConfig = computed(() => ebookStore.userConfig.storage)
 const refreshToken = ref('')
 const inputAccessToken = ref('')
 const isLoading = ref(false)
+
+// Qwen OAuth 相关状态
+const qwenAccessToken = ref('')
+const qwenRefreshToken = ref('')
+const qwenResourceUrl = ref('')  // 添加 resource_url
+const isQwenLoading = ref(false)
+const isQwenTesting = ref(false)
+const qwenTestResult = ref('')
+const qwenSessionId = ref('')
+const qwenUserCode = ref('')
+const qwenPollInterval = ref<number | null>(null)
+
+// 从 localStorage 加载 Qwen token
+onMounted(() => {
+  const savedAccessToken = localStorage.getItem('qwen_access_token')
+  const savedRefreshToken = localStorage.getItem('qwen_refresh_token')
+  const savedResourceUrl = localStorage.getItem('qwen_resource_url')
+  if (savedAccessToken) {
+    qwenAccessToken.value = savedAccessToken
+  }
+  if (savedRefreshToken) {
+    qwenRefreshToken.value = savedRefreshToken
+  }
+  if (savedResourceUrl) {
+    qwenResourceUrl.value = savedResourceUrl
+  }
+})
 
 const getAuthorization = () => {
   console.log('=== 开始获取授权 ===')
@@ -237,8 +336,27 @@ const handleAuthCodeViaAlist = async (code: string) => {
     
     console.log('后端API响应状态:', response.status, response.statusText)
     
-    const data = await response.json()
-    console.log('后端API响应数据:', data)
+    // 检查响应是否成功
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('✗ 后端API返回错误:', errorText)
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
+    
+    // 获取响应文本
+    const responseText = await response.text()
+    console.log('后端API响应文本:', responseText)
+    
+    // 尝试解析JSON
+    let data
+    try {
+      data = JSON.parse(responseText)
+      console.log('后端API响应数据:', data)
+    } catch (parseError) {
+      console.error('✗ JSON解析失败:', parseError)
+      console.error('响应内容:', responseText)
+      throw new Error('服务器返回了无效的JSON格式')
+    }
     
     if (!data.error && data.access_token && data.refresh_token) {
       console.log('✓ 成功获取token')
@@ -366,6 +484,230 @@ const handleLanguageChange = async (event: Event) => {
     ui: { ...ebookStore.userConfig.ui, language: target.value }
   })
 }
+
+// ============ Qwen OAuth 相关函数 ============
+
+/**
+ * 启动 Qwen Device Code Flow 授权
+ */
+const startQwenAuth = async () => {
+  console.log('=== 开始 Qwen Device Code Flow 授权 ===')
+  isQwenLoading.value = true
+  qwenTestResult.value = ''
+  
+  try {
+    // 1. 启动 Device Code Flow
+    const deviceAuth = await qwenAPI.startDeviceAuth()
+    qwenSessionId.value = deviceAuth.session_id
+    qwenUserCode.value = deviceAuth.user_code
+    
+    console.log('Device Code Flow 启动成功')
+    console.log('User Code:', deviceAuth.user_code)
+    console.log('Auth URL:', deviceAuth.auth_url)
+    console.log('Session ID:', deviceAuth.session_id)
+    
+    // 2. 打开授权页面
+    if (window.electron) {
+      // Electron 环境：使用系统默认浏览器打开（避免白屏）
+      console.log('✓ Electron 环境，使用系统浏览器打开授权页面')
+      window.electron.openExternal(deviceAuth.auth_url)
+    } else {
+      // 浏览器环境
+      window.open(deviceAuth.auth_url, '_blank', 'width=800,height=600')
+    }
+    
+    // 3. 显示用户码
+    dialogStore.showDialog({
+      title: 'Qwen 授权',
+      message: `请在打开的页面中输入以下用户码完成授权：\n\n${deviceAuth.user_code}\n\n授权后将自动获取 token...`,
+      type: 'info'
+    })
+    
+    // 4. 开始轮询 token
+    startPolling(deviceAuth.session_id, deviceAuth.interval)
+    
+  } catch (error: any) {
+    console.error('✗ Qwen 授权失败:', error)
+    dialogStore.showErrorDialog('授权失败', error.message || '未知错误')
+    isQwenLoading.value = false
+  }
+}
+
+/**
+ * 轮询获取 token
+ */
+const startPolling = async (sessionId: string, interval: number) => {
+  console.log('=== 开始轮询 token ===')
+  console.log('Session ID:', sessionId)
+  console.log('Interval:', interval, 'seconds')
+  
+  let pollCount = 0
+  const maxPolls = 60 // 最多轮询 60 次（5 分钟）
+  let currentInterval = interval * 1000
+  
+  const poll = async () => {
+    pollCount++
+    console.log(`轮询第 ${pollCount} 次...`)
+    
+    try {
+      const result = await qwenAPI.pollForToken(sessionId)
+      
+      if (result.status === 'pending') {
+        // 还在等待授权
+        if (result.slow_down) {
+          // 服务器要求减慢轮询速度
+          currentInterval = currentInterval * 1.5
+          console.log('服务器要求减慢轮询，新间隔:', currentInterval / 1000, 'seconds')
+        }
+        
+        if (pollCount < maxPolls) {
+          // 继续轮询
+          qwenPollInterval.value = window.setTimeout(poll, currentInterval)
+        } else {
+          // 超时
+          throw new Error('授权超时，请重新开始')
+        }
+      } else if (result.status === 'success') {
+        // 获取到 token
+        console.log('✓ 成功获取 token')
+        
+        if (result.is_mock) {
+          console.warn('⚠️ 使用模拟 token（真实 API 不可用）')
+        }
+        
+        qwenAccessToken.value = result.access_token!
+        qwenRefreshToken.value = result.refresh_token!
+        qwenResourceUrl.value = result.resource_url || ''
+        localStorage.setItem('qwen_access_token', result.access_token!)
+        localStorage.setItem('qwen_refresh_token', result.refresh_token!)
+        if (result.resource_url) {
+          localStorage.setItem('qwen_resource_url', result.resource_url)
+        }
+        
+        isQwenLoading.value = false
+        
+        if (result.is_mock) {
+          dialogStore.showDialog({
+            title: 'Qwen 授权成功（模拟模式）',
+            message: '已获取模拟 token。\n\n注意：由于 Qwen 真实 API 端点未知，当前使用模拟数据。\n\n要使用真实 API，需要获取正确的端点信息。',
+            type: 'info'
+          })
+        } else {
+          dialogStore.showSuccessDialog('Qwen 授权成功！')
+        }
+        
+        // 自动测试 API（如果不是模拟模式）
+        if (!result.is_mock) {
+          setTimeout(() => {
+            testQwenAPI()
+          }, 1000)
+        }
+      }
+    } catch (error: any) {
+      console.error('✗ 轮询失败:', error)
+      isQwenLoading.value = false
+      
+      if (qwenPollInterval.value) {
+        clearTimeout(qwenPollInterval.value)
+        qwenPollInterval.value = null
+      }
+      
+      dialogStore.showErrorDialog('获取 Token 失败', error.message || '未知错误')
+    }
+  }
+  
+  // 开始第一次轮询
+  qwenPollInterval.value = window.setTimeout(poll, currentInterval)
+}
+
+/**
+ * 测试 Qwen API
+ */
+const testQwenAPI = async () => {
+  console.log('=== 测试 Qwen API ===')
+  isQwenTesting.value = true
+  qwenTestResult.value = ''
+  
+  try {
+    // Qwen OAuth 只支持两个模型（硬编码，不通过 API 获取）
+    const availableModels = ['qwen3-coder-plus', 'qwen3-coder-flash']
+    const testModel = availableModels[0]
+    
+    console.log('可用模型（硬编码）:', availableModels)
+    console.log('使用模型:', testModel)
+    console.log('Resource URL:', qwenResourceUrl.value || '(未设置，使用默认)')
+    
+    const result = await qwenAPI.testQwenAPI(
+      qwenAccessToken.value,
+      '你好，请用一句话介绍你自己。',
+      qwenResourceUrl.value  // 传递 resource_url
+    )
+    
+    console.log('✓ API 测试成功')
+    console.log('响应:', result.response)
+    console.log('Token 使用:', result.usage)
+    
+    qwenTestResult.value = result.response
+    
+    dialogStore.showDialog({
+      title: 'API 测试成功',
+      message: `模型: ${testModel}\n\nQwen AI 响应：\n\n${result.response}\n\n使用 Token: ${result.usage.total_tokens}`,
+      type: 'success'
+    })
+  } catch (error: any) {
+    console.error('✗ API 测试失败:', error)
+    
+    // 如果是 token 过期，尝试刷新
+    if (error.message?.includes('token') && qwenRefreshToken.value) {
+      console.log('尝试刷新 token...')
+      try {
+        const tokens = await qwenAPI.refreshToken(qwenRefreshToken.value)
+        qwenAccessToken.value = tokens.access_token
+        qwenRefreshToken.value = tokens.refresh_token
+        localStorage.setItem('qwen_access_token', tokens.access_token)
+        localStorage.setItem('qwen_refresh_token', tokens.refresh_token)
+        
+        // 重试测试
+        await testQwenAPI()
+        return
+      } catch (refreshError: any) {
+        console.error('✗ 刷新 token 失败:', refreshError)
+      }
+    }
+    
+    dialogStore.showErrorDialog('API 测试失败', error.message || '未知错误')
+  } finally {
+    isQwenTesting.value = false
+  }
+}
+
+/**
+ * 取消 Qwen 授权
+ */
+const disconnectQwen = () => {
+  // 停止轮询
+  if (qwenPollInterval.value) {
+    clearTimeout(qwenPollInterval.value)
+    qwenPollInterval.value = null
+  }
+  
+  // 清除状态
+  qwenAccessToken.value = ''
+  qwenRefreshToken.value = ''
+  qwenResourceUrl.value = ''
+  qwenTestResult.value = ''
+  qwenSessionId.value = ''
+  qwenUserCode.value = ''
+  
+  // 清除本地存储
+  localStorage.removeItem('qwen_access_token')
+  localStorage.removeItem('qwen_refresh_token')
+  localStorage.removeItem('qwen_resource_url')
+  
+  dialogStore.showSuccessDialog('已取消 Qwen 授权')
+}
+
+
 </script>
 
 <style scoped>
@@ -546,6 +888,60 @@ const handleLanguageChange = async (event: Event) => {
 
 .btn-danger:hover {
   background-color: #f23c3c;
+}
+
+.btn-danger:hover {
+  background-color: #f23c3c;
+}
+
+.btn-secondary {
+  background-color: #909399;
+  color: white;
+}
+
+.btn-secondary:hover {
+  background-color: #73767a;
+}
+
+.test-result {
+  background: linear-gradient(135deg, #F0F9FF, #E0F2FE);
+  border: 1px solid #BAE6FD;
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 8px;
+}
+
+.test-result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.test-result-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0369A1;
+}
+
+.test-result-badge {
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.test-result-badge.success {
+  background-color: #D1FAE5;
+  color: #065F46;
+}
+
+.test-result-content {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #334155;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 @media (max-width: 768px) {

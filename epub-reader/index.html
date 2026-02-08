@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EPUB 阅读器</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #2c3e50;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            color: #7f8c8d;
+            font-size: 1.1em;
+        }
+        
+        .upload-section {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 40px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border: 2px dashed #ddd;
+            transition: all 0.3s ease;
+        }
+        
+        .upload-section:hover {
+            border-color: #3498db;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        
+        .upload-section.dragover {
+            border-color: #2ecc71;
+            background-color: #f0f9ff;
+        }
+        
+        #fileInput {
+            display: none;
+        }
+        
+        .upload-btn {
+            display: inline-block;
+            padding: 12px 24px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 1em;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+            margin: 10px;
+        }
+        
+        .upload-btn:hover {
+            background-color: #2980b9;
+        }
+        
+        .upload-btn.secondary {
+            background-color: #95a5a6;
+        }
+        
+        .upload-btn.secondary:hover {
+            background-color: #7f8c8d;
+        }
+        
+        .reader-container {
+            display: none;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .reader-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background-color: #f8f9fa;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .control-group {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .mode-btn {
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            background-color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .mode-btn.active {
+            background-color: #3498db;
+            color: white;
+            border-color: #3498db;
+        }
+        
+        .nav-btn {
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            background-color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .nav-btn:hover {
+            background-color: #f8f9fa;
+        }
+        
+        .reader-content {
+            position: relative;
+            height: 600px;
+            overflow: auto;
+        }
+        
+        #reader {
+            width: 100%;
+            height: 100%;
+        }
+        
+        .scroll-mode {
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        
+        .page-mode {
+            overflow: hidden;
+        }
+        
+        /* 添加滚动条样式 */
+        .scroll-mode::-webkit-scrollbar {
+            width: 10px;
+        }
+        
+        .scroll-mode::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        
+        .scroll-mode::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 5px;
+        }
+        
+        .scroll-mode::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100%;
+            font-size: 1.2em;
+            color: #7f8c8d;
+        }
+        
+        .error-message {
+            text-align: center;
+            padding: 20px;
+            color: #e74c3c;
+            background-color: #fee;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+            
+            h1 {
+                font-size: 2em;
+            }
+            
+            .upload-section {
+                padding: 20px;
+            }
+            
+            .reader-content {
+                height: 500px;
+            }
+            
+            .reader-controls {
+                flex-direction: column;
+                gap: 10px;
+                align-items: stretch;
+            }
+            
+            .control-group {
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>EPUB 阅读器</h1>
+            <p class="subtitle">支持本地 EPUB 文件导入，提供翻页和滚动两种阅读模式</p>
+        </header>
+        
+        <div class="upload-section" id="uploadSection">
+            <h2>导入 EPUB 文件</h2>
+            <p>点击下方按钮选择 EPUB 文件，或直接拖拽文件到此处</p>
+            <input type="file" id="fileInput" accept=".epub">
+            <button class="upload-btn" onclick="document.getElementById('fileInput').click()">选择文件</button>
+            <button class="upload-btn secondary" onclick="location.reload()">重新开始</button>
+        </div>
+        
+        <div class="reader-container" id="readerContainer">
+            <div class="reader-controls">
+                <div class="control-group">
+                    <button class="mode-btn active" id="pageModeBtn" onclick="switchMode('page')">翻页模式</button>
+                    <button class="mode-btn" id="scrollModeBtn" onclick="switchMode('scroll')">滚动模式</button>
+                </div>
+                <div class="control-group">
+                    <button class="nav-btn" onclick="prevPage()">上一页</button>
+                    <button class="nav-btn" onclick="nextPage()">下一页</button>
+                </div>
+                <div id="bookInfo">
+                    书名: <span id="bookTitle">加载中...</span>
+                </div>
+            </div>
+            <div class="reader-content" id="readerContent">
+                <div class="loading">正在加载 EPUB 文件...</div>
+                <div id="reader"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js"></script>
+    <script>
+        let book = null;
+        let rendition = null;
+        let currentMode = 'page';
+        let bookTitle = '';
+        
+        // 检查库是否加载成功
+        if (typeof ePub === 'undefined') {
+            console.error('epub.js library failed to load');
+            document.getElementById('uploadSection').innerHTML += '<div class="error-message">错误：epub.js 库加载失败，请检查网络连接</div>';
+        }
+        
+        // 拖拽功能
+        const uploadSection = document.getElementById('uploadSection');
+        
+        uploadSection.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadSection.classList.add('dragover');
+        });
+        
+        uploadSection.addEventListener('dragleave', () => {
+            uploadSection.classList.remove('dragover');
+        });
+        
+        uploadSection.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadSection.classList.remove('dragover');
+            
+            if (e.dataTransfer.files.length > 0) {
+                handleFile(e.dataTransfer.files[0]);
+            }
+        });
+        
+        // 文件选择
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+        
+        function handleFile(file) {
+            if (file.type !== 'application/epub+zip' && !file.name.endsWith('.epub')) {
+                alert('请选择 EPUB 格式的文件');
+                return;
+            }
+            
+            if (typeof ePub === 'undefined') {
+                alert('错误：epub.js 库未加载，请刷新页面重试');
+                return;
+            }
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const arrayBuffer = e.target.result;
+                console.log('FileReader loaded arrayBuffer:', arrayBuffer);
+                if (!arrayBuffer) {
+                    alert('错误：无法读取文件内容');
+                    return;
+                }
+                loadEpub(arrayBuffer);
+            };
+            reader.onerror = function(e) {
+                console.error('FileReader error:', e);
+                alert('错误：文件读取失败');
+            };
+            reader.readAsArrayBuffer(file);
+        }
+        
+        function loadEpub(arrayBuffer) {
+            // 显示加载状态
+            document.getElementById('readerContent').innerHTML = '<div class="loading">正在解析 EPUB 文件...</div><div id="reader"></div>';
+            document.getElementById('readerContainer').style.display = 'block';
+            
+            if (typeof ePub === 'undefined') {
+                document.getElementById('readerContent').innerHTML = '<div class="error-message">错误：epub.js 库未加载，请刷新页面重试</div>';
+                return;
+            }
+            
+            try {
+                // 使用正确的 EPUB.js API：直接将 arrayBuffer 传递给 ePub() 构造函数
+                book = ePub(arrayBuffer);
+                
+                console.log('Book created:', book);
+                
+                // 确保 book 对象有效且具有必要的属性
+                if (!book || typeof book.renderTo !== 'function') {
+                    throw new Error('Failed to create book object: book is invalid or missing renderTo method');
+                }
+                
+                // 获取书籍信息
+                try {
+                    // 尝试获取书籍元数据
+                    if (book.ready) {
+                        book.ready.then(() => {
+                            if (book.package && book.package.metadata) {
+                                const metadata = book.package.metadata;
+                                bookTitle = metadata.title || metadata.bookTitle || '未知书名';
+                                document.getElementById('bookTitle').textContent = bookTitle;
+                            }
+                        }).catch((error) => {
+                            console.warn('Error getting metadata:', error);
+                            bookTitle = '未知书名';
+                            document.getElementById('bookTitle').textContent = bookTitle;
+                        });
+                    } else if (book.package && book.package.metadata) {
+                        const metadata = book.package.metadata;
+                        bookTitle = metadata.title || metadata.bookTitle || '未知书名';
+                        document.getElementById('bookTitle').textContent = bookTitle;
+                    } else {
+                        bookTitle = '未知书名';
+                        document.getElementById('bookTitle').textContent = bookTitle;
+                    }
+                } catch (error) {
+                    console.warn('Error getting metadata:', error);
+                    bookTitle = '未知书名';
+                    document.getElementById('bookTitle').textContent = bookTitle;
+                }
+                
+                // 初始化阅读器
+                try {
+                    const readerElement = document.getElementById('reader');
+                    if (!readerElement) {
+                        throw new Error('Reader element not found');
+                    }
+                    
+                    if (!book.renderTo) {
+                        throw new Error('renderTo method not available on book object');
+                    }
+                    
+                    rendition = book.renderTo('reader', {
+                        width: '100%',
+                        height: '100%',
+                        method: 'default',
+                        flow: 'paginated',
+                        spread: 'none',
+                        allowScriptedContent: true,
+                        manager: 'default'
+                    });
+                    
+                    // 隐藏加载状态
+                    document.querySelector('.loading').style.display = 'none';
+                    
+                    // 开始阅读
+                    if (rendition && rendition.display) {
+                        rendition.display();
+                        
+                        // 绑定事件
+                        rendition.on('rendered', (section) => {
+                            console.log('Page rendered:', section);
+                        });
+                        
+                        rendition.on('resized', () => {
+                            if (rendition.resize) {
+                                rendition.resize();
+                            }
+                        });
+                        
+                        // 添加滚动监听，实现章节衔接
+                        rendition.on('relocated', (location) => {
+                            console.log('Relocated to:', location);
+                        });
+                        
+                        window.addEventListener('resize', () => {
+                            if (rendition && rendition.resize) {
+                                rendition.resize();
+                            }
+                        });
+                        
+                        // 监听滚动事件，实现章节衔接
+                        const readerContent = document.getElementById('readerContent');
+                        readerContent.addEventListener('scroll', () => {
+                            if (currentMode === 'scroll') {
+                                // 计算滚动百分比
+                                const scrollTop = readerContent.scrollTop;
+                                const scrollHeight = readerContent.scrollHeight;
+                                const clientHeight = readerContent.clientHeight;
+                                const scrollPercentage = (scrollTop + clientHeight * 1.5) / scrollHeight;
+                                
+                                console.log('Scroll percentage:', scrollPercentage);
+                                
+                                // 当滚动到接近末尾时（90%），尝试加载下一章
+                                if (scrollPercentage > 0.9) {
+                                    console.log('Attempting to load next chapter...');
+                                    // 尝试获取下一个位置
+                                    if (rendition) {
+                                        rendition.next();
+                                    }
+                                }
+                            }
+                        });
+                    } else {
+                        throw new Error('Failed to create rendition or display it');
+                    }
+                } catch (error) {
+                    console.error('Error initializing reader:', error);
+                    document.getElementById('readerContent').innerHTML = '<div class="error-message">初始化阅读器失败: ' + error.message + '</div>';
+                }
+            } catch (error) {
+                console.error('Error loading EPUB:', error);
+                document.getElementById('readerContent').innerHTML = '<div class="error-message">加载 EPUB 文件失败: ' + error.message + '</div>';
+            }
+        }
+        
+        function switchMode(mode) {
+            if (!rendition) return;
+            
+            currentMode = mode;
+            
+            // 更新按钮状态
+            document.getElementById('pageModeBtn').classList.remove('active');
+            document.getElementById('scrollModeBtn').classList.remove('active');
+            document.getElementById(mode + 'ModeBtn').classList.add('active');
+            
+            // 更新阅读模式
+            if (mode === 'page') {
+                // 使用 flow 方法设置翻页模式
+                rendition.flow('paginated');
+                document.getElementById('readerContent').classList.remove('scroll-mode');
+                document.getElementById('readerContent').classList.add('page-mode');
+            } else {
+                // 使用 flow 方法设置滚动模式 - 使用 scrolled-doc 实现连续滚动
+                rendition.flow('scrolled-doc');
+                document.getElementById('readerContent').classList.remove('page-mode');
+                document.getElementById('readerContent').classList.add('scroll-mode');
+            }
+            
+            // 重新渲染并确保内容可见
+            rendition.resize();
+            
+            // 确保内容重新渲染
+            setTimeout(() => {
+                rendition.display();
+            }, 100);
+        }
+        
+        function prevPage() {
+            if (rendition) {
+                rendition.prev();
+            }
+        }
+        
+        function nextPage() {
+            if (rendition) {
+                rendition.next();
+            }
+        }
+        
+        // 键盘导航
+        document.addEventListener('keydown', (e) => {
+            if (!rendition) return;
+            
+            switch (e.key) {
+                case 'ArrowLeft':
+                    if (currentMode === 'page') {
+                        e.preventDefault();
+                        prevPage();
+                    }
+                    break;
+                case 'ArrowRight':
+                    if (currentMode === 'page') {
+                        e.preventDefault();
+                        nextPage();
+                    }
+                    break;
+                case 'ArrowUp':
+                    e.preventDefault();
+                    if (currentMode === 'page') {
+                        prevPage();
+                    } else {
+                        const readerContent = document.getElementById('readerContent');
+                        readerContent.scrollTop -= 50;
+                    }
+                    break;
+                case 'ArrowDown':
+                    e.preventDefault();
+                    if (currentMode === 'page') {
+                        nextPage();
+                    } else {
+                        const readerContent = document.getElementById('readerContent');
+                        readerContent.scrollTop += 50;
+                    }
+                    break;
+                case 'PageUp':
+                    e.preventDefault();
+                    if (currentMode === 'page') {
+                        prevPage();
+                    } else {
+                        const readerContent = document.getElementById('readerContent');
+                        readerContent.scrollTop -= window.innerHeight * 0.8;
+                    }
+                    break;
+                case 'PageDown':
+                    e.preventDefault();
+                    if (currentMode === 'page') {
+                        nextPage();
+                    } else {
+                        const readerContent = document.getElementById('readerContent');
+                        readerContent.scrollTop += window.innerHeight * 0.8;
+                    }
+                    break;
+            }
+        });
+    </script>
+</body>
+</html>

@@ -60,25 +60,6 @@
           </button>
         </div>
       </div>
-      
-      <!-- 模式 -->
-      <div class="control-group">
-        <label>模式</label>
-        <div class="mode-options">
-          <button
-            :class="['mode-btn', { active: pageMode === 'page' }]"
-            @click="$emit('update:pageMode', 'page')"
-          >
-            翻页
-          </button>
-          <button
-            :class="['mode-btn', { active: pageMode === 'scroll' }]"
-            @click="$emit('update:pageMode', 'scroll')"
-          >
-            滚动
-          </button>
-        </div>
-      </div>
     </div>
   </div>
 </template>
@@ -93,8 +74,6 @@ const props = defineProps<{
   theme: string
   fontSize: number
   lineHeight: number
-  pageMode: string
-  alignment: string
 }>()
 
 const emit = defineEmits<{
@@ -102,8 +81,6 @@ const emit = defineEmits<{
   'update:theme': [value: string]
   'update:fontSize': [value: number]
   'update:lineHeight': [value: number]
-  'update:pageMode': [value: 'page' | 'scroll']
-  'update:alignment': [value: string]
 }>()
 
 const themes = [
@@ -242,7 +219,7 @@ const handleProgressChange = () => {
 
 .controls-section {
   display: grid;
-  grid-template-columns: auto repeat(3, minmax(0, 1fr));
+  grid-template-columns: auto repeat(2, minmax(0, 1fr));
   gap: 16px;
   padding: 0 8px;
   align-items: start;
@@ -424,66 +401,6 @@ const handleProgressChange = () => {
 .segment-btn.active {
   background: #4a90e2;
   color: white;
-  box-shadow: 0 1px 3px rgba(74, 144, 226, 0.3);
-}
-
-.mode-options {
-  display: flex;
-  gap: 6px;
-}
-
-.mode-btn {
-  flex: 1;
-  padding: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  background: rgba(0, 0, 0, 0.02);
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-  transition: all 0.2s ease;
-  color: inherit;
-  font-weight: 500;
-}
-
-.mode-btn:hover {
-  background: rgba(0, 0, 0, 0.04);
-  border-color: rgba(0, 0, 0, 0.12);
-}
-
-.theme-dark .mode-btn {
-  border-color: rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.theme-dark .mode-btn:hover {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.12);
-}
-
-.theme-sepia .mode-btn {
-  border-color: rgba(91, 70, 54, 0.08);
-  background: rgba(91, 70, 54, 0.02);
-}
-
-.theme-sepia .mode-btn:hover {
-  background: rgba(91, 70, 54, 0.04);
-  border-color: rgba(91, 70, 54, 0.12);
-}
-
-.theme-green .mode-btn {
-  border-color: rgba(45, 90, 61, 0.08);
-  background: rgba(45, 90, 61, 0.02);
-}
-
-.theme-green .mode-btn:hover {
-  background: rgba(45, 90, 61, 0.04);
-  border-color: rgba(45, 90, 61, 0.12);
-}
-
-.mode-btn.active {
-  background: #4a90e2;
-  color: white;
-  border-color: #4a90e2;
   box-shadow: 0 1px 3px rgba(74, 144, 226, 0.3);
 }
 

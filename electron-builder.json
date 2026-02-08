@@ -36,7 +36,7 @@
         "arch": ["x64"]
       }
     ],
-    "icon": "build/icon.ico",
+    "icon": "appicon.png",
     "artifactName": "${productName}-${version}-${arch}.${ext}"
   },
   "mac": {

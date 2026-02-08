@@ -53,3 +53,5 @@ vendor/
 /.kiro/
 /.trae/
 /.trae/
+/docs/
+/CLIProxyAPI/

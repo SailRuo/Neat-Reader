@@ -1,7 +1,10 @@
 const express = require('express')
 const cors = require('cors')
 const baiduRoutes = require('./routes/baidu')
+const ttsRoutes = require('./routes/tts')
+const qwenRoutes = require('./routes/qwen')
 const logger = require('./utils/logger')
+const { killPortProcess } = require('./utils/portKiller')
 
 const app = express()
 const PORT = 3000
@@ -23,6 +26,8 @@ app.use((req, res, next) => {
 
 // 路由
 app.use('/api/baidu', baiduRoutes)
+app.use('/api/tts', ttsRoutes)
+app.use('/api/qwen', qwenRoutes)
 
 // 健康检查
 app.get('/health', (req, res) => {
