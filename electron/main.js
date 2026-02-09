@@ -25,6 +25,38 @@ function createWindow() {
     icon: path.join(__dirname, '../build/icon.png')
   })
   
+  // 设置 Content Security Policy
+  mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          isDev
+            ? // 开发环境：允许 Vite HMR 和开发工具
+              "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: http://localhost:* ws://localhost:* wss://localhost:*; " +
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:*; " +
+              "style-src 'self' 'unsafe-inline' http://localhost:*; " +
+              "img-src 'self' data: blob: http://localhost:* https:; " +
+              "font-src 'self' data: http://localhost:*; " +
+              "connect-src 'self' http://localhost:* ws://localhost:* wss://localhost:* https://chat.qwen.ai https://portal.qwen.ai https://*.qwen.ai https://pan.baidu.com https://d.pcs.baidu.com https://alistgo.com; " +
+              "media-src 'self' blob: data:; " +
+              "worker-src 'self' blob:; " +
+              "frame-src 'self' blob: data:;"
+            : // 生产环境：更严格的策略
+              "default-src 'self'; " +
+              "script-src 'self'; " +
+              "style-src 'self' 'unsafe-inline'; " +
+              "img-src 'self' data: blob: https:; " +
+              "font-src 'self' data:; " +
+              "connect-src 'self' https://chat.qwen.ai https://portal.qwen.ai https://*.qwen.ai https://pan.baidu.com https://d.pcs.baidu.com https://alistgo.com; " +
+              "media-src 'self' blob: data:; " +
+              "worker-src 'self' blob:; " +
+              "frame-src 'self' blob: data:;"
+        ]
+      }
+    })
+  })
+  
   // 开发环境加载 Vite 服务器，生产环境加载打包文件
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173')

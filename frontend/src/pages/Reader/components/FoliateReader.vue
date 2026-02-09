@@ -28,7 +28,7 @@ const props = defineProps<{
   fontSize: number
   lineHeight: number
   initialProgress?: number
-  initialCfi?: string
+  initialCfi?: string // 添加 CFI 支持
 }>()
 
 // Emits
@@ -37,6 +37,7 @@ const emit = defineEmits<{
   'progress-change': [data: { progress: number; currentPage: number; totalPages: number; cfi?: string }]
   'chapter-change': [data: { index: number; title: string }]
   click: []
+  'text-selected': [data: { text: string; position: { x: number; y: number } }]
 }>()
 
 // 状态
@@ -45,17 +46,26 @@ const view = ref<any>(null)
 const isReady = ref(false)
 const error = ref('')
 
+// 缓存书籍内容和 File 对象
+const cachedBookContent = ref<ArrayBuffer | null>(null)
+const cachedBookFile = ref<File | null>(null)
+const cachedBookId = ref<string>('')
+
 // 章节信息
 const chapters = ref<any[]>([])
 const currentChapterIndex = ref(0)
 const currentChapterTitle = ref('')
+
+// 缓存当前加载的章节 documents（用于 TTS 和样式更新）
+const loadedDocs = ref<Map<number, Document>>(new Map())
 
 // 进度信息
 const progress = ref(0)
 const currentPage = ref(1)
 const totalPages = ref(1)
 
-const hasRestoredProgress = ref(false)
+// 存储当前可见章节的文本内容
+const currentChapterTexts = ref<Map<number, string>>(new Map())
 
 const relocateListener = (e: any) => handleRelocate(e.detail)
 const loadListener = (e: any) => handleLoad(e.detail.doc, e.detail.index)
@@ -79,6 +89,47 @@ const bindDocClickForwarding = (doc: Document) => {
 
   doc.addEventListener('click', handler, true)
   docAny._neatReaderClickForwarder = handler
+}
+
+// 绑定文本选择监听
+const bindDocSelectionListener = (doc: Document) => {
+  const docAny = doc as any
+  if (docAny._neatReaderSelectionListener) return
+
+  const handler = () => {
+    const selection = doc.getSelection ? doc.getSelection() : window.getSelection()
+    if (!selection) return
+
+    const selectedText = selection.toString().trim()
+    if (!selectedText || selectedText.length === 0) return
+
+    // 获取选中文本的位置
+    const range = selection.getRangeAt(0)
+    const rect = range.getBoundingClientRect()
+    
+    // 获取 iframe 的位置偏移
+    const iframe = (doc as any).defaultView?.frameElement
+    let offsetX = 0
+    let offsetY = 0
+    
+    if (iframe) {
+      const iframeRect = iframe.getBoundingClientRect()
+      offsetX = iframeRect.left
+      offsetY = iframeRect.top
+    }
+
+    // 计算相对于视口的位置
+    const position = {
+      x: rect.left + offsetX + rect.width / 2,
+      y: rect.bottom + offsetY
+    }
+
+    emit('text-selected', { text: selectedText, position })
+  }
+
+  doc.addEventListener('mouseup', handler)
+  doc.addEventListener('touchend', handler)
+  docAny._neatReaderSelectionListener = handler
 }
 
 // 绑定 iframe 内滚轮事件转发（用于滚轮翻页）
@@ -117,9 +168,6 @@ const cleanupView = () => {
     delete (viewerRef.value as any)._clickHandler
   }
 
-  currentChapterDocs.clear()
-  currentChapterTexts.value.clear()
-
   if (view.value) {
     try {
       view.value.removeEventListener?.('relocate', relocateListener)
@@ -140,12 +188,27 @@ const themeColors = {
   light: { background: '#ffffff', color: '#2c3e50' },
   sepia: { background: '#f4ecd8', color: '#5b4636' },
   green: { background: '#e8f5e9', color: '#2d5a3d' },
-  dark: { background: '#1a1a1a', color: '#e2e8f0' }
+  dark: { background: '#1a1a1a', color: '#e8e8e8' }
 }
 
 // 初始化
 const initialize = async () => {
   error.value = ''
+  
+  // 如果已经初始化且是同一本书，只需要恢复位置
+  if (isReady.value && view.value && cachedBookId.value === props.bookId) {
+    console.log('✅ [Foliate] 阅读器已初始化，跳过重新加载')
+    
+    // 如果有新的 CFI，跳转到新位置
+    if (props.initialCfi) {
+      await goToCfi(props.initialCfi)
+    } else if (props.initialProgress && props.initialProgress > 0) {
+      await goToProgress(props.initialProgress)
+    }
+    
+    return
+  }
+  
   isReady.value = false
 
   if (!viewerRef.value) {
@@ -156,15 +219,27 @@ const initialize = async () => {
   try {
     cleanupView()
     
-    // 加载书籍内容
-    const content = await localforage.getItem<ArrayBuffer>(`ebook_content_${props.bookId}`)
-    if (!content) {
-      error.value = '书籍内容不存在，请重新导入'
-      return
-    }
+    // 检查缓存：如果是同一本书且已缓存，直接使用
+    let file: File
+    if (cachedBookId.value === props.bookId && cachedBookFile.value) {
+      console.log('✅ [Foliate] 使用缓存的书籍内容')
+      file = cachedBookFile.value
+    } else {
+      console.log('📖 [Foliate] 从 IndexedDB 加载书籍内容')
+      // 加载书籍内容
+      const content = await localforage.getItem<ArrayBuffer>(`ebook_content_${props.bookId}`)
+      if (!content) {
+        error.value = '书籍内容不存在，请重新导入'
+        return
+      }
 
-    // 转换为 File 对象
-    const file = new File([content], 'book.epub', { type: 'application/epub+zip' })
+      // 转换为 File 对象并缓存
+      file = new File([content], 'book.epub', { type: 'application/epub+zip' })
+      cachedBookContent.value = content
+      cachedBookFile.value = file
+      cachedBookId.value = props.bookId
+      console.log('✅ [Foliate] 书籍内容已缓存')
+    }
 
     // 动态导入 Foliate-js
     const { View } = await import('@ray-d-song/foliate-js/view.js')
@@ -182,10 +257,23 @@ const initialize = async () => {
     // 打开书籍
     await view.value.open(file)
 
-    // 初始化视图（不跳转到初始进度，让它自然加载）
+    // 初始化视图 - 如果有 CFI，使用 CFI 恢复；否则使用百分比
+    let lastLocation = null
+    if (props.initialCfi) {
+      // 构建完整的 location 对象
+      lastLocation = {
+        cfi: props.initialCfi,
+        fraction: props.initialProgress ? props.initialProgress / 100 : 0,
+        location: props.initialProgress || 0,
+        tocItem: null,
+        section: null
+      }
+      console.log('📍 [Foliate] 准备使用 CFI 恢复:', lastLocation)
+    }
+    
     await view.value.init({
-      lastLocation: null,
-      showTextStart: false
+      lastLocation: lastLocation,
+      showTextStart: !lastLocation // 如果没有保存位置，显示开头
     })
 
     // 应用主题和样式
@@ -195,11 +283,34 @@ const initialize = async () => {
     addClickListener()
 
     isReady.value = true
-
-    // 延迟恢复进度，避免阻塞初始化
-    setTimeout(() => {
-      tryRestoreProgress()
-    }, 500)
+    console.log('✅ [Foliate] 阅读器初始化完成')
+    
+    // 获取目录并触发 ready 事件
+    if (view.value?.book?.toc) {
+      chapters.value = view.value.book.toc.map((item: any) => ({
+        label: item.label,
+        href: item.href
+      }))
+      console.log('📚 [Foliate] 目录加载完成，章节数:', chapters.value.length)
+    }
+    
+    // 立即触发 ready 事件，不要等待章节加载
+    emit('ready', { chapters: chapters.value })
+    
+    // 如果没有 CFI 但有百分比进度，延迟跳转
+    if (!props.initialCfi && props.initialProgress && props.initialProgress > 0) {
+      setTimeout(() => {
+        console.log('📍 [Foliate] 使用百分比恢复进度:', props.initialProgress)
+        goToProgress(props.initialProgress)
+      }, 500)
+    } else if (props.initialCfi) {
+      console.log('✅ [Foliate] CFI 恢复已应用')
+    } else {
+      // 即使没有初始进度，也要等待一下让第一个章节加载
+      setTimeout(() => {
+        console.log('✅ [Foliate] 初始章节已加载')
+      }, 300)
+    }
 
   } catch (err) {
     console.error('❌ [Foliate] 初始化失败:', err)
@@ -207,57 +318,19 @@ const initialize = async () => {
   }
 }
 
-const tryRestoreProgress = async () => {
-  if (!isReady.value) return
-  if (hasRestoredProgress.value) return
-  hasRestoredProgress.value = true
-
-  console.log('🎯 开始恢复Foliate进度 - CFI:', props.initialCfi, '进度百分比:', props.initialProgress)
-  
-  const cfi = (props.initialCfi || '').trim()
-  if (cfi && view.value) {
-    console.log('📋 使用CFI恢复进度:', cfi)
-    try {
-      await view.value.goTo(cfi)
-      console.log('✅ CFI恢复成功')
-      return
-    } catch (err) {
-      console.log('⚠️ CFI恢复失败:', err)
-    }
-
-    try {
-      await view.value.goTo({ cfi })
-      console.log('✅ CFI对象恢复成功')
-      return
-    } catch (err) {
-      console.log('⚠️ CFI对象恢复失败:', err)
-    }
-  }
-
-  if (props.initialProgress && props.initialProgress > 0) {
-    console.log('📈 使用进度百分比恢复:', props.initialProgress)
-    await goToProgress(props.initialProgress)
-  } else {
-    console.log('ℹ️ 未找到恢复数据，保持在开头')
-  }
-}
-
-// 存储当前可见章节的文本内容
-const currentChapterTexts = ref<Map<number, string>>(new Map())
-
-// 存储已加载章节的 Document（用于样式更新/文本获取）
-const currentChapterDocs = new Map<number, Document>()
-
 // 章节加载完成
 const handleLoad = (doc: Document, index: number) => {
-  // 记录章节 Document（用于后续样式/文本更新）
-  currentChapterDocs.set(index, doc)
+  console.log('📄 [章节加载]', index)
+
+  // 缓存文档对象
+  loadedDocs.value.set(index, doc)
 
   // 保存章节文本内容（用于 TTS）
   try {
     const bodyText = doc.body?.innerText || doc.body?.textContent || ''
     if (bodyText.trim()) {
       currentChapterTexts.value.set(index, bodyText.trim())
+      console.log(`📝 [章节文本] 章节 ${index} 文本长度:`, bodyText.trim().length)
     }
   } catch (e) {
     console.warn('⚠️ [章节文本] 保存失败:', e)
@@ -265,6 +338,8 @@ const handleLoad = (doc: Document, index: number) => {
 
   try {
     const styleEl = doc.getElementById('neat-reader-foliate-style') as HTMLStyleElement | null
+    const colors = themeColors[props.theme]
+    
     if (!styleEl) {
       const style = doc.createElement('style')
       style.id = 'neat-reader-foliate-style'
@@ -276,6 +351,8 @@ const handleLoad = (doc: Document, index: number) => {
           padding: 0 !important;
           font-size: ${props.fontSize}px !important;
           line-height: ${props.lineHeight} !important;
+          background: ${colors.background} !important;
+          color: ${colors.color} !important;
         }
         body {
           box-sizing: border-box !important;
@@ -283,9 +360,10 @@ const handleLoad = (doc: Document, index: number) => {
         * {
           max-width: none !important;
         }
-        p, div, span, li, td, th {
+        p, div, span, li, td, th, h1, h2, h3, h4, h5, h6, a {
           font-size: inherit !important;
           line-height: inherit !important;
+          color: ${colors.color} !important;
         }
         img, svg, video, canvas, table, pre, code {
           max-width: 100% !important;
@@ -293,8 +371,9 @@ const handleLoad = (doc: Document, index: number) => {
         }
       `
       doc.head.appendChild(style)
+      console.log('✅ [样式] 字号:', props.fontSize, '行高:', props.lineHeight, '主题:', props.theme)
     } else {
-      // 更新已存在的样式（用于响应字号/行高变化）
+      // 更新已存在的样式（用于响应字号/行高/主题变化）
       styleEl.textContent = `
         html, body {
           width: 100% !important;
@@ -303,6 +382,8 @@ const handleLoad = (doc: Document, index: number) => {
           padding: 0 !important;
           font-size: ${props.fontSize}px !important;
           line-height: ${props.lineHeight} !important;
+          background: ${colors.background} !important;
+          color: ${colors.color} !important;
         }
         body {
           box-sizing: border-box !important;
@@ -310,9 +391,10 @@ const handleLoad = (doc: Document, index: number) => {
         * {
           max-width: none !important;
         }
-        p, div, span, li, td, th {
+        p, div, span, li, td, th, h1, h2, h3, h4, h5, h6, a {
           font-size: inherit !important;
           line-height: inherit !important;
+          color: ${colors.color} !important;
         }
         img, svg, video, canvas, table, pre, code {
           max-width: 100% !important;
@@ -337,24 +419,24 @@ const handleLoad = (doc: Document, index: number) => {
   } catch (e) {
     console.warn('⚠️ [滚轮] 转发绑定失败:', e)
   }
+
+  // 绑定文本选择监听
+  try {
+    bindDocSelectionListener(doc)
+  } catch (e) {
+    console.warn('⚠️ [文本选择] 监听绑定失败:', e)
+  }
   
-  // 第一次加载时获取目录
-  if (index === 0 && view.value?.book?.toc) {
-    chapters.value = view.value.book.toc.map((item: any) => ({
-      label: item.label,
-      href: item.href
-    }))
-    
-    emit('ready', { chapters: chapters.value })
+  // 如果是当前章节，触发文本更新
+  if (index === currentChapterIndex.value) {
+    console.log('✅ [章节加载] 当前章节已加载，可以获取文本')
   }
 }
 
 // 位置变化
 const handleRelocate = (location: any) => {
   // 提取可序列化的数据，避免 IndexedDB 克隆错误
-  const { section, fraction, tocItem, cfi } = location
-  
-  console.log('🔄 位置变化事件触发 - 分数:', fraction, 'CFI:', cfi)
+  const { section, fraction, tocItem, cfi, range, index, total } = location
   
   // 更新章节（确保 section 是数字）
   if (section !== undefined) {
@@ -372,13 +454,19 @@ const handleRelocate = (location: any) => {
   }
   
   // 更新进度
-  if (fraction !== undefined && typeof fraction === 'number' && !isNaN(fraction) && fraction >= 0) {
-    // 处理分数异常值（负数或过大）
-    const normalizedFraction = Math.min(1, Math.max(0, fraction));
-    progress.value = Math.round(normalizedFraction * 100);
-    console.log('📈 进度更新:', progress.value, '分数:', fraction, '标准化后分数:', normalizedFraction);
-  } else if (fraction !== undefined) {
-    console.warn('⚠️ 检测到异常分数值:', fraction, '使用当前进度:', progress.value);
+  if (fraction !== undefined) {
+    progress.value = Math.round(fraction * 100)
+  }
+  
+  // 更新页数信息（从 location 对象中提取）
+  if (range) {
+    // range 包含当前页和总页数信息
+    currentPage.value = (range.current || 0) + 1 // Foliate 从 0 开始计数
+    totalPages.value = range.total || 1
+  } else if (index !== undefined && total !== undefined) {
+    // 备用方案：使用 index 和 total
+    currentPage.value = index + 1
+    totalPages.value = total
   }
   
   // 发送进度变化事件（只传递可序列化的数据）
@@ -581,13 +669,23 @@ const prevPage = async () => {
 const goToProgress = async (targetProgress: number) => {
   if (!view.value) return
 
-  console.log('🔄 开始跳转到进度:', targetProgress, '转换为分数:', targetProgress / 100)
   try {
     const fraction = targetProgress / 100
     await view.value.goToFraction(fraction)
-    console.log('✅ 跳转到进度成功:', targetProgress)
   } catch (err) {
     console.error('跳转失败:', err)
+  }
+}
+
+// 跳转到 CFI
+const goToCfi = async (cfi: string) => {
+  if (!view.value || !cfi) return
+
+  try {
+    console.log('📍 [Foliate] 跳转到 CFI:', cfi)
+    await view.value.goTo(cfi)
+  } catch (err) {
+    console.error('❌ [Foliate] CFI 跳转失败:', err)
   }
 }
 
@@ -628,86 +726,93 @@ const getCurrentLocation = () => {
 // 监听主题变化
 watch(() => props.theme, () => {
   applyTheme()
+  // 更新所有已加载章节的主题颜色
+  updateAllIframeStyles()
+  console.log('✅ [主题] 已应用到所有 iframe')
 })
 
 // 监听字体大小变化
 watch(() => props.fontSize, (newSize, oldSize) => {
+  console.log('📏 [字号变化]', oldSize, '→', newSize)
   if (view.value?.renderer) {
     view.value.renderer.style.setProperty('--user-font-size', `${props.fontSize}px`)
     view.value.renderer.style.fontSize = `${props.fontSize}px`
     
     // 更新所有已加载章节的样式
     updateAllIframeStyles()
+    console.log('✅ [字号] 已应用到所有 iframe')
   }
 })
 
 // 监听行高变化
 watch(() => props.lineHeight, (newHeight, oldHeight) => {
+  console.log('📐 [行高变化]', oldHeight, '→', newHeight)
   if (view.value?.renderer) {
     view.value.renderer.style.setProperty('--user-line-height', `${props.lineHeight}`)
     view.value.renderer.style.lineHeight = `${props.lineHeight}`
     
     // 更新所有已加载章节的样式
     updateAllIframeStyles()
+    console.log('✅ [行高] 已应用到所有 iframe')
   }
 })
 
-// 更新所有已加载章节文档的样式（旧名保留，避免改动调用点）
+// 更新所有 iframe 的样式
 const updateAllIframeStyles = () => {
-  const docs = Array.from(currentChapterDocs.entries())
-  if (docs.length === 0) return
-
-  docs.forEach(([index, doc]) => {
+  console.log('🔄 [样式更新] 开始更新所有已加载的章节')
+  
+  // 直接使用缓存的文档对象
+  if (loadedDocs.value.size === 0) {
+    console.log('⚠️ [样式更新] 没有已加载的章节文档')
+    return
+  }
+  
+  const colors = themeColors[props.theme]
+  let updatedCount = 0
+  
+  loadedDocs.value.forEach((doc, index) => {
     try {
       const styleEl = doc.getElementById('neat-reader-foliate-style') as HTMLStyleElement | null
-      const css = `
-        html, body {
-          width: 100% !important;
-          max-width: none !important;
-          margin: 0 !important;
-          padding: 0 !important;
-          font-size: ${props.fontSize}px !important;
-          line-height: ${props.lineHeight} !important;
-        }
-        body {
-          box-sizing: border-box !important;
-        }
-        * {
-          max-width: none !important;
-        }
-        p, div, span, li, td, th {
-          font-size: inherit !important;
-          line-height: inherit !important;
-        }
-        img, svg, video, canvas, table, pre, code {
-          max-width: 100% !important;
-          height: auto !important;
-        }
-      `
-
       if (styleEl) {
-        styleEl.textContent = css
-        return
+        styleEl.textContent = `
+          html, body {
+            width: 100% !important;
+            max-width: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            font-size: ${props.fontSize}px !important;
+            line-height: ${props.lineHeight} !important;
+            background: ${colors.background} !important;
+            color: ${colors.color} !important;
+          }
+          body {
+            box-sizing: border-box !important;
+          }
+          * {
+            max-width: none !important;
+          }
+          p, div, span, li, td, th, h1, h2, h3, h4, h5, h6, a {
+            font-size: inherit !important;
+            line-height: inherit !important;
+            color: ${colors.color} !important;
+          }
+          img, svg, video, canvas, table, pre, code {
+            max-width: 100% !important;
+            height: auto !important;
+          }
+        `
+        updatedCount++
+        console.log(`✅ [样式更新] 章节 ${index} 已更新 (字号:${props.fontSize}, 行高:${props.lineHeight}, 主题:${props.theme})`)
+      } else {
+        console.log(`⚠️ [样式更新] 章节 ${index} 没有找到样式元素`)
       }
-
-      const style = doc.createElement('style')
-      style.id = 'neat-reader-foliate-style'
-      style.textContent = css
-      doc.head.appendChild(style)
     } catch (e) {
-      console.warn(`⚠️ [样式更新] 章节 ${index} 更新失败:`, e)
+      console.warn(`⚠️ [样式更新] 无法更新章节 ${index}:`, e)
     }
   })
+  
+  console.log(`✅ [样式更新] 共更新 ${updatedCount} 个章节`)
 }
-
-watch(() => props.initialProgress, () => {
-  // saved progress may be loaded after reader mounts
-  void tryRestoreProgress()
-})
-
-watch(() => props.initialCfi, () => {
-  void tryRestoreProgress()
-})
 
 // 生命周期
 onMounted(async () => {
@@ -742,18 +847,35 @@ onMounted(async () => {
 
 // 获取当前页面文本（用于 TTS）
 const getCurrentPageText = (): string => {
-  const sectionIndex = currentChapterIndex.value
-
-  const cachedText = currentChapterTexts.value.get(sectionIndex)
-  if (cachedText && cachedText.trim()) {
-    return cachedText.trim()
+  //console.log('🔍 [TTS] 开始获取页面文本')
+  //console.log('  - 当前章节索引:', currentChapterIndex.value)
+  //console.log('  - 已缓存章节数:', loadedDocs.value.size)
+  
+  // 优先使用缓存的章节文本
+  const cachedText = currentChapterTexts.value.get(currentChapterIndex.value)
+  if (cachedText) {
+    //console.log('✅ [TTS] 使用缓存的章节文本，长度:', cachedText.length, '前50字:', cachedText.substring(0, 50))
+    return cachedText
   }
-
-  const doc = currentChapterDocs.get(sectionIndex)
-  if (doc?.body) {
-    const bodyText = doc.body.innerText || doc.body.textContent || ''
-    return bodyText.trim()
+  
+  // 如果没有缓存，尝试从文档对象获取
+  const doc = loadedDocs.value.get(currentChapterIndex.value)
+  if (doc) {
+    try {
+      const bodyText = doc.body?.innerText || doc.body?.textContent || ''
+      const trimmedText = bodyText.trim()
+      if (trimmedText) {
+        // 缓存文本
+        currentChapterTexts.value.set(currentChapterIndex.value, trimmedText)
+        //console.log('✅ [TTS] 从文档对象获取文本，长度:', trimmedText.length, '前50字:', trimmedText.substring(0, 50))
+        return trimmedText
+      }
+    } catch (e) {
+      console.warn('⚠️ [TTS] 从文档对象获取文本失败:', e)
+    }
   }
+  
+  console.log('⚠️ [TTS] 无法获取当前页面文本')
   return ''
 }
 
@@ -766,6 +888,7 @@ defineExpose({
   nextPage,
   prevPage,
   goToProgress,
+  goToCfi,
   goToChapter,
   getCurrentLocation,
   getCurrentPageText

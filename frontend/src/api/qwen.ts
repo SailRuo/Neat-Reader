@@ -7,6 +7,7 @@ export interface QwenTokenResponse {
   refresh_token: string
   expires_in: number
   token_type: string
+  resource_url?: string
 }
 
 export interface QwenDeviceAuthResponse {

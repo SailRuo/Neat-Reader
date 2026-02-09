@@ -952,7 +952,7 @@ const uploadToBaidupan = async (book: any) => {
       buttons: []
     })
     
-    const result = await ebookStore.uploadToBaidupan(book.id)
+    const result = await ebookStore.uploadLocalBookToBaidupan(book)
     
     dialogStore.closeDialog()
     

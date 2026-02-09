@@ -15,6 +15,21 @@ export interface BookCategory {
   updatedAt: number;
 }
 
+// AI 对话消息类型
+export interface AIChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+  selectedText?: string; // 用户选中的文本（如果有）
+}
+
+// AI 对话历史类型（每本书独立）
+export interface AIConversationHistory {
+  bookId: string;
+  messages: AIChatMessage[];
+  lastUpdated: number;
+}
+
 // 定义电子书元数据类型
 export interface EbookMetadata {
   id: string;
@@ -108,6 +123,9 @@ export const useEbookStore = defineStore('ebook', () => {
   const readingProgress = ref<ReadingProgress | null>(null);
   const baidupanUser = ref<{baidu_name: string; avatar_url: string; vip_type: number} | null>(null);
   const baidupanUserInfoCache = ref<{data: any, timestamp: number} | null>(null);
+  
+  // AI 对话历史（每本书独立）
+  const aiConversations = ref<Map<string, AIConversationHistory>>(new Map());
   const userConfig = ref<UserConfig>({
     storage: {
       default: 'local',
@@ -283,10 +301,10 @@ export const useEbookStore = defineStore('ebook', () => {
         return serializableBook;
       });
       
-      console.log('正在保存书籍列表，书籍数量:', booksToSave.length);
+      //console.log('正在保存书籍列表，书籍数量:', booksToSave.length);
       
       await localforage.setItem('books', booksToSave);
-      console.log('书籍列表保存成功');
+      // console.log('书籍列表保存成功');
     } catch (error) {
       console.error('保存电子书列表失败:', error);
       if (error instanceof Error) {
@@ -303,7 +321,7 @@ export const useEbookStore = defineStore('ebook', () => {
       const savedCategories = await localforage.getItem<BookCategory[]>('categories');
       
       if (savedCategories && Array.isArray(savedCategories) && savedCategories.length > 0) {
-        console.log('成功加载分类列表，分类数量:', savedCategories.length);
+        //console.log('成功加载分类列表，分类数量:', savedCategories.length);
         // 确保数据是干净的纯对象
         categories.value = savedCategories.map(category => ({
           id: category.id || `category_${Date.now()}_${Math.random()}`,
@@ -1832,12 +1850,72 @@ export const useEbookStore = defineStore('ebook', () => {
     }
   };
 
+  // AI 对话历史管理
+  const loadAIConversations = async () => {
+    try {
+      const saved = await localforage.getItem<Record<string, AIConversationHistory>>('aiConversations')
+      if (saved) {
+        aiConversations.value = new Map(Object.entries(saved))
+        console.log('✅ 加载 AI 对话历史成功，书籍数:', aiConversations.value.size)
+      }
+    } catch (error) {
+      console.error('❌ 加载 AI 对话历史失败:', error)
+    }
+  }
+
+  const saveAIConversations = async () => {
+    try {
+      // 将 Map 转换为普通对象，确保可序列化
+      const obj: Record<string, AIConversationHistory> = {}
+      aiConversations.value.forEach((value, key) => {
+        // 深拷贝并确保所有数据都是可序列化的
+        obj[key] = {
+          bookId: value.bookId,
+          messages: value.messages.map(msg => ({
+            role: msg.role,
+            content: msg.content,
+            timestamp: msg.timestamp,
+            selectedText: msg.selectedText
+          })),
+          lastUpdated: value.lastUpdated
+        }
+      })
+      await localforage.setItem('aiConversations', obj)
+    } catch (error) {
+      console.error('❌ 保存 AI 对话历史失败:', error)
+    }
+  }
+
+  const getAIConversation = (bookId: string): AIConversationHistory => {
+    if (!aiConversations.value.has(bookId)) {
+      aiConversations.value.set(bookId, {
+        bookId,
+        messages: [],
+        lastUpdated: Date.now()
+      })
+    }
+    return aiConversations.value.get(bookId)!
+  }
+
+  const addAIMessage = async (bookId: string, message: AIChatMessage) => {
+    const conversation = getAIConversation(bookId)
+    conversation.messages.push(message)
+    conversation.lastUpdated = Date.now()
+    await saveAIConversations()
+  }
+
+  const clearAIConversation = async (bookId: string) => {
+    aiConversations.value.delete(bookId)
+    await saveAIConversations()
+  }
+
   // 初始化函数
   const initialize = async () => {
     await Promise.all([
       loadBooks(),
       loadUserConfig(),
-      loadCategories()
+      loadCategories(),
+      loadAIConversations()
     ]);
     
     // 尝试从百度网盘同步配置和书籍
@@ -1883,6 +1961,7 @@ export const useEbookStore = defineStore('ebook', () => {
     userConfig,
     deviceInfo,
     baidupanUser,
+    aiConversations,
     
     // 计算属性
     localBooks,
@@ -1927,6 +2006,10 @@ export const useEbookStore = defineStore('ebook', () => {
     loadBaidupanBooks,
     fetchBaidupanUserInfo,
     uploadToBaidupanNew,
+    getAIConversation,
+    addAIMessage,
+    clearAIConversation,
+    saveAIConversations,
     initialize
   };
 });

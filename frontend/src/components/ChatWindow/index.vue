@@ -196,6 +196,7 @@
 import { ref, computed, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import * as qwenAPI from '../../api/qwen'
+import { qwenTokenManager } from '../../utils/qwenTokenManager'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -216,6 +217,8 @@ interface Conversation {
 
 const props = defineProps<{
   visible: boolean
+  bookContext?: string  // 可选的书籍上下文
+  bookTitle?: string    // 可选的书名
 }>()
 
 const emit = defineEmits<{
@@ -252,8 +255,8 @@ const currentMessages = computed(() =>
 
 // 检查是否已授权
 const isOnline = computed(() => {
-  const token = localStorage.getItem('qwen_access_token')
-  return !!token
+  const token = qwenTokenManager.getAccessToken()
+  return !!token && !qwenTokenManager.isTokenExpired()
 })
 
 // 初始化对话
@@ -506,13 +509,20 @@ const sendMessage = async () => {
   })
 
   try {
-    const accessToken = localStorage.getItem('qwen_access_token') || ''
-    const resourceUrl = localStorage.getItem('qwen_resource_url') || ''
+    const accessToken = qwenTokenManager.getAccessToken() || ''
+    const resourceUrl = qwenTokenManager.getResourceUrl() || ''
+
+    // 构建完整的提示词（如果有书籍上下文）
+    let fullPrompt = userMessage || '请描述这张图片'
+    if (props.bookContext && props.bookTitle) {
+      fullPrompt = `你是一个阅读助手，正在帮助用户理解《${props.bookTitle}》这本书。\n\n书籍信息：\n${props.bookContext}\n\n用户问题：${fullPrompt}\n\n请基于书籍内容回答用户的问题。`
+      console.log('📖 [ChatWindow] 使用书籍上下文，书名:', props.bookTitle)
+    }
 
     // 使用流式 API
     await qwenAPI.chatStream(
       accessToken,
-      userMessage || '请描述这张图片',
+      fullPrompt,
       resourceUrl,
       (chunk) => {
         // 实时更新 AI 消息内容

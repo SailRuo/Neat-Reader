@@ -175,11 +175,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useEbookStore } from '../../stores/ebook'
 import { useDialogStore } from '../../stores/dialog'
 import { api } from '../../api/adapter'
 import * as qwenAPI from '../../api/qwen'
+import { qwenTokenManager } from '../../utils/qwenTokenManager'
 
 const ebookStore = useEbookStore()
 const dialogStore = useDialogStore()
@@ -225,6 +226,29 @@ onMounted(() => {
   if (savedResourceUrl) {
     qwenResourceUrl.value = savedResourceUrl
   }
+  
+  // 设置 token 管理器回调
+  qwenTokenManager.onRefresh((tokens) => {
+    console.log('✅ [Settings] Token 自动刷新成功')
+    qwenAccessToken.value = tokens.accessToken
+    qwenRefreshToken.value = tokens.refreshToken
+    if (tokens.resourceUrl) {
+      qwenResourceUrl.value = tokens.resourceUrl
+    }
+  })
+  
+  qwenTokenManager.onError((error) => {
+    console.error('❌ [Settings] Token 自动刷新失败:', error)
+    dialogStore.showErrorDialog(
+      'Token 刷新失败',
+      '您的 Qwen AI 授权已过期，请重新授权'
+    )
+  })
+})
+
+// 组件卸载时清理
+onBeforeUnmount(() => {
+  qwenTokenManager.destroy()
 })
 
 const getAuthorization = () => {
@@ -516,10 +540,10 @@ const startQwenAuth = async () => {
       window.open(deviceAuth.auth_url, '_blank', 'width=800,height=600')
     }
     
-    // 3. 显示用户码
+    // 3. 显示用户码和操作指引
     dialogStore.showDialog({
-      title: 'Qwen 授权',
-      message: `请在打开的页面中输入以下用户码完成授权：\n\n${deviceAuth.user_code}\n\n授权后将自动获取 token...`,
+      title: 'Qwen 授权 - 步骤说明',
+      message: `📋 请按以下步骤完成授权：\n\n1️⃣ 在打开的浏览器页面中输入用户码：\n   ${deviceAuth.user_code}\n\n2️⃣ 点击"确认"完成授权\n\n3️⃣ 看到"认证成功"后，可以关闭浏览器窗口\n\n⏳ 应用将自动获取 token，请稍候...`,
       type: 'info'
     })
     
@@ -548,6 +572,11 @@ const startPolling = async (sessionId: string, interval: number) => {
   const poll = async () => {
     pollCount++
     console.log(`轮询第 ${pollCount} 次...`)
+    
+    // 每 10 次轮询（约 50 秒）提醒一次用户
+    if (pollCount % 10 === 0 && pollCount < maxPolls) {
+      console.log(`⏳ 已等待 ${pollCount * interval} 秒，继续等待授权...`)
+    }
     
     try {
       const result = await qwenAPI.pollForToken(sessionId)
@@ -584,6 +613,17 @@ const startPolling = async (sessionId: string, interval: number) => {
           localStorage.setItem('qwen_resource_url', result.resource_url)
         }
         
+        // 设置 token 管理器（启动自动刷新）
+        if (result.expires_in) {
+          qwenTokenManager.setTokens(
+            result.access_token!,
+            result.refresh_token!,
+            result.expires_in,
+            result.resource_url
+          )
+          console.log('✅ [Settings] Token 管理器已启动自动刷新')
+        }
+        
         isQwenLoading.value = false
         
         if (result.is_mock) {
@@ -593,7 +633,11 @@ const startPolling = async (sessionId: string, interval: number) => {
             type: 'info'
           })
         } else {
-          dialogStore.showSuccessDialog('Qwen 授权成功！')
+          dialogStore.showDialog({
+            title: '✅ Qwen 授权成功',
+            message: '🎉 已成功获取 access token！\n\n💡 提示：您现在可以关闭浏览器中的授权页面了。\n\n应用将自动测试 API 连接...',
+            type: 'success'
+          })
         }
         
         // 自动测试 API（如果不是模拟模式）
@@ -703,6 +747,10 @@ const disconnectQwen = () => {
   localStorage.removeItem('qwen_access_token')
   localStorage.removeItem('qwen_refresh_token')
   localStorage.removeItem('qwen_resource_url')
+  
+  // 清除 token 管理器
+  qwenTokenManager.clearTokens()
+  console.log('✅ [Settings] Token 管理器已清除')
   
   dialogStore.showSuccessDialog('已取消 Qwen 授权')
 }

@@ -29,6 +29,7 @@
         @progress-change="handleProgressChange"
         @chapter-change="handleChapterChange"
         @click="handleContentClick"
+        @text-selected="handleTextSelected"
       />
       
       <PdfReader
@@ -76,6 +77,32 @@
       @navigate="handleNavigate"
     />
     
+    <!-- 文本选择菜单 -->
+    <TextSelectionMenu
+      :visible="showSelectionMenu"
+      :selected-text="selectedText"
+      :position="selectionPosition"
+      @ask-ai="handleAskAI"
+      @close="showSelectionMenu = false"
+    />
+    
+    <!-- AI 浮动按钮 -->
+    <AIFloatingButton
+      :is-open="showAIChat"
+      @toggle="handleToggleAIChat"
+    />
+    
+    <!-- 书籍专用 AI 对话面板 -->
+    <BookAIChatPanel
+      v-if="book"
+      :is-open="showAIChat"
+      :book-id="book.id"
+      :book-title="book.title"
+      :selected-text="selectedTextForAI"
+      :current-page-context="currentPageText"
+      @close="showAIChat = false"
+    />
+    
     <!-- 亮度遮罩 -->
     <div class="brightness-overlay" :style="{ opacity: (100 - brightness) / 100 }"></div>
   </div>
@@ -92,6 +119,9 @@ import BottomBar from './components/BottomBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import FoliateReader from './components/FoliateReader.vue'
 import PdfReader from './components/PdfReader.vue'
+import TextSelectionMenu from './components/TextSelectionMenu.vue'
+import AIFloatingButton from './components/AIFloatingButton.vue'
+import BookAIChatPanel from './components/BookAIChatPanel.vue'
 import { useTextToSpeech } from './composables/useTextToSpeech'
 
 const route = useRoute()
@@ -128,15 +158,27 @@ const chapters = ref<any[]>([]) // 初始化为空数组
 const readingTime = ref(0)
 
 const initialCfi = ref('')
+const initialProgress = ref(0)
 
 const isRestoringProgress = ref(false)
 const restoreTargetProgress = ref(0)
+const restoreStartTime = ref(0)
+const RESTORE_TIMEOUT = 5000 // 5秒超时
 
 // 初始化 TTS
 const tts = useTextToSpeech()
 
 // 获取当前页面文本（用于 TTS）- 使用 ref 而不是 computed
 const currentPageText = ref('')
+
+// 文本选择相关
+const showSelectionMenu = ref(false)
+const selectedText = ref('')
+const selectionPosition = ref({ x: 0, y: 0 })
+const selectedTextForAI = ref('') // 传递给 AI 的选中文本
+
+// AI 对话相关
+const showAIChat = ref(false)
 
 // 更新当前页面文本（带重试机制）
 const updateCurrentPageText = (retryCount = 0) => {
@@ -164,9 +206,15 @@ const updateCurrentPageText = (retryCount = 0) => {
 // const selectedText = ref('')
 // const searchResults = ref<any[]>([])
 
-// 内容点击处理 - 切换控制栏显示/隐藏
+// 内容点击处理 - 切换控制栏显示/隐藏，同时关闭 AI 对话框
 const handleContentClick = () => {
   showControls.value = !showControls.value
+  
+  // 如果 AI 对话框打开，点击阅读区域时关闭它
+  if (showAIChat.value) {
+    showAIChat.value = false
+    console.log('🤖 [AI 对话] 点击阅读区域，关闭对话框')
+  }
 }
 
 // 侧边栏切换
@@ -203,13 +251,14 @@ const handleReaderReady = (data: any) => {
 
 // 进度变化
 const handleProgressChange = (data: any) => {
-  console.log('🔄 进度变化事件 - 接收数据:', data)
+  console.log('🔄 进度变化事件 - 接收数据:', data, '恢复状态:', isRestoringProgress.value)
   
   // 验证进度值是否有效
   if (typeof data.progress === 'number' && !isNaN(data.progress) && data.progress >= 0 && data.progress <= 100) {
     progress.value = data.progress
   } else {
     console.warn('⚠️ 接收到无效的进度值:', data.progress, '使用当前值:', progress.value)
+    return // 无效进度不保存
   }
   
   currentPage.value = data.currentPage || 1
@@ -218,18 +267,33 @@ const handleProgressChange = (data: any) => {
   // 更新当前页面文本
   updateCurrentPageText()
   
-  // 保存进度
+  // 检查进度恢复状态
   if (isRestoringProgress.value) {
-    console.log('🔄 检查进度恢复状态 - 当前:', progress.value, '目标:', restoreTargetProgress.value, '差值:', Math.abs(progress.value - restoreTargetProgress.value))
-    if (progress.value > 0 && Math.abs(progress.value - restoreTargetProgress.value) <= 2) {
+    const elapsed = Date.now() - restoreStartTime.value
+    const diff = Math.abs(progress.value - restoreTargetProgress.value)
+    
+    console.log('🔄 检查进度恢复状态 - 当前:', progress.value, '目标:', restoreTargetProgress.value, '差值:', diff, '耗时:', elapsed)
+    
+    // 检查是否超时
+    if (elapsed > RESTORE_TIMEOUT) {
+      console.warn('⚠️ 进度恢复超时，强制完成')
+      isRestoringProgress.value = false
+      saveProgress()
+      return
+    }
+    
+    // 检查是否恢复成功（允许 5% 的误差）
+    if (diff <= 5) {
       console.log('✅ 进度恢复完成，目标:', restoreTargetProgress.value, '当前:', progress.value)
       isRestoringProgress.value = false
+      saveProgress()
     } else {
       console.log('🔄 仍在恢复进度，当前:', progress.value, '目标:', restoreTargetProgress.value)
-      return
+      return // 恢复中不保存进度
     }
   }
 
+  // 非恢复状态，保存进度
   saveProgress()
 }
 
@@ -289,6 +353,40 @@ const handleNavigate = (data: any) => {
   }
   
   activeSidebar.value = null
+}
+
+// 处理文本选择
+const handleTextSelected = (data: { text: string; position: { x: number; y: number } }) => {
+  console.log('📝 [文本选择]', data.text.substring(0, 50))
+  selectedText.value = data.text
+  selectionPosition.value = data.position
+  showSelectionMenu.value = true
+}
+
+// 处理 AI 对话
+const handleAskAI = (text: string) => {
+  console.log('🤖 [AI 对话] 选中文本:', text.substring(0, 50))
+  
+  // 保存选中的文本，传递给 AI 面板
+  selectedTextForAI.value = text
+  
+  // 关闭选择菜单，打开 AI 面板
+  showSelectionMenu.value = false
+  showAIChat.value = true
+  
+  console.log('✅ 选中文本已传递给 AI 面板')
+}
+
+// 切换 AI 对话面板
+const handleToggleAIChat = () => {
+  console.log('🤖 [AI 对话] 切换面板:', !showAIChat.value)
+  
+  // 如果关闭面板，清空选中文本
+  if (showAIChat.value) {
+    selectedTextForAI.value = ''
+  }
+  
+  showAIChat.value = !showAIChat.value
 }
 
 // 保存进度
@@ -365,9 +463,10 @@ watch([theme, fontSize, lineHeight, brightness], () => {
 onMounted(async () => {
   const bookId = route.params.id as string
   
-  book.value = ebookStore.getBookById(bookId)
+  // 先设置 book，避免 v-if 闪烁
+  const bookData = ebookStore.getBookById(bookId)
   
-  if (!book.value) {
+  if (!bookData) {
     console.error('❌ 未找到书籍信息')
     router.push('/')
     return
@@ -380,7 +479,7 @@ onMounted(async () => {
       console.error('❌ 书籍内容不存在，键名:', `ebook_content_${bookId}`)
       
       // 检查是否是云端书籍需要下载
-      if (book.value.storageType === 'baidupan') {
+      if (bookData.storageType === 'baidupan') {
         alert('该书籍尚未下载到本地，请先在首页下载后再阅读')
       } else {
         alert('书籍内容加载失败，文件可能已损坏，请重新导入')
@@ -402,23 +501,29 @@ onMounted(async () => {
   // 同步加载阅读进度（阻塞，确保进度在阅读器初始化前加载）
   const savedProgress = await ebookStore.loadReadingProgress(bookId)
   if (savedProgress) {
-    progress.value = Math.floor(savedProgress.position * 100)
+    const savedProgressPercent = Math.floor(savedProgress.position * 100)
+    progress.value = savedProgressPercent
     currentChapterIndex.value = savedProgress.chapterIndex || 0
     currentChapterTitle.value = savedProgress.chapterTitle || ''
     readingTime.value = savedProgress.readingTime || 0
 
     initialCfi.value = savedProgress.cfi || ''
+    initialProgress.value = savedProgressPercent
 
-    if (progress.value > 0) {
+    if (savedProgressPercent > 0) {
       isRestoringProgress.value = true
-      restoreTargetProgress.value = progress.value
+      restoreTargetProgress.value = savedProgressPercent
+      restoreStartTime.value = Date.now()
+      console.log('📖 设置进度恢复 - 目标:', savedProgressPercent, '%, CFI:', initialCfi.value)
     }
   } else {
-    // start from beginning
+    console.log('ℹ️ 无保存进度，从头开始')
   }
-})
-
-onMounted(() => {
+  
+  // 最后设置 book，触发阅读器渲染（此时所有数据已准备好）
+  book.value = bookData
+  
+  // 键盘事件监听
   window.addEventListener('keydown', handleKeyDown)
 })
 
@@ -443,27 +548,28 @@ onBeforeUnmount(async () => {
   height: 100vh;
   position: relative;
   overflow: hidden;
-  transition: background-color 0.3s ease;
+  transition: background-color 0.2s ease;
 }
 
+/* 主题颜色 - 优化对比度和舒适度 */
 .theme-light {
   background: #ffffff;
-  color: #2c3e50;
+  color: #1a1a1a;
 }
 
 .theme-sepia {
   background: #f4ecd8;
-  color: #5b4636;
+  color: #3d2817;
 }
 
 .theme-green {
   background: #e8f5e9;
-  color: #2d5a3d;
+  color: #1b4d2e;
 }
 
 .theme-dark {
   background: #1a1a1a;
-  color: #e2e8f0;
+  color: #e8e8e8;
 }
 
 .reader-content {
@@ -475,7 +581,7 @@ onBeforeUnmount(async () => {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  transition: background-color 0.3s ease;
+  transition: background-color 0.2s ease;
   z-index: 1;
 }
 
@@ -502,26 +608,30 @@ onBeforeUnmount(async () => {
   user-select: none;
 }
 
+/* 优化浮动进度显示 - 更好的可读性 */
 .floating-progress {
   position: fixed;
-  bottom: 8px;
-  left: 8px;
-  padding: 4px 10px;
-  background: rgba(0, 0, 0, 0.3);
-  color: rgba(255, 255, 255, 0.8);
-  border-radius: 4px;
-  font-size: 11px;
+  bottom: 12px;
+  left: 12px;
+  padding: 6px 12px;
+  background: rgba(0, 0, 0, 0.6);
+  color: rgba(255, 255, 255, 0.95);
+  border-radius: 6px;
+  font-size: 12px;
   font-weight: 500;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   z-index: 500;
   pointer-events: none;
   user-select: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transition: opacity 0.2s ease;
 }
 
+/* 淡入淡出动画 - 更流畅 */
 .fade-enter-active,
 .fade-leave-active {
-  transition: opacity 0.3s ease;
+  transition: opacity 0.2s ease;
 }
 
 .fade-enter-from,
@@ -529,6 +639,7 @@ onBeforeUnmount(async () => {
   opacity: 0;
 }
 
+/* 亮度遮罩 - 平滑过渡 */
 .brightness-overlay {
   position: fixed;
   top: 0;
@@ -538,6 +649,6 @@ onBeforeUnmount(async () => {
   background: #000;
   pointer-events: none;
   z-index: 10000;
-  transition: opacity 0.3s ease;
+  transition: opacity 0.2s ease;
 }
 </style>
