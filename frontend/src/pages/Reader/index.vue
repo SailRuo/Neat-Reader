@@ -461,10 +461,13 @@ watch([theme, fontSize, lineHeight, brightness], () => {
 
 // 生命周期
 onMounted(async () => {
+  console.log('🔍 [Reader] onMounted 开始')
   const bookId = route.params.id as string
+  console.log('🔍 [Reader] 书籍ID:', bookId)
   
   // 先设置 book，避免 v-if 闪烁
   const bookData = ebookStore.getBookById(bookId)
+  console.log('🔍 [Reader] 书籍数据:', bookData ? '已找到' : '未找到')
   
   if (!bookData) {
     console.error('❌ 未找到书籍信息')
@@ -472,9 +475,11 @@ onMounted(async () => {
     return
   }
   
+  console.log('🔍 [Reader] 开始检查书籍内容...')
   // 详细检查书籍内容是否存在
   try {
     const contentExists = await localforage.getItem(`ebook_content_${bookId}`)
+    console.log('🔍 [Reader] 内容检查结果:', contentExists ? '存在' : '不存在')
     if (!contentExists) {
       console.error('❌ 书籍内容不存在，键名:', `ebook_content_${bookId}`)
       
@@ -495,8 +500,10 @@ onMounted(async () => {
     return
   }
   
+  console.log('🔍 [Reader] 开始加载用户配置...')
   // 立即加载用户配置（同步操作）
   loadUserConfig()
+  console.log('🔍 [Reader] 用户配置加载完成')
   
   // 同步加载阅读进度（阻塞，确保进度在阅读器初始化前加载）
   const savedProgress = await ebookStore.loadReadingProgress(bookId)

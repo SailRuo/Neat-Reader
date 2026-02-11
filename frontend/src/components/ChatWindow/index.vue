@@ -62,7 +62,7 @@
             </div>
 
             <!-- 消息列表 -->
-            <div class="chat-messages" ref="messagesContainer" @paste="handlePaste">
+            <div class="chat-messages" ref="messagesContainer">
               <div v-if="currentMessages.length === 0" class="chat-empty">
                 <div class="empty-icon">💬</div>
                 <p>开始与 Qwen AI 对话吧！</p>
@@ -141,6 +141,7 @@
                 rows="1"
                 @keydown.enter.exact.prevent="sendMessage"
                 @keydown.enter.shift.exact="inputMessage += '\n'"
+                @paste="handlePaste"
                 ref="inputRef"
               ></textarea>
               <button 
@@ -158,9 +159,17 @@
 
             <!-- 底部提示 -->
             <div v-if="!isOnline" class="chat-footer">
-              <span class="warning-icon">⚠️</span>
-              <span>请先在设置中完成 Qwen AI 授权</span>
-              <button class="link-btn" @click="goToSettings">前往设置</button>
+              <div class="footer-content">
+                <span class="warning-icon">⚠️</span>
+                <span class="footer-text">请先在设置中完成 Qwen AI 授权</span>
+                <button class="link-btn" @click="goToSettings">
+                  前往设置
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                    <polyline points="12 5 19 12 12 19"></polyline>
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -390,23 +399,86 @@ const triggerImageUpload = () => {
   fileInputRef.value?.click()
 }
 
+// 压缩图片（更激进的压缩策略）
+const compressImage = (file: File, maxWidth: number = 800, quality: number = 0.7): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const img = new Image()
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        let width = img.width
+        let height = img.height
+
+        // 计算缩放比例（更激进）
+        if (width > maxWidth || height > maxWidth) {
+          if (width > height) {
+            height = (height * maxWidth) / width
+            width = maxWidth
+          } else {
+            width = (width * maxWidth) / height
+            height = maxWidth
+          }
+        }
+
+        canvas.width = width
+        canvas.height = height
+
+        const ctx = canvas.getContext('2d')
+        if (!ctx) {
+          reject(new Error('无法获取 canvas context'))
+          return
+        }
+
+        ctx.drawImage(img, 0, 0, width, height)
+
+        // 转换为 Base64，使用 JPEG 格式压缩
+        const compressedBase64 = canvas.toDataURL('image/jpeg', quality)
+        
+        // 检查压缩后的大小
+        const sizeInKB = (compressedBase64.length * 0.75) / 1024
+        console.log('图片压缩完成', {
+          原始尺寸: `${img.width}x${img.height}`,
+          压缩后尺寸: `${width}x${height}`,
+          原始大小: `${(file.size / 1024).toFixed(2)}KB`,
+          压缩后大小: `${sizeInKB.toFixed(2)}KB`
+        })
+        
+        // 如果压缩后仍然太大（> 500KB），进一步压缩
+        if (sizeInKB > 500 && quality > 0.3) {
+          console.warn('图片仍然较大，进行二次压缩...')
+          const furtherCompressed = canvas.toDataURL('image/jpeg', 0.5)
+          resolve(furtherCompressed)
+        } else {
+          resolve(compressedBase64)
+        }
+      }
+      img.onerror = () => reject(new Error('图片加载失败'))
+      img.src = e.target?.result as string
+    }
+    reader.onerror = () => reject(new Error('文件读取失败'))
+    reader.readAsDataURL(file)
+  })
+}
+
 // 处理文件选择
-const handleFileSelect = (event: Event) => {
+const handleFileSelect = async (event: Event) => {
   const target = event.target as HTMLInputElement
   const files = target.files
   
   if (files) {
-    Array.from(files).forEach(file => {
+    for (const file of Array.from(files)) {
       if (file.type.startsWith('image/')) {
-        const reader = new FileReader()
-        reader.onload = (e) => {
-          if (e.target?.result) {
-            pendingImages.value.push(e.target.result as string)
-          }
+        try {
+          // 更激进的压缩（最大 800px，质量 0.7）
+          const compressedBase64 = await compressImage(file, 800, 0.7)
+          pendingImages.value.push(compressedBase64)
+        } catch (error) {
+          console.error('图片压缩失败:', error)
+          alert(`图片 "${file.name}" 处理失败，请尝试更小的图片`)
         }
-        reader.readAsDataURL(file)
       }
-    })
+    }
   }
   
   // 清空文件输入
@@ -416,7 +488,7 @@ const handleFileSelect = (event: Event) => {
 }
 
 // 处理粘贴
-const handlePaste = (event: ClipboardEvent) => {
+const handlePaste = async (event: ClipboardEvent) => {
   const items = event.clipboardData?.items
   if (!items) return
   
@@ -426,13 +498,14 @@ const handlePaste = (event: ClipboardEvent) => {
       event.preventDefault()
       const file = item.getAsFile()
       if (file) {
-        const reader = new FileReader()
-        reader.onload = (e) => {
-          if (e.target?.result) {
-            pendingImages.value.push(e.target.result as string)
-          }
+        try {
+          // 更激进的压缩（最大 800px，质量 0.7）
+          const compressedBase64 = await compressImage(file, 800, 0.7)
+          pendingImages.value.push(compressedBase64)
+        } catch (error) {
+          console.error('图片压缩失败:', error)
+          alert('粘贴的图片处理失败，请尝试更小的图片')
         }
-        reader.readAsDataURL(file)
       }
     }
   }
@@ -519,11 +592,19 @@ const sendMessage = async () => {
       console.log('📖 [ChatWindow] 使用书籍上下文，书名:', props.bookTitle)
     }
 
-    // 使用流式 API
+    // 使用流式 API，传递图片数据
+    console.log('📤 发送消息到 Qwen API', {
+      hasImages: images.length > 0,
+      imageCount: images.length,
+      firstImagePrefix: images[0]?.substring(0, 50),
+      messageLength: fullPrompt.length
+    });
+    
     await qwenAPI.chatStream(
       accessToken,
       fullPrompt,
       resourceUrl,
+      images.length > 0 ? images : undefined,  // 传递图片 Base64 数组
       (chunk) => {
         // 实时更新 AI 消息内容
         conv.messages[aiMessageIndex].content += chunk
@@ -566,7 +647,8 @@ watch(isVisible, (visible) => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -576,21 +658,22 @@ watch(isVisible, (visible) => {
 
 .chat-window {
   width: 100%;
-  max-width: 1000px;
-  height: 80vh;
-  max-height: 700px;
+  max-width: 1100px;
+  height: 85vh;
+  max-height: 800px;
   background: white;
-  border-radius: 16px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  border-radius: 20px;
+  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.25), 0 0 1px rgba(0, 0, 0, 0.1);
   display: flex;
   overflow: hidden;
+  border: 1px solid rgba(226, 232, 240, 0.8);
 }
 
 /* 侧边栏 */
 .chat-sidebar {
-  width: 260px;
-  background: linear-gradient(180deg, #F8FAFC 0%, #FFFFFF 100%);
-  border-right: 1px solid #E8E8E8;
+  width: 280px;
+  background: linear-gradient(180deg, #F8FAFC 0%, #F1F5F9 100%);
+  border-right: 1px solid #E2E8F0;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -600,62 +683,88 @@ watch(isVisible, (visible) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px;
-  border-bottom: 1px solid #E8E8E8;
+  padding: 20px 16px;
+  border-bottom: 1px solid #E2E8F0;
+  background: white;
 }
 
 .sidebar-header h3 {
   margin: 0;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
-  color: #1E293B;
+  color: #0F172A;
+  letter-spacing: -0.01em;
 }
 
 .new-chat-btn {
   width: 36px;
   height: 36px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #4A90E2, #357ABD);
+  border-radius: 10px;
+  background: linear-gradient(135deg, #3B82F6, #2563EB);
   border: none;
   color: white;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 3px rgba(59, 130, 246, 0.3);
 }
 
 .new-chat-btn:hover {
-  transform: scale(1.05);
-  box-shadow: 0 4px 12px rgba(74, 144, 226, 0.4);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+  background: linear-gradient(135deg, #2563EB, #1D4ED8);
+}
+
+.new-chat-btn:active {
+  transform: translateY(0);
 }
 
 .conversations-list {
   flex: 1;
   overflow-y: auto;
-  padding: 8px;
+  padding: 12px 8px;
 }
 
 .conversation-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   padding: 12px;
-  border-radius: 8px;
+  border-radius: 12px;
   cursor: pointer;
-  transition: all 0.2s;
-  margin-bottom: 4px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  margin-bottom: 6px;
   border: 1px solid transparent;
+  position: relative;
+}
+
+.conversation-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 0;
+  background: linear-gradient(180deg, #3B82F6, #2563EB);
+  border-radius: 0 2px 2px 0;
+  transition: height 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .conversation-item:hover {
-  background: rgba(74, 144, 226, 0.05);
-  border-color: rgba(74, 144, 226, 0.2);
+  background: rgba(59, 130, 246, 0.06);
+  border-color: rgba(59, 130, 246, 0.15);
 }
 
 .conversation-item.active {
-  background: linear-gradient(135deg, rgba(74, 144, 226, 0.1), rgba(74, 144, 226, 0.05));
-  border-color: #4A90E2;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(59, 130, 246, 0.06));
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.conversation-item.active::before {
+  height: 60%;
 }
 
 .conversation-info {
@@ -664,13 +773,14 @@ watch(isVisible, (visible) => {
 }
 
 .conversation-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
-  color: #1E293B;
+  color: #0F172A;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   margin-bottom: 4px;
+  letter-spacing: -0.01em;
 }
 
 .conversation-preview {
@@ -679,12 +789,13 @@ watch(isVisible, (visible) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.4;
 }
 
 .delete-conversation-btn {
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  border-radius: 8px;
   background: transparent;
   border: none;
   color: #94A3B8;
@@ -692,7 +803,7 @@ watch(isVisible, (visible) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   opacity: 0;
 }
 
@@ -703,6 +814,7 @@ watch(isVisible, (visible) => {
 .delete-conversation-btn:hover {
   background: rgba(239, 68, 68, 0.1);
   color: #EF4444;
+  transform: scale(1.05);
 }
 
 /* 主聊天区域 */
@@ -718,63 +830,105 @@ watch(isVisible, (visible) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
-  background: linear-gradient(135deg, #4A90E2, #357ABD);
+  padding: 20px 24px;
+  background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
   color: white;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .chat-header-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
 }
 
 .chat-icon {
-  font-size: 32px;
+  font-size: 36px;
   line-height: 1;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
 }
 
 .chat-title h3 {
   margin: 0;
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
 .chat-status {
   font-size: 12px;
-  opacity: 0.8;
-}
-
-.chat-status.online {
-  opacity: 1;
+  opacity: 0.9;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
 }
 
 .chat-status.online::before {
-  content: '●';
-  color: #67C23A;
-  margin-right: 4px;
+  content: '';
+  width: 6px;
+  height: 6px;
+  background: #10B981;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.3);
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 .close-btn {
-  background: none;
+  background: rgba(255, 255, 255, 0.1);
   border: none;
   color: white;
   cursor: pointer;
   padding: 8px;
-  border-radius: 8px;
-  transition: background 0.2s;
+  border-radius: 10px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .close-btn:hover {
   background: rgba(255, 255, 255, 0.2);
+  transform: scale(1.05);
+}
+
+.close-btn:active {
+  transform: scale(0.95);
 }
 
 /* 消息列表 */
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 20px;
-  background: #F5F7FA;
+  padding: 24px;
+  background: linear-gradient(180deg, #F8FAFC 0%, #F1F5F9 100%);
+}
+
+.chat-messages::-webkit-scrollbar {
+  width: 8px;
+}
+
+.chat-messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-messages::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 4px;
+}
+
+.chat-messages::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
 }
 
 .chat-empty {
@@ -783,51 +937,66 @@ watch(isVisible, (visible) => {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #999;
+  color: #64748B;
   text-align: center;
 }
 
 .empty-icon {
-  font-size: 64px;
-  margin-bottom: 16px;
+  font-size: 72px;
+  margin-bottom: 20px;
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.05));
+}
+
+.chat-empty p {
+  font-size: 15px;
+  color: #475569;
+  margin: 0;
 }
 
 .quick-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 20px;
+  gap: 10px;
+  margin-top: 28px;
   justify-content: center;
 }
 
 .quick-actions button {
-  padding: 8px 16px;
+  padding: 10px 18px;
   background: white;
-  border: 1px solid #DCDFE6;
-  border-radius: 20px;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
   cursor: pointer;
-  font-size: 14px;
-  color: #606266;
-  transition: all 0.2s;
+  font-size: 13px;
+  color: #475569;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  font-weight: 500;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .quick-actions button:hover {
-  background: #4A90E2;
+  background: linear-gradient(135deg, #3B82F6, #2563EB);
   color: white;
-  border-color: #4A90E2;
+  border-color: transparent;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.quick-actions button:active {
+  transform: translateY(0);
 }
 
 .message {
   display: flex;
   gap: 12px;
-  margin-bottom: 16px;
-  animation: messageSlideIn 0.3s ease;
+  margin-bottom: 20px;
+  animation: messageSlideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 @keyframes messageSlideIn {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(12px);
   }
   to {
     opacity: 1;
@@ -840,21 +1009,27 @@ watch(isVisible, (visible) => {
 }
 
 .message-avatar {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   background: white;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
+  font-size: 22px;
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border: 2px solid #F1F5F9;
+}
+
+.message.user .message-avatar {
+  background: linear-gradient(135deg, #3B82F6, #2563EB);
+  border-color: rgba(59, 130, 246, 0.2);
 }
 
 .message-content {
   flex: 1;
-  max-width: 70%;
+  max-width: 75%;
 }
 
 .message.user .message-content {
@@ -866,58 +1041,69 @@ watch(isVisible, (visible) => {
 .message-images {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 
 .message-image {
-  max-width: 200px;
-  max-height: 200px;
-  border-radius: 8px;
+  max-width: 220px;
+  max-height: 220px;
+  border-radius: 12px;
   cursor: pointer;
-  transition: transform 0.2s;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   object-fit: cover;
+  border: 2px solid #E2E8F0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 .message-image:hover {
-  transform: scale(1.05);
+  transform: scale(1.03);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  border-color: #3B82F6;
 }
 
 .message-text {
   background: white;
-  padding: 12px 16px;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  padding: 14px 18px;
+  border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
   word-wrap: break-word;
   white-space: pre-wrap;
-  line-height: 1.6;
+  line-height: 1.65;
+  font-size: 14px;
+  color: #1E293B;
+  border: 1px solid #F1F5F9;
 }
 
 .message.user .message-text {
-  background: linear-gradient(135deg, #4A90E2, #357ABD);
+  background: linear-gradient(135deg, #3B82F6, #2563EB);
   color: white;
+  border-color: transparent;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.25);
 }
 
 .message-time {
-  font-size: 12px;
-  color: #999;
-  margin-top: 4px;
-  padding: 0 4px;
+  font-size: 11px;
+  color: #94A3B8;
+  margin-top: 6px;
+  padding: 0 6px;
+  font-weight: 500;
 }
 
 /* 输入中动画 */
 .typing {
   display: flex;
-  gap: 4px;
-  padding: 16px;
+  gap: 5px;
+  padding: 18px;
 }
 
 .typing span {
-  width: 8px;
-  height: 8px;
-  background: #4A90E2;
+  width: 9px;
+  height: 9px;
+  background: linear-gradient(135deg, #3B82F6, #2563EB);
   border-radius: 50%;
-  animation: typing 1.4s infinite;
+  animation: typing 1.4s ease-in-out infinite;
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
 }
 
 .typing span:nth-child(2) {
@@ -930,11 +1116,11 @@ watch(isVisible, (visible) => {
 
 @keyframes typing {
   0%, 60%, 100% {
-    transform: translateY(0);
-    opacity: 0.5;
+    transform: translateY(0) scale(1);
+    opacity: 0.6;
   }
   30% {
-    transform: translateY(-10px);
+    transform: translateY(-12px) scale(1.1);
     opacity: 1;
   }
 }
@@ -942,18 +1128,18 @@ watch(isVisible, (visible) => {
 /* 待发送图片 */
 .pending-images {
   background: white;
-  border-top: 1px solid #E8E8E8;
-  padding: 12px 20px;
+  border-top: 1px solid #E2E8F0;
+  padding: 16px 24px;
 }
 
 .pending-images-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
   font-size: 13px;
-  color: #64748B;
-  font-weight: 500;
+  color: #475569;
+  font-weight: 600;
 }
 
 .clear-images-btn {
@@ -962,9 +1148,10 @@ watch(isVisible, (visible) => {
   color: #EF4444;
   cursor: pointer;
   font-size: 12px;
-  padding: 4px 8px;
-  border-radius: 4px;
-  transition: background 0.2s;
+  padding: 6px 12px;
+  border-radius: 8px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  font-weight: 600;
 }
 
 .clear-images-btn:hover {
@@ -973,8 +1160,23 @@ watch(isVisible, (visible) => {
 
 .pending-images-list {
   display: flex;
-  gap: 8px;
+  gap: 12px;
   overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.pending-images-list::-webkit-scrollbar {
+  height: 6px;
+}
+
+.pending-images-list::-webkit-scrollbar-track {
+  background: #F1F5F9;
+  border-radius: 3px;
+}
+
+.pending-images-list::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 3px;
 }
 
 .pending-image-item {
@@ -983,19 +1185,25 @@ watch(isVisible, (visible) => {
 }
 
 .pending-image-preview {
-  width: 80px;
-  height: 80px;
+  width: 90px;
+  height: 90px;
   object-fit: cover;
-  border-radius: 8px;
-  border: 2px solid #E8E8E8;
+  border-radius: 12px;
+  border: 2px solid #E2E8F0;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.pending-image-item:hover .pending-image-preview {
+  border-color: #3B82F6;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
 }
 
 .remove-image-btn {
   position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 20px;
-  height: 20px;
+  top: -8px;
+  right: -8px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   background: #EF4444;
   border: 2px solid white;
@@ -1004,82 +1212,164 @@ watch(isVisible, (visible) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: transform 0.2s;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4);
 }
 
 .remove-image-btn:hover {
-  transform: scale(1.1);
+  transform: scale(1.15);
+  background: #DC2626;
+}
+
+.remove-image-btn:active {
+  transform: scale(1);
 }
 
 /* 输入框 */
 .chat-input-container {
   display: flex;
   gap: 12px;
-  padding: 16px 20px;
+  padding: 20px 24px;
   background: white;
-  border-top: 1px solid #E8E8E8;
+  border-top: 1px solid #E2E8F0;
 }
 
 .attach-btn {
-  width: 44px;
-  height: 44px;
-  background: #F5F7FA;
-  border: 1px solid #E8E8E8;
-  border-radius: 12px;
+  width: 48px;
+  height: 48px;
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  border-radius: 14px;
   color: #64748B;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   flex-shrink: 0;
 }
 
 .attach-btn:hover {
-  background: #E8E8E8;
-  color: #4A90E2;
+  background: #F1F5F9;
+  color: #3B82F6;
+  border-color: #CBD5E1;
+  transform: translateY(-1px);
+}
+
+.attach-btn:active {
+  transform: translateY(0);
 }
 
 .chat-input {
   flex: 1;
-  padding: 12px 16px;
-  border: 1px solid #DCDFE6;
-  border-radius: 12px;
+  padding: 14px 18px;
+  border: 1px solid #E2E8F0;
+  border-radius: 14px;
   font-size: 14px;
   resize: none;
   max-height: 120px;
   font-family: inherit;
-  transition: border-color 0.2s;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  background: #F8FAFC;
+  color: #1E293B;
+  line-height: 1.5;
+}
+
+.chat-input::placeholder {
+  color: #94A3B8;
 }
 
 .chat-input:focus {
   outline: none;
-  border-color: #4A90E2;
+  border-color: #3B82F6;
+  background: white;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 .send-btn {
-  width: 44px;
-  height: 44px;
-  background: linear-gradient(135deg, #4A90E2, #357ABD);
+  width: 48px;
+  height: 48px;
+  background: linear-gradient(135deg, #3B82F6, #2563EB);
   border: none;
-  border-radius: 12px;
+  border-radius: 14px;
   color: white;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
 }
 
 .send-btn:hover:not(:disabled) {
-  transform: scale(1.05);
-  box-shadow: 0 4px 12px rgba(74, 144, 226, 0.4);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.4);
+  background: linear-gradient(135deg, #2563EB, #1D4ED8);
+}
+
+.send-btn:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .send-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* 底部提示 */
+.chat-footer {
+  padding: 16px 24px;
+  background: linear-gradient(135deg, #FEF3C7, #FDE68A);
+  border-top: 1px solid #FCD34D;
+}
+
+.footer-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #92400E;
+}
+
+.warning-icon {
+  font-size: 18px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
+}
+
+.footer-text {
+  flex: 1;
+  font-weight: 500;
+}
+
+.link-btn {
+  background: white;
+  border: 1px solid #FCD34D;
+  color: #3B82F6;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 8px 16px;
+  border-radius: 10px;
+  font-weight: 600;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.link-btn:hover {
+  background: #3B82F6;
+  color: white;
+  border-color: #3B82F6;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.link-btn:active {
+  transform: translateY(0);
 }
 
 /* 底部提示 */
@@ -1120,7 +1410,8 @@ watch(isVisible, (visible) => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.9);
+  background: rgba(0, 0, 0, 0.92);
+  backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1132,39 +1423,46 @@ watch(isVisible, (visible) => {
   max-width: 90%;
   max-height: 90%;
   object-fit: contain;
-  border-radius: 8px;
+  border-radius: 12px;
+  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.5);
 }
 
 .preview-close-btn {
   position: absolute;
-  top: 20px;
-  right: 20px;
-  width: 40px;
-  height: 40px;
+  top: 24px;
+  right: 24px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.2);
-  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   color: white;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .preview-close-btn:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.25);
+  transform: scale(1.05);
+}
+
+.preview-close-btn:active {
+  transform: scale(0.95);
 }
 
 /* 过渡动画 */
 .chat-window-enter-active,
 .chat-window-leave-active {
-  transition: opacity 0.3s ease;
+  transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .chat-window-enter-active .chat-window,
 .chat-window-leave-active .chat-window {
-  transition: transform 0.3s ease;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .chat-window-enter-from,
@@ -1173,16 +1471,16 @@ watch(isVisible, (visible) => {
 }
 
 .chat-window-enter-from .chat-window {
-  transform: scale(0.9) translateY(20px);
+  transform: scale(0.92) translateY(30px);
 }
 
 .chat-window-leave-to .chat-window {
-  transform: scale(0.9) translateY(20px);
+  transform: scale(0.92) translateY(30px);
 }
 
 .fade-enter-active,
 .fade-leave-active {
-  transition: opacity 0.3s ease;
+  transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .fade-enter-from,
@@ -1208,7 +1506,34 @@ watch(isVisible, (visible) => {
   }
 
   .message-content {
-    max-width: 80%;
+    max-width: 85%;
+  }
+
+  .chat-messages {
+    padding: 16px;
+  }
+
+  .chat-input-container {
+    padding: 16px;
+  }
+
+  .pending-images {
+    padding: 12px 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .message-content {
+    max-width: 90%;
+  }
+
+  .quick-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .quick-actions button {
+    width: 100%;
   }
 }
 </style>

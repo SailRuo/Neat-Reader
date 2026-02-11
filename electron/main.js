@@ -1,6 +1,20 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
 const path = require('path')
 
+// 增加 V8 堆内存限制（解决大文件加载崩溃）
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=4096')
+app.commandLine.appendSwitch('disable-renderer-backgrounding')
+
+// 禁用 GPU 加速（解决 Windows GPU 崩溃 exitCode: -1073741819）
+app.commandLine.appendSwitch('disable-gpu')
+app.commandLine.appendSwitch('disable-gpu-compositing')
+app.commandLine.appendSwitch('disable-software-rasterizer')
+app.commandLine.appendSwitch('disable-gpu-sandbox')
+app.commandLine.appendSwitch('disable-gpu-vsync')
+app.commandLine.appendSwitch('disable-gpu-driver-bug-workarounds')
+app.commandLine.appendSwitch('no-sandbox')  // 禁用沙箱（临时测试）
+app.disableHardwareAcceleration()
+
 // 判断是否为开发环境
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
@@ -20,7 +34,10 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: true,
-      allowRunningInsecureContent: false
+      allowRunningInsecureContent: false,
+      // 优化性能和内存
+      backgroundThrottling: false,
+      v8CacheOptions: 'code'
     },
     icon: path.join(__dirname, '../build/icon.png')
   })
@@ -34,20 +51,22 @@ function createWindow() {
           isDev
             ? // 开发环境：允许 Vite HMR 和开发工具
               "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: http://localhost:* ws://localhost:* wss://localhost:*; " +
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:*; " +
-              "style-src 'self' 'unsafe-inline' http://localhost:*; " +
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: http://localhost:*; " +
+              "style-src 'self' 'unsafe-inline' blob: http://localhost:*; " +
+              "style-src-elem 'self' 'unsafe-inline' blob: http://localhost:*; " +
               "img-src 'self' data: blob: http://localhost:* https:; " +
-              "font-src 'self' data: http://localhost:*; " +
+              "font-src 'self' data: blob: http://localhost:*; " +
               "connect-src 'self' http://localhost:* ws://localhost:* wss://localhost:* https://chat.qwen.ai https://portal.qwen.ai https://*.qwen.ai https://pan.baidu.com https://d.pcs.baidu.com https://alistgo.com; " +
               "media-src 'self' blob: data:; " +
               "worker-src 'self' blob:; " +
               "frame-src 'self' blob: data:;"
-            : // 生产环境：更严格的策略
+            : // 生产环境：允许 epub.js 和 pdf.js 所需的功能
               "default-src 'self'; " +
-              "script-src 'self'; " +
-              "style-src 'self' 'unsafe-inline'; " +
+              "script-src 'self' 'unsafe-eval' blob:; " +
+              "style-src 'self' 'unsafe-inline' blob:; " +
+              "style-src-elem 'self' 'unsafe-inline' blob:; " +
               "img-src 'self' data: blob: https:; " +
-              "font-src 'self' data:; " +
+              "font-src 'self' data: blob:; " +
               "connect-src 'self' https://chat.qwen.ai https://portal.qwen.ai https://*.qwen.ai https://pan.baidu.com https://d.pcs.baidu.com https://alistgo.com; " +
               "media-src 'self' blob: data:; " +
               "worker-src 'self' blob:; " +
@@ -61,6 +80,32 @@ function createWindow() {
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173')
     mainWindow.webContents.openDevTools()
+    
+    // 监听渲染进程崩溃
+    mainWindow.webContents.on('render-process-gone', (event, details) => {
+      console.error('❌ 渲染进程崩溃:', details)
+      console.error('原因:', details.reason)
+      console.error('退出码:', details.exitCode)
+    })
+    
+    // 监听页面崩溃（已废弃，但保留兼容）
+    mainWindow.webContents.on('crashed', (event) => {
+      console.error('❌ 页面崩溃')
+    })
+    
+    // 监听未响应
+    mainWindow.on('unresponsive', () => {
+      console.error('❌ 窗口未响应')
+    })
+    
+    // 监听导航
+    mainWindow.webContents.on('did-start-navigation', (event, url) => {
+      console.log('🔄 开始导航:', url)
+    })
+    
+    mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+      console.error('❌ 页面加载失败:', errorCode, errorDescription, validatedURL)
+    })
   } else {
     mainWindow.loadFile(path.join(__dirname, '../frontend/dist/index.html'))
   }
@@ -249,5 +294,11 @@ app.on('window-all-closed', () => {
 
 // 处理未捕获的异常
 process.on('uncaughtException', (error) => {
-  console.error('未捕获的异常:', error)
+  console.error('❌ 未捕获的异常:', error)
+  console.error('堆栈:', error.stack)
+})
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ 未处理的 Promise 拒绝:', reason)
+  console.error('Promise:', promise)
 })

@@ -173,18 +173,14 @@ export const useEbookStore = defineStore('ebook', () => {
       .slice(0, 10);
   });
 
-  // 分类相关计算属性
-  const getBooksByCategory = computed(() => {
-    return (categoryId: string) => {
-      return books.value.filter(book => book.categoryId === categoryId);
-    };
-  });
+  // 分类相关方法（不是计算属性，因为需要参数）
+  const getBooksByCategory = (categoryId: string) => {
+    return books.value.filter(book => book.categoryId === categoryId);
+  };
 
-  const getCategoryById = computed(() => {
-    return (categoryId: string) => {
-      return categories.value.find(category => category.id === categoryId) || null;
-    };
-  });
+  const getCategoryById = (categoryId: string) => {
+    return categories.value.find(category => category.id === categoryId) || null;
+  };
 
   // Blob URL 转 Base64 工具函数
   const blobToBase64 = (blobUrl: string): Promise<string> => {
@@ -1967,10 +1963,10 @@ export const useEbookStore = defineStore('ebook', () => {
     localBooks,
     baidupanBooks,
     recentBooks,
-    getBooksByCategory,
-    getCategoryById,
     
     // 方法
+    getBooksByCategory,
+    getCategoryById,
     loadBooks,
     saveBooks,
     addBook,

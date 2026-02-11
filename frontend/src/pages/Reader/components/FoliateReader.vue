@@ -1047,15 +1047,15 @@ defineExpose({
 }
 
 /* 针对 Web Components 的样式穿透 */
-.foliate-viewer >>> * {
+.foliate-viewer :deep(*) {
   max-width: none !important;
 }
 
-.foliate-viewer >>> .paginated {
+.foliate-viewer :deep(.paginated) {
   grid-template-columns: 1fr !important;
 }
 
-.foliate-viewer >>> .column {
+.foliate-viewer :deep(.column) {
   width: 100% !important;
   max-width: none !important;
   grid-column: 1 / -1 !important;

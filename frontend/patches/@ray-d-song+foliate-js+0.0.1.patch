@@ -1,0 +1,10 @@
+diff --git a/node_modules/@ray-d-song/foliate-js/pdf.js b/node_modules/@ray-d-song/foliate-js/pdf.js
+index 1234567..abcdefg 100644
+--- a/node_modules/@ray-d-song/foliate-js/pdf.js
++++ b/node_modules/@ray-d-song/foliate-js/pdf.js
+@@ -1,4 +1,4 @@
+-const pdfjsPath = path => new URL(`vendor/pdfjs/${path}`, import.meta.url).toString()
++const pdfjsPath = path => new URL(`./vendor/pdfjs/${path}`, import.meta.url).toString()
+ 
+ import './vendor/pdfjs/pdf.mjs'
+ const pdfjsLib = globalThis.pdfjsLib

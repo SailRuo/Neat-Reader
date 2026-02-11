@@ -36,58 +36,59 @@ const handleToggle = () => {
 <style scoped>
 .ai-floating-button {
   position: fixed;
-  /* 默认隐藏在右侧，露出一半（按钮宽 56px，露出 28px） */
-  right: -28px;
-  bottom: 80px;
+  right: 20px;
+  bottom: 24px;
   z-index: 9998;
   display: flex;
   align-items: center;
   gap: 12px;
-  transition: right 0.28s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.ai-floating-button:hover {
-  /* 悬浮时完整显示 */
-  right: 24px;
 }
 
 .ai-toggle-btn {
-  width: 56px;
-  height: 56px;
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.9) 0%, rgba(118, 75, 162, 0.9) 100%);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: none;
-  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   color: white;
+  opacity: 0.85;
 }
 
 .ai-toggle-btn:hover {
-  transform: scale(1.1);
-  box-shadow: 0 6px 24px rgba(102, 126, 234, 0.5);
+  transform: scale(1.08);
+  box-shadow: 0 6px 24px rgba(102, 126, 234, 0.4);
+  opacity: 1;
 }
 
 .ai-toggle-btn:active {
-  transform: scale(0.95);
+  transform: scale(0.98);
 }
 
 .ai-floating-button.is-open .ai-toggle-btn {
-  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-  box-shadow: 0 4px 16px rgba(245, 87, 108, 0.4);
+  background: linear-gradient(135deg, rgba(240, 147, 251, 0.9) 0%, rgba(245, 87, 108, 0.9) 100%);
+  box-shadow: 0 4px 16px rgba(245, 87, 108, 0.3);
+}
+
+.ai-floating-button.is-open .ai-toggle-btn:hover {
+  box-shadow: 0 6px 24px rgba(245, 87, 108, 0.4);
 }
 
 .icon {
-  width: 28px;
-  height: 28px;
-  transition: transform 0.3s ease;
+  width: 24px;
+  height: 24px;
+  transition: transform 0.25s ease;
 }
 
 .ai-toggle-btn:hover .icon {
-  transform: rotate(10deg);
+  transform: rotate(5deg);
 }
 
 .ai-floating-button.is-open .icon {
@@ -106,41 +107,10 @@ const handleToggle = () => {
   }
 }
 
-/* 提示文字 */
-.hint-text {
-  padding: 8px 16px;
-  background: rgba(0, 0, 0, 0.8);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  color: white;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
-  white-space: nowrap;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-}
-
-/* 淡入滑动动画 */
-.fade-slide-enter-active,
-.fade-slide-leave-active {
-  transition: all 0.3s ease;
-}
-
-.fade-slide-enter-from {
-  opacity: 0;
-  transform: translateX(10px);
-}
-
-.fade-slide-leave-to {
-  opacity: 0;
-  transform: translateX(10px);
-}
-
 /* 响应式调整 */
 @media (max-width: 768px) {
   .ai-floating-button {
-    /* 小屏露出一半（按钮 48px，露出 24px） */
-    right: -24px;
+    right: 16px;
     bottom: 70px;
   }
   
@@ -153,21 +123,5 @@ const handleToggle = () => {
     width: 24px;
     height: 24px;
   }
-}
-
-/* 深色主题适配 */
-.theme-dark .hint-text {
-  background: rgba(255, 255, 255, 0.9);
-  color: #1a1a1a;
-}
-
-.theme-sepia .hint-text {
-  background: rgba(61, 40, 23, 0.9);
-  color: #f4ecd8;
-}
-
-.theme-green .hint-text {
-  background: rgba(27, 77, 46, 0.9);
-  color: #e8f5e9;
 }
 </style>

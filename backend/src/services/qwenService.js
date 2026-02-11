@@ -297,11 +297,11 @@ async function listModels(accessToken, resourceUrl = null) {
  * 基于 CLIProxyAPI 的实现
  * 
  * @param {string} accessToken - OAuth access token
- * @param {Array} messages - 消息列表
- * @param {string} model - 模型名称（默认 qwen3-coder-plus）
+ * @param {Array} messages - 消息列表（支持多模态：文本 + 图片）
+ * @param {string} model - 模型名称（默认 qwen3-coder-flash，支持 vision）
  * @param {string} resourceUrl - 从 token 响应中获取的 resource_url（可选）
  */
-async function chatCompletion(accessToken, messages, model = 'qwen3-coder-plus', resourceUrl = null) {
+async function chatCompletion(accessToken, messages, model = 'qwen3-coder-flash', resourceUrl = null) {
   try {
     logger.info('开始调用 Qwen API', { model, messageCount: messages.length, hasResourceUrl: !!resourceUrl });
     
@@ -352,13 +352,38 @@ async function chatCompletion(accessToken, messages, model = 'qwen3-coder-plus',
  * 调用 Qwen API（流式响应）
  * 
  * @param {string} accessToken - OAuth access token
- * @param {Array} messages - 消息列表
- * @param {string} model - 模型名称（默认 qwen3-coder-plus）
+ * @param {Array} messages - 消息列表（支持多模态：文本 + 图片）
+ * @param {string} model - 模型名称（默认 qwen3-coder-flash，支持 vision）
  * @param {string} resourceUrl - 从 token 响应中获取的 resource_url（可选）
  * @returns {Promise<Stream>} - 返回流对象
  */
-async function chatCompletionStream(accessToken, messages, model = 'qwen3-coder-plus', resourceUrl = null) {
-  logger.info('开始调用 Qwen API（流式）', { model, messageCount: messages.length, hasResourceUrl: !!resourceUrl });
+async function chatCompletionStream(accessToken, messages, model = 'qwen3-coder-flash', resourceUrl = null) {
+  logger.info('开始调用 Qwen API（流式）', { 
+    model, 
+    messageCount: messages.length, 
+    hasResourceUrl: !!resourceUrl 
+  });
+  
+  // 详细日志：检查消息内容
+  messages.forEach((msg, index) => {
+    if (Array.isArray(msg.content)) {
+      logger.info(`消息 ${index} 内容类型`, {
+        role: msg.role,
+        contentParts: msg.content.length,
+        types: msg.content.map(part => part.type),
+        hasImages: msg.content.some(part => part.type === 'image_url'),
+        imageUrlPrefixes: msg.content
+          .filter(part => part.type === 'image_url')
+          .map(part => part.image_url?.url?.substring(0, 50))
+      });
+    } else {
+      logger.info(`消息 ${index} 内容类型`, {
+        role: msg.role,
+        contentType: typeof msg.content,
+        contentLength: msg.content?.length || 0
+      });
+    }
+  });
   
   let apiBaseUrl;
   if (resourceUrl) {
@@ -367,13 +392,23 @@ async function chatCompletionStream(accessToken, messages, model = 'qwen3-coder-
     apiBaseUrl = 'https://portal.qwen.ai/v1';
   }
   
+  const requestBody = {
+    model: model,
+    messages: messages,
+    stream: true
+  };
+  
+  // 记录请求体大小
+  const requestBodySize = JSON.stringify(requestBody).length;
+  logger.info('请求体信息', {
+    size: requestBodySize,
+    sizeKB: (requestBodySize / 1024).toFixed(2),
+    endpoint: `${apiBaseUrl}/chat/completions`
+  });
+  
   const response = await axios.post(
     `${apiBaseUrl}/chat/completions`,
-    {
-      model: model,
-      messages: messages,
-      stream: true
-    },
+    requestBody,
     {
       headers: {
         'Content-Type': 'application/json',

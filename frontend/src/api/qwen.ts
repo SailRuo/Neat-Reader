@@ -93,6 +93,7 @@ export async function chatStream(
   accessToken: string, 
   message: string, 
   resourceUrl?: string,
+  images?: string[],  // 新增：图片 Base64 数组
   onChunk?: (content: string) => void
 ): Promise<void> {
   const response = await fetch(`${API_BASE}/chat-stream`, {
@@ -103,6 +104,7 @@ export async function chatStream(
     body: JSON.stringify({
       access_token: accessToken,
       message,
+      images,  // 传递图片数据
       resource_url: resourceUrl
     })
   })
