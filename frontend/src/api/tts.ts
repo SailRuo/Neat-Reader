@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const API_BASE = 'http://localhost:3000/api/tts'
+const API_BASE = 'http://localhost:3001/api/tts'
 
 export interface TTSVoice {
     Name: string

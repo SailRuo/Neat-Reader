@@ -34,18 +34,18 @@ if not exist "node_modules" (
 )
 echo.
 
-echo [3/3] Checking port 3000...
+echo [3/3] Checking port 3001...
 echo.
 
-REM Check if port 3000 is in use
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr :3000 ^| findstr LISTENING') do (
+REM Check if port 3001 is in use
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr :3001 ^| findstr LISTENING') do (
     set PID=%%a
     goto :found
 )
 goto :notfound
 
 :found
-echo [WARNING] Port 3000 is already in use by process %PID%
+echo [WARNING] Port 3001 is already in use by process %PID%
 echo Killing process %PID%...
 taskkill /F /PID %PID% >nul 2>nul
 if %ERRORLEVEL% EQU 0 (
@@ -58,12 +58,12 @@ if %ERRORLEVEL% EQU 0 (
 )
 
 :notfound
-echo Port 3000 is available
+echo Port 3001 is available
 echo.
 echo [4/4] Starting application...
 echo.
 echo Info:
-echo - Backend:  http://localhost:3000
+echo - Backend:  http://localhost:3001
 echo - Frontend: http://localhost:5173
 echo - Press Ctrl+C to stop
 echo.

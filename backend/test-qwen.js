@@ -7,7 +7,7 @@
 
 const axios = require('axios');
 
-const API_BASE = 'http://localhost:3000/api/qwen';
+const API_BASE = 'http://localhost:3001/api/qwen';
 
 async function testQwenOAuth() {
   console.log('=== Qwen OAuth 测试 ===\n');

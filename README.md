@@ -88,7 +88,7 @@ npm run dev
 
 应用会自动打开，同时启动：
 - 前端开发服务器：http://localhost:5173
-- 后端 API 服务器：http://localhost:3000
+- 后端 API 服务器：http://localhost:3001
 
 ### 手动安装
 
@@ -158,7 +158,7 @@ neat-reader/
 │   └── menu.js           # 应用菜单
 ├── backend/              # Express 后端服务
 │   └── src/
-│       ├── server.js     # HTTP 服务器（端口 3000）
+│       ├── server.js     # HTTP 服务器（端口 3001）
 │       ├── routes/       # API 路由
 │       ├── services/     # 业务逻辑
 │       │   ├── baiduService.js   # 百度网盘 API
@@ -306,16 +306,16 @@ cnpm install
 
 ### 端口被占用
 
-**问题**：启动时提示端口 3000 或 5173 被占用
+**问题**：启动时提示端口 3001 或 5173 被占用
 
 **解决方案**：
 ```bash
 # Windows
-netstat -ano | findstr :3000
+netstat -ano | findstr :3001
 taskkill /PID <进程ID> /F
 
 # macOS/Linux
-lsof -i :3000
+lsof -i :3001
 kill -9 <进程ID>
 ```
 
