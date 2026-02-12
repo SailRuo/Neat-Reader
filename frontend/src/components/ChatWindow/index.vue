@@ -78,16 +78,6 @@
                   {{ msg.role === 'user' ? '👤' : '🤖' }}
                 </div>
                 <div class="message-content">
-                  <!-- 图片消息 -->
-                  <div v-if="msg.images && msg.images.length > 0" class="message-images">
-                    <img 
-                      v-for="(img, imgIndex) in msg.images" 
-                      :key="imgIndex"
-                      :src="img" 
-                      class="message-image"
-                      @click="previewImage(img)"
-                    />
-                  </div>
                   <!-- 文本消息 -->
                   <div class="message-text">{{ msg.content }}</div>
                   <div class="message-time">{{ formatTime(msg.timestamp) }}</div>
@@ -106,48 +96,21 @@
               </div>
             </div>
 
-            <!-- 图片预览区 -->
-            <div v-if="pendingImages.length > 0" class="pending-images">
-              <div class="pending-images-header">
-                <span>待发送图片 ({{ pendingImages.length }})</span>
-                <button @click="clearPendingImages" class="clear-images-btn">清空</button>
-              </div>
-              <div class="pending-images-list">
-                <div v-for="(img, index) in pendingImages" :key="index" class="pending-image-item">
-                  <img :src="img" class="pending-image-preview" />
-                  <button @click="removePendingImage(index)" class="remove-image-btn">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <line x1="18" y1="6" x2="6" y2="18"></line>
-                      <line x1="6" y1="6" x2="18" y2="18"></line>
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            </div>
-
             <!-- 输入框 -->
             <div class="chat-input-container">
-              <button class="attach-btn" @click="triggerImageUpload" title="上传图片">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                  <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                  <polyline points="21 15 16 10 5 21"></polyline>
-                </svg>
-              </button>
               <textarea
                 v-model="inputMessage"
                 class="chat-input"
-                placeholder="输入消息... (Ctrl+V 粘贴图片)"
+                placeholder="输入消息..."
                 rows="1"
                 @keydown.enter.exact.prevent="sendMessage"
                 @keydown.enter.shift.exact="inputMessage += '\n'"
-                @paste="handlePaste"
                 ref="inputRef"
               ></textarea>
               <button 
                 class="send-btn" 
                 @click="sendMessage"
-                :disabled="(!inputMessage.trim() && pendingImages.length === 0) || isLoading || !isOnline"
+                :disabled="!inputMessage.trim() || isLoading || !isOnline"
                 title="发送 (Enter)"
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -176,28 +139,7 @@
       </div>
     </Transition>
 
-    <!-- 图片预览模态框 -->
-    <Transition name="fade">
-      <div v-if="previewImageUrl" class="image-preview-modal" @click="closeImagePreview">
-        <img :src="previewImageUrl" class="preview-image" @click.stop />
-        <button class="preview-close-btn" @click="closeImagePreview">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
-      </div>
-    </Transition>
 
-    <!-- 隐藏的文件输入 -->
-    <input 
-      type="file" 
-      ref="fileInputRef"
-      @change="handleFileSelect"
-      accept="image/*"
-      multiple
-      style="display: none"
-    />
   </Teleport>
 </template>
 
@@ -211,7 +153,6 @@ interface Message {
   role: 'user' | 'assistant'
   content: string
   timestamp: number
-  images?: string[]
 }
 
 interface Conversation {
@@ -237,11 +178,8 @@ const emit = defineEmits<{
 const router = useRouter()
 const messagesContainer = ref<HTMLElement>()
 const inputRef = ref<HTMLTextAreaElement>()
-const fileInputRef = ref<HTMLInputElement>()
 const inputMessage = ref('')
 const isLoading = ref(false)
-const pendingImages = ref<string[]>([])
-const previewImageUrl = ref('')
 
 // 对话管理
 const conversations = ref<Conversation[]>([])
@@ -394,143 +332,6 @@ const scrollToBottom = () => {
   })
 }
 
-// 触发图片上传
-const triggerImageUpload = () => {
-  fileInputRef.value?.click()
-}
-
-// 压缩图片（更激进的压缩策略）
-const compressImage = (file: File, maxWidth: number = 800, quality: number = 0.7): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      const img = new Image()
-      img.onload = () => {
-        const canvas = document.createElement('canvas')
-        let width = img.width
-        let height = img.height
-
-        // 计算缩放比例（更激进）
-        if (width > maxWidth || height > maxWidth) {
-          if (width > height) {
-            height = (height * maxWidth) / width
-            width = maxWidth
-          } else {
-            width = (width * maxWidth) / height
-            height = maxWidth
-          }
-        }
-
-        canvas.width = width
-        canvas.height = height
-
-        const ctx = canvas.getContext('2d')
-        if (!ctx) {
-          reject(new Error('无法获取 canvas context'))
-          return
-        }
-
-        ctx.drawImage(img, 0, 0, width, height)
-
-        // 转换为 Base64，使用 JPEG 格式压缩
-        const compressedBase64 = canvas.toDataURL('image/jpeg', quality)
-        
-        // 检查压缩后的大小
-        const sizeInKB = (compressedBase64.length * 0.75) / 1024
-        console.log('图片压缩完成', {
-          原始尺寸: `${img.width}x${img.height}`,
-          压缩后尺寸: `${width}x${height}`,
-          原始大小: `${(file.size / 1024).toFixed(2)}KB`,
-          压缩后大小: `${sizeInKB.toFixed(2)}KB`
-        })
-        
-        // 如果压缩后仍然太大（> 500KB），进一步压缩
-        if (sizeInKB > 500 && quality > 0.3) {
-          console.warn('图片仍然较大，进行二次压缩...')
-          const furtherCompressed = canvas.toDataURL('image/jpeg', 0.5)
-          resolve(furtherCompressed)
-        } else {
-          resolve(compressedBase64)
-        }
-      }
-      img.onerror = () => reject(new Error('图片加载失败'))
-      img.src = e.target?.result as string
-    }
-    reader.onerror = () => reject(new Error('文件读取失败'))
-    reader.readAsDataURL(file)
-  })
-}
-
-// 处理文件选择
-const handleFileSelect = async (event: Event) => {
-  const target = event.target as HTMLInputElement
-  const files = target.files
-  
-  if (files) {
-    for (const file of Array.from(files)) {
-      if (file.type.startsWith('image/')) {
-        try {
-          // 更激进的压缩（最大 800px，质量 0.7）
-          const compressedBase64 = await compressImage(file, 800, 0.7)
-          pendingImages.value.push(compressedBase64)
-        } catch (error) {
-          console.error('图片压缩失败:', error)
-          alert(`图片 "${file.name}" 处理失败，请尝试更小的图片`)
-        }
-      }
-    }
-  }
-  
-  // 清空文件输入
-  if (target) {
-    target.value = ''
-  }
-}
-
-// 处理粘贴
-const handlePaste = async (event: ClipboardEvent) => {
-  const items = event.clipboardData?.items
-  if (!items) return
-  
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i]
-    if (item.type.startsWith('image/')) {
-      event.preventDefault()
-      const file = item.getAsFile()
-      if (file) {
-        try {
-          // 更激进的压缩（最大 800px，质量 0.7）
-          const compressedBase64 = await compressImage(file, 800, 0.7)
-          pendingImages.value.push(compressedBase64)
-        } catch (error) {
-          console.error('图片压缩失败:', error)
-          alert('粘贴的图片处理失败，请尝试更小的图片')
-        }
-      }
-    }
-  }
-}
-
-// 清空待发送图片
-const clearPendingImages = () => {
-  pendingImages.value = []
-}
-
-// 移除单个待发送图片
-const removePendingImage = (index: number) => {
-  pendingImages.value.splice(index, 1)
-}
-
-// 预览图片
-const previewImage = (url: string) => {
-  previewImageUrl.value = url
-}
-
-// 关闭图片预览
-const closeImagePreview = () => {
-  previewImageUrl.value = ''
-}
-
 // 发送快捷消息
 const sendQuickMessage = (text: string) => {
   inputMessage.value = text
@@ -539,7 +340,7 @@ const sendQuickMessage = (text: string) => {
 
 // 发送消息
 const sendMessage = async () => {
-  if ((!inputMessage.value.trim() && pendingImages.value.length === 0) || !isOnline.value) {
+  if (!inputMessage.value.trim() || !isOnline.value) {
     return
   }
 
@@ -553,16 +354,13 @@ const sendMessage = async () => {
   }
 
   const userMessage = inputMessage.value.trim()
-  const images = [...pendingImages.value]
   inputMessage.value = ''
-  pendingImages.value = []
 
   // 添加用户消息
   conv.messages.push({
     role: 'user',
-    content: userMessage || '(发送了图片)',
-    timestamp: Date.now(),
-    images: images.length > 0 ? images : undefined
+    content: userMessage,
+    timestamp: Date.now()
   })
 
   updateConversation()
@@ -586,17 +384,14 @@ const sendMessage = async () => {
     const resourceUrl = qwenTokenManager.getResourceUrl() || ''
 
     // 构建完整的提示词（如果有书籍上下文）
-    let fullPrompt = userMessage || '请描述这张图片'
+    let fullPrompt = userMessage
     if (props.bookContext && props.bookTitle) {
       fullPrompt = `你是一个阅读助手，正在帮助用户理解《${props.bookTitle}》这本书。\n\n书籍信息：\n${props.bookContext}\n\n用户问题：${fullPrompt}\n\n请基于书籍内容回答用户的问题。`
       console.log('📖 [ChatWindow] 使用书籍上下文，书名:', props.bookTitle)
     }
 
-    // 使用流式 API，传递图片数据
+    // 使用流式 API
     console.log('📤 发送消息到 Qwen API', {
-      hasImages: images.length > 0,
-      imageCount: images.length,
-      firstImagePrefix: images[0]?.substring(0, 50),
       messageLength: fullPrompt.length
     });
     
@@ -604,7 +399,7 @@ const sendMessage = async () => {
       accessToken,
       fullPrompt,
       resourceUrl,
-      images.length > 0 ? images : undefined,  // 传递图片 Base64 数组
+      undefined,  // 不传递图片
       (chunk) => {
         // 实时更新 AI 消息内容
         conv.messages[aiMessageIndex].content += chunk
@@ -663,10 +458,9 @@ watch(isVisible, (visible) => {
   max-height: 800px;
   background: white;
   border-radius: 20px;
-  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.25), 0 0 1px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.25);
   display: flex;
   overflow: hidden;
-  border: 1px solid rgba(226, 232, 240, 0.8);
 }
 
 /* 侧边栏 */
@@ -1038,30 +832,6 @@ watch(isVisible, (visible) => {
   align-items: flex-end;
 }
 
-.message-images {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.message-image {
-  max-width: 220px;
-  max-height: 220px;
-  border-radius: 12px;
-  cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  object-fit: cover;
-  border: 2px solid #E2E8F0;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-}
-
-.message-image:hover {
-  transform: scale(1.03);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-  border-color: #3B82F6;
-}
-
 .message-text {
   background: white;
   padding: 14px 18px;
@@ -1125,106 +895,6 @@ watch(isVisible, (visible) => {
   }
 }
 
-/* 待发送图片 */
-.pending-images {
-  background: white;
-  border-top: 1px solid #E2E8F0;
-  padding: 16px 24px;
-}
-
-.pending-images-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-  font-size: 13px;
-  color: #475569;
-  font-weight: 600;
-}
-
-.clear-images-btn {
-  background: none;
-  border: none;
-  color: #EF4444;
-  cursor: pointer;
-  font-size: 12px;
-  padding: 6px 12px;
-  border-radius: 8px;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  font-weight: 600;
-}
-
-.clear-images-btn:hover {
-  background: rgba(239, 68, 68, 0.1);
-}
-
-.pending-images-list {
-  display: flex;
-  gap: 12px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-}
-
-.pending-images-list::-webkit-scrollbar {
-  height: 6px;
-}
-
-.pending-images-list::-webkit-scrollbar-track {
-  background: #F1F5F9;
-  border-radius: 3px;
-}
-
-.pending-images-list::-webkit-scrollbar-thumb {
-  background: #CBD5E1;
-  border-radius: 3px;
-}
-
-.pending-image-item {
-  position: relative;
-  flex-shrink: 0;
-}
-
-.pending-image-preview {
-  width: 90px;
-  height: 90px;
-  object-fit: cover;
-  border-radius: 12px;
-  border: 2px solid #E2E8F0;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.pending-image-item:hover .pending-image-preview {
-  border-color: #3B82F6;
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
-}
-
-.remove-image-btn {
-  position: absolute;
-  top: -8px;
-  right: -8px;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: #EF4444;
-  border: 2px solid white;
-  color: white;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4);
-}
-
-.remove-image-btn:hover {
-  transform: scale(1.15);
-  background: #DC2626;
-}
-
-.remove-image-btn:active {
-  transform: scale(1);
-}
-
 /* 输入框 */
 .chat-input-container {
   display: flex;
@@ -1232,32 +902,6 @@ watch(isVisible, (visible) => {
   padding: 20px 24px;
   background: white;
   border-top: 1px solid #E2E8F0;
-}
-
-.attach-btn {
-  width: 48px;
-  height: 48px;
-  background: #F8FAFC;
-  border: 1px solid #E2E8F0;
-  border-radius: 14px;
-  color: #64748B;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  flex-shrink: 0;
-}
-
-.attach-btn:hover {
-  background: #F1F5F9;
-  color: #3B82F6;
-  border-color: #CBD5E1;
-  transform: translateY(-1px);
-}
-
-.attach-btn:active {
-  transform: translateY(0);
 }
 
 .chat-input {
@@ -1403,57 +1047,6 @@ watch(isVisible, (visible) => {
   color: #357ABD;
 }
 
-/* 图片预览模态框 */
-.image-preview-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.92);
-  backdrop-filter: blur(8px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 10000;
-  padding: 40px;
-}
-
-.preview-image {
-  max-width: 90%;
-  max-height: 90%;
-  object-fit: contain;
-  border-radius: 12px;
-  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.5);
-}
-
-.preview-close-btn {
-  position: absolute;
-  top: 24px;
-  right: 24px;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.15);
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: white;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.preview-close-btn:hover {
-  background: rgba(255, 255, 255, 0.25);
-  transform: scale(1.05);
-}
-
-.preview-close-btn:active {
-  transform: scale(0.95);
-}
-
 /* 过渡动画 */
 .chat-window-enter-active,
 .chat-window-leave-active {
@@ -1517,9 +1110,6 @@ watch(isVisible, (visible) => {
     padding: 16px;
   }
 
-  .pending-images {
-    padding: 12px 16px;
-  }
 }
 
 @media (max-width: 480px) {

@@ -1,18 +1,15 @@
 ## Neat Reader
-
-简洁优雅的桌面级电子书阅读器，支持 EPUB / PDF、本地文件与百度网盘书库，并集成 Qwen AI 阅读助手与 TTS 朗读。
-
-> ⚠️ 仍在积极开发中，API 与 UI 可能会有调整。
-
-<p align="center">
-  <!-- 可以替换为真实仓库链接 -->
-  <a href="https://github.com/your-name/Neat-Reader">
-    <img src="https://img.shields.io/badge/status-alpha-orange" alt="status" />
-  </a>
-  <img src="https://img.shields.io/badge/electron-28+-9feaf9" alt="electron" />
-  <img src="https://img.shields.io/badge/vue-3.x-42b883" alt="vue3" />
-  <img src="https://img.shields.io/badge/license-MIT-blue" alt="license" />
-</p>
+ 
+ 简洁优雅的桌面级电子书阅读器（Electron），支持 EPUB / PDF、本地文件与百度网盘书库，并集成 Qwen AI 阅读助手与 TTS 朗读。
+ 
+ > ⚠️ 仍在积极开发中，API 与 UI 可能会有调整。
+ 
+ <p align="center">
+   <img src="https://img.shields.io/badge/status-alpha-orange" alt="status" />
+   <img src="https://img.shields.io/badge/electron-28+-9feaf9" alt="electron" />
+   <img src="https://img.shields.io/badge/vue-3.x-42b883" alt="vue3" />
+   <img src="https://img.shields.io/badge/license-MIT-blue" alt="license" />
+ </p>
 
 
 ---
@@ -40,35 +37,35 @@
 ### 特性
 
 - **多格式阅读支持**
-  - 支持 EPUB（基于 `epubjs` / `@ray-d-song/foliate-js`）与 PDF（基于 `pdfjs-dist`）
-  - 书签、进度、主题等阅读体验增强（见 `frontend/src/pages/Reader` 相关逻辑）
+  - EPUB：`epubjs` / `@ray-d-song/foliate-js`
+  - PDF：`pdfjs-dist`
+  - 进度与主题等逻辑主要在 `frontend/src/pages/Reader` 下
 
 - **百度网盘书库**
-  - 借助后端 `backend/src/routes/baidu.js` 与 `baiduService`，支持：
-    - 授权登录
-    - 文件列表 / 搜索 / 下载 / 上传
+  - 后端：`backend/src/routes/baidu.js` + `backend/src/services/baiduService.js`
+  - 能力：授权换 Token / 刷新 / 校验、文件列表 / 搜索 / 下载 / 上传
 
 - **Qwen AI 阅读助手**
-  - 通过 `backend/src/routes/qwen.js` & `qwenService` 对接 Qwen OAuth 与对话接口
-  - 支持设备码登录、模型列表获取、流式对话（SSE）等
-  - 前端在阅读器侧边栏/悬浮按钮中集成 AI 聊天与问答能力
+  - 后端：`backend/src/routes/qwen.js` + `backend/src/services/qwenService.js`
+  - 能力：Device Code Flow（含 PKCE）、刷新 Token、模型列表、对话/流式对话（SSE）
+  - 前端入口主要在 `frontend/src/pages/Reader/components`
 
 - **TTS 朗读**
-  - 后端 `backend/src/routes/tts.js` 提供文本转语音能力
-  - 前端 `TTSSettings`、阅读器组件内集成朗读控制
+  - 后端：`backend/src/routes/tts.js` + `backend/src/services/ttsService.js`（`node-edge-tts`）
+  - 提供语音列表、合成（一次性/流式）、清理缓存
 
 - **跨平台桌面应用**
-  - 使用 `electron` + `electron-builder` 打包
-  - 支持 Windows / macOS / Linux（见根目录 `build:*` 脚本）
+  - Electron 主进程：`electron/main.js`（窗口、CSP、授权窗口、IPC）
+  - 打包：`electron-builder`（见 `electron-builder.json` 与根目录 `build:*` 脚本）
 
 ---
 
 ### 技术栈
 
-- **桌面端**：Electron 28+（根目录）、Electron 40+（前端开发依赖）
+- **桌面端**：Electron（主进程入口 `electron/main.js`）
 - **前端**：Vue 3、Vue Router、Pinia、Vite、TypeScript
 - **阅读内核**：`epubjs`、`@ray-d-song/foliate-js`、`pdfjs-dist`
-- **后端**：Node.js + Express，路由与服务位于 `backend/src`
+- **后端**：Node.js + Express（`backend/src/server.js`，端口 `3001`）
 - **其它**：Axios、dayjs、localforage、uuid、lucide-vue-next 等
 
 ---
@@ -97,9 +94,9 @@ Neat-Reader/
       server.js       # 后端入口，默认端口 3001
 
   electron/           # Electron 主进程代码
-    main.js           # 创建主窗口、CSP、高级授权窗口等
-    preload.js        # 预加载脚本，桥接渲染进程与主进程
-    menu.js           # 应用菜单定义（如有）
+    main.js           # 创建主窗口、CSP、授权窗口、IPC handler
+    preload.js        # 预加载脚本（contextBridge 暴露安全 API）
+    menu.js           # 应用菜单
 
   frontend/           # Vue 3 + Vite 前端
     src/
@@ -124,11 +121,11 @@ Neat-Reader/
 
 - Node.js 18+（建议）  
 - npm 或兼容包管理器（项目脚本以 `npm` 为例）  
-- 已配置的：
+- 可选账号/平台：
   - 百度网盘开放平台应用（用于 OAuth）
-  - Qwen 账号与相关 OAuth 配置
+  - Qwen 账号（Device Code Flow）
 
-> 注：具体的 ClientId / Secret / 回调地址等敏感信息不应提交到仓库，请放在 `.env` 或本地配置文件中，后端服务通过环境变量或配置文件读取。
+> 注：当前后端对百度的 `clientId` / `clientSecret` / `redirectUri` 是由前端请求时传入（见 `backend/src/routes/baidu.js`）。Qwen 的 OAuth clientId 目前以常量形式存在于 `backend/src/services/qwenService.js`。
 
 ---
 
@@ -164,6 +161,10 @@ npm run dev
 - 启动后端：`npm run dev:backend`（默认端口 `http://localhost:3001`，见 `backend/src/server.js`）
 - 启动前端：`npm run dev:frontend`（Vite，默认 `http://localhost:5173`）
 - 待前端可用后，启动 Electron 主进程：`npm run dev:electron`，加载 `http://localhost:5173`
+
+前端开发服务器已在 `frontend/vite.config.ts` 配置了代理：
+
+- `/api/*` -> `http://localhost:3001/api/*`
 
 你也可以分别启动：
 
@@ -207,30 +208,32 @@ npm run build:linux
 
 ### 配置与密钥管理
 
-根据后端代码（如 `backend/src/services/*`）与第三方平台文档，你通常需要配置以下信息：
+项目中涉及到的“配置/密钥”主要分两类：
 
-- **百度网盘**
-  - `clientId` / `clientSecret` / `redirectUri`
-  - OAuth 授权回调地址需与 `electron/main.js` 中授权窗口的回调处理保持一致
-  - 可通过 `alistgo` 相关 API 简化 Refresh Token 获取流程（见 `baidu.js` 中 `/alist-token` 路由）
+- **百度网盘 OAuth（需要你自行申请）**
+  - 后端接口需要前端传入：`clientId` / `clientSecret` / `redirectUri`（见 `backend/src/routes/baidu.js`）
+  - 如果你使用 Electron 内置授权窗口（`electron/main.js` 的 `auth:openWindow`），回调识别逻辑会检测：
+    - `alistgo.com/tool/baidu/callback`
+  - 也提供通过 alist 获取 refresh token：`POST /api/baidu/alist-token`
 
-- **Qwen**
-  - OAuth / Device Code Flow 配置（在 `qwenService` 中使用）
-  - 设备码授权页面 URL 与回调 URL 需要与 Qwen 平台设置对应
+- **Qwen（Device Code Flow）**
+  - 启动授权：`POST /api/qwen/device-auth`
+  - 轮询 token：`POST /api/qwen/poll-token`
+  - `qwenService` 当前内置了 OAuth clientId 与端点（`backend/src/services/qwenService.js`）
 
-推荐做法：
+建议：
 
-- 在 `backend` 中使用 `.env` 或 `config.*.json` 管理密钥
-- 使用 `.gitignore` 忽略本地配置文件，避免泄漏
+- 不要把 `clientSecret` 写死在仓库里
+- 若要改为环境变量方式，可在后端引入 `.env` 并在服务层读取（当前版本未内置 `.env` 读取逻辑）
 
 ---
 
 ### 代码阅读指引
 
 - 想了解**阅读器内核与 UI**：  
-  查看 `frontend/src/pages/Reader` 下的：
-  - `components/`：`FoliateReader.vue`、`PdfReader.vue`、`AIChatPanel.vue`、`TextSelectionMenu.vue` 等
-  - `composables/`：`useReaderTheme.ts`、`useReaderProgress.ts`、`useTextToSpeech.ts` 等
+  - `frontend/src/pages/Reader/index.vue`
+  - `frontend/src/pages/Reader/components`：`FoliateReader.vue`、`PdfReader.vue`、`AIChatPanel.vue`、`TextSelectionMenu.vue` 等
+  - `frontend/src/pages/Reader/composables`：主题/进度等
 
 - 想了解**AI / TTS 能力如何接入**：  
   - 前端：`frontend/src/api`、`frontend/src/components/ChatWindow`、`TTSSettings` 等
@@ -242,7 +245,8 @@ npm run build:linux
 
 - 想了解 **Electron 与前端的交互**：  
   - `electron/main.js` 中的 `ipcMain.handle(...)`（文件选择、授权窗口等）
-  - `preload.js` 中暴露给渲染进程的 API
+  - `electron/preload.js` 中暴露给渲染进程的 API
+  - 渲染进程封装：`frontend/src/electron.ts`
 
 ---
 
@@ -254,8 +258,9 @@ npm run build:linux
 
 - **Q: 后端接口请求失败 / 401 / 5xx？**  
   - 检查后端控制台日志（`backend/src/utils/logger.js`）  
-  - 确认百度 / Qwen 配置是否正确、是否已完成授权流程  
-  - 确认本地网络可访问对应的第三方服务
+  - 确认端口：后端固定 `3001`，前端开发端口 `5173`  
+  - 百度相关：确认 `clientId` / `clientSecret` / `redirectUri` 是否正确  
+  - Qwen 相关：确认能访问 `chat.qwen.ai` / `portal.qwen.ai`，以及 device flow 是否完成授权
 
 - **Q: 如何自定义 UI / 主题？**  
   - 查看 `frontend/src/pages/Reader/styles/theme.css` 与全局样式 `frontend/src/assets/styles/global.css`  
@@ -277,7 +282,7 @@ npm run build:linux
 
 ### License
 
-本项目使用 **MIT License**，详见仓库中的 `LICENSE` 文件。
+本项目使用 **MIT License**。
 
 ---
 

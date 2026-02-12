@@ -45,45 +45,53 @@ const handleToggle = () => {
 }
 
 .ai-toggle-btn {
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.9) 0%, rgba(118, 75, 162, 0.9) 100%);
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.75) 0%, rgba(118, 75, 162, 0.75) 100%);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border: none;
-  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   color: white;
-  opacity: 0.85;
+  /* 半隐藏状态 */
+  opacity: 0.35;
+  transform: translateX(8px);
 }
 
 .ai-toggle-btn:hover {
-  transform: scale(1.08);
-  box-shadow: 0 6px 24px rgba(102, 126, 234, 0.4);
+  /* 悬停时完全显示 */
   opacity: 1;
+  transform: translateX(0) scale(1.05);
+  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.35);
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.95) 0%, rgba(118, 75, 162, 0.95) 100%);
 }
 
 .ai-toggle-btn:active {
-  transform: scale(0.98);
+  transform: translateX(0) scale(0.95);
 }
 
+/* 打开状态：完全显示 */
 .ai-floating-button.is-open .ai-toggle-btn {
+  opacity: 1;
+  transform: translateX(0);
   background: linear-gradient(135deg, rgba(240, 147, 251, 0.9) 0%, rgba(245, 87, 108, 0.9) 100%);
   box-shadow: 0 4px 16px rgba(245, 87, 108, 0.3);
 }
 
 .ai-floating-button.is-open .ai-toggle-btn:hover {
+  transform: scale(1.05);
   box-shadow: 0 6px 24px rgba(245, 87, 108, 0.4);
 }
 
 .icon {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   transition: transform 0.25s ease;
 }
 
@@ -115,13 +123,15 @@ const handleToggle = () => {
   }
   
   .ai-toggle-btn {
-    width: 48px;
-    height: 48px;
+    width: 44px;
+    height: 44px;
+    /* 移动端稍微明显一点 */
+    opacity: 0.5;
   }
   
   .icon {
-    width: 24px;
-    height: 24px;
+    width: 22px;
+    height: 22px;
   }
 }
 </style>

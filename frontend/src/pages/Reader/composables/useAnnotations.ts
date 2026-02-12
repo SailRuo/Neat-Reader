@@ -1,197 +1,235 @@
-import { ref, Ref } from 'vue'
-import { Rendition } from 'epubjs'
+// 注释功能 Composable
+import { ref, computed } from 'vue'
+import { useAnnotationStore } from '../../../stores/annotation'
+import type { Annotation } from '../../../types/annotation'
+import { DEFAULT_ANNOTATION_COLOR, ANNOTATION_COLORS } from '../../../types/annotation'
 
-export interface Note {
-    id: string
-    bookId: string
+export function useAnnotations(bookId: string) {
+  const annotationStore = useAnnotationStore()
+
+  // 当前选中的文本信息
+  const selectedText = ref('')
+  const selectedRange = ref<Range | null>(null)
+  const selectedCfi = ref('')
+  const selectedChapterIndex = ref(0)
+  const selectedChapterTitle = ref('')
+
+  // 当前操作的注释
+  const currentAnnotation = ref<Annotation | null>(null)
+
+  // 注释菜单状态
+  const showAnnotationMenu = ref(false)
+  const annotationMenuPosition = ref({ x: 0, y: 0 })
+
+  // 注释编辑对话框
+  const showNoteDialog = ref(false)
+  const noteDialogContent = ref('')
+
+  // 获取当前书籍的所有注释
+  const bookAnnotations = computed(() => 
+    annotationStore.getBookAnnotations(bookId)
+  )
+
+  // 获取当前章节的注释
+  const chapterAnnotations = computed(() => 
+    annotationStore.getChapterAnnotations(bookId, selectedChapterIndex.value)
+  )
+
+  // 处理文本选择
+  const handleTextSelection = (data: {
     text: string
-    content: string
-    color: string
-    cfi: string
-    chapter: string
+    range?: Range
+    cfi?: string
     chapterIndex: number
-    timestamp: number
-}
+    chapterTitle?: string
+    position: { x: number; y: number }
+  }) => {
+    // 🎯 核心修复: 永远不要直接保存 Range 对象到 ref，它包含循环引用且不可序列化
+    // 只保存我们真正需要的纯文本和位置信息
+    selectedText.value = data.text
+    selectedRange.value = null // 显式置空，防止误用
+    selectedCfi.value = data.cfi || ''
+    selectedChapterIndex.value = data.chapterIndex
+    selectedChapterTitle.value = data.chapterTitle || ''
 
-export function useAnnotations(rendition: Ref<Rendition | null>) {
-    const notes = ref<Note[]>([])
+    // 显示注释菜单
+    showAnnotationMenu.value = true
+    annotationMenuPosition.value = data.position
+  }
 
-    let annotationsPatched = false
+  // 创建高亮
+  const createHighlight = async (color = DEFAULT_ANNOTATION_COLOR.value) => {
+    if (!selectedText.value || !selectedCfi.value) return null
 
-    const ensureAnnotationsPatched = () => {
-        if (annotationsPatched) return
-        if (!rendition.value) return
+    try {
+      const annotation = await annotationStore.addAnnotation({
+        bookId,
+        cfi: selectedCfi.value,
+        text: selectedText.value,
+        color,
+        type: 'highlight',
+        chapterIndex: selectedChapterIndex.value,
+        chapterTitle: selectedChapterTitle.value,
+      })
 
-        const annotations = (rendition.value as any).annotations
-        if (!annotations) return
-
-        const originalInject = annotations.inject
-        if (typeof originalInject === 'function') {
-            annotations.inject = function (...args: any[]) {
-                try {
-                    return originalInject.apply(this, args)
-                } catch (error) {
-                    console.warn('⚠️ [Annotations] inject failed (ignored):', error)
-                }
-            }
-        }
-
-        annotationsPatched = true
+      clearSelection()
+      return annotation
+    } catch (error) {
+      console.error('创建高亮失败:', error)
+      return null
     }
+  }
 
-    // 设置笔记列表
-    const setNotes = (notesList: Note[]) => {
-        ensureAnnotationsPatched()
-        notes.value = notesList
+  // 创建下划线
+  const createUnderline = async (color = DEFAULT_ANNOTATION_COLOR.value) => {
+    if (!selectedText.value || !selectedCfi.value) return null
+
+    try {
+      const annotation = await annotationStore.addAnnotation({
+        bookId,
+        cfi: selectedCfi.value,
+        text: selectedText.value,
+        color,
+        type: 'underline',
+        chapterIndex: selectedChapterIndex.value,
+        chapterTitle: selectedChapterTitle.value,
+      })
+
+      clearSelection()
+      return annotation
+    } catch (error) {
+      console.error('创建下划线失败:', error)
+      return null
     }
+  }
 
-    // 添加高亮
-    const addHighlight = (cfi: string, color: string, note: Note) => {
-        if (!rendition.value) return
-        ensureAnnotationsPatched()
+  // 创建笔记
+  const createNote = async (note: string, color = DEFAULT_ANNOTATION_COLOR.value) => {
+    if (!selectedText.value || !selectedCfi.value) return null
 
-        try {
-            console.log('🎨 添加高亮:', { cfi, color, noteId: note.id })
+    try {
+      const annotation = await annotationStore.addAnnotation({
+        bookId,
+        cfi: selectedCfi.value,
+        text: selectedText.value,
+        note,
+        color,
+        type: 'note',
+        chapterIndex: selectedChapterIndex.value,
+        chapterTitle: selectedChapterTitle.value,
+      })
 
-                ; (rendition.value as any).annotations.add(
-                    'highlight',
-                    cfi,
-                    { noteId: note.id },
-                    null,
-                    'epub-highlight',
-                    {
-                        fill: color,
-                        fillOpacity: '0.3',
-                        mixBlendMode: 'multiply'
-                    }
-                )
-
-            console.log('✅ 高亮添加成功')
-        } catch (error) {
-            console.warn('添加高亮失败:', error)
-        }
+      clearSelection()
+      return annotation
+    } catch (error) {
+      console.error('创建笔记失败:', error)
+      return null
     }
+  }
 
-    // 移除高亮
-    const removeHighlight = (cfi: string) => {
-        if (!rendition.value) return
+  // 显示笔记对话框
+  const showNoteDialogForSelection = () => {
+    noteDialogContent.value = ''
+    showNoteDialog.value = true
+  }
 
-        try {
-            ; (rendition.value as any).annotations.remove(cfi, 'highlight')
-            console.log('🗑️ 高亮已移除:', cfi)
-        } catch (error) {
-            console.warn('移除高亮失败:', error)
-        }
-    }
+  // 保存笔记
+  const saveNote = async (color = DEFAULT_ANNOTATION_COLOR.value) => {
+    if (!noteDialogContent.value.trim()) return
 
-    // 恢复所有高亮
-    const restoreHighlights = (contents?: any) => {
-        if (!notes.value || notes.value.length === 0) return
-        ensureAnnotationsPatched()
+    await createNote(noteDialogContent.value.trim(), color)
+    showNoteDialog.value = false
+    noteDialogContent.value = ''
+  }
 
-        console.log('🎨 恢复高亮，笔记数量:', notes.value.length)
+  // 更新注释
+  const updateAnnotation = async (annotationId: string, updates: Partial<Annotation>) => {
+    return await annotationStore.updateAnnotation(bookId, annotationId, updates)
+  }
 
-        notes.value.forEach(note => {
-            if (note.cfi) {
-                try {
-                    addHighlight(note.cfi, note.color, note)
-                } catch (error) {
-                    console.warn('恢复高亮失败:', error)
-                }
-            }
-        })
-    }
+  // 删除注释
+  const deleteAnnotation = async (annotationId: string) => {
+    return await annotationStore.deleteAnnotation(bookId, annotationId)
+  }
 
-    // 清除文本选区
-    const clearSelection = () => {
-        if (window.getSelection) {
-            window.getSelection()?.removeAllRanges()
-        }
-    }
+  // 编辑注释笔记
+  const editAnnotationNote = (annotation: Annotation) => {
+    currentAnnotation.value = annotation
+    noteDialogContent.value = annotation.note || ''
+    showNoteDialog.value = true
+  }
 
-    // 绑定文本选择事件
-    const bindSelectionEvents = (
-        onTextSelected?: (data: { text: string; cfi: string }) => void,
-        onHighlightClicked?: (note: Note) => void
-    ) => {
-        if (!rendition.value) return
+  // 更新笔记内容
+  const updateNote = async () => {
+    if (!currentAnnotation.value) return
 
-            // 选择事件
-            ; (rendition.value as any).on('selected', (cfiRange: string, contents: any) => {
-                const selection = contents.window.getSelection()
-                if (selection && selection.toString().trim().length > 0) {
-                    const text = selection.toString().trim()
-                    onTextSelected?.({ text, cfi: cfiRange })
-                }
-            })
-    }
+    await updateAnnotation(currentAnnotation.value.id, {
+      note: noteDialogContent.value.trim(),
+    })
 
-    // 为内容设置高亮点击和选择钩子
-    const setupContentHooks = (
-        contents: any,
-        onTextSelected?: (data: { text: string; cfi: string }) => void,
-        onHighlightClicked?: (note: Note) => void
-    ) => {
-        const doc = contents.document
-        const win = contents.window
+    showNoteDialog.value = false
+    noteDialogContent.value = ''
+    currentAnnotation.value = null
+  }
 
-        // 检查是否已设置
-        try {
-            const root = doc?.documentElement
-            if (root?.getAttribute('data-annotations-hooks') === '1') return
-            root?.setAttribute('data-annotations-hooks', '1')
-        } catch (e) { }
+  // 清除选择
+  const clearSelection = () => {
+    selectedText.value = ''
+    selectedRange.value = null
+    selectedCfi.value = ''
+    showAnnotationMenu.value = false
+  }
 
-        // 点击事件 - 检测高亮点击
-        doc.addEventListener('click', (e: MouseEvent) => {
-            const target = e.target as HTMLElement
-            if (target.classList.contains('epub-highlight')) {
-                const noteId = target.getAttribute('data-note-id')
-                if (noteId) {
-                    const note = notes.value.find(n => n.id === noteId)
-                    if (note) {
-                        onHighlightClicked?.(note)
-                    }
-                }
-            }
-        })
+  // 跳转到注释位置
+  const navigateToAnnotation = (annotation: Annotation) => {
+    // 这个方法需要在父组件中实现，通过 emit 或回调
+    return annotation
+  }
 
-        // 文本选择事件
-        let selectionTimeout: ReturnType<typeof setTimeout> | null = null
+  // 导出注释
+  const exportAnnotations = () => {
+    return annotationStore.exportAnnotations(bookId)
+  }
 
-        const handleSelection = () => {
-            if (selectionTimeout) clearTimeout(selectionTimeout)
+  // 导入注释
+  const importAnnotations = async (jsonData: string) => {
+    return await annotationStore.importAnnotations(bookId, jsonData)
+  }
 
-            selectionTimeout = setTimeout(() => {
-                const selection = win.getSelection()
-                if (selection && selection.toString().trim().length > 0) {
-                    try {
-                        const range = selection.getRangeAt(0)
-                        const cfi = (rendition.value as any).getRange(range).toString()
-                        const text = selection.toString().trim()
+  // 获取统计信息
+  const stats = computed(() => annotationStore.getStats(bookId))
 
-                        if (text.length > 0 && cfi) {
-                            onTextSelected?.({ text, cfi })
-                        }
-                    } catch (error) {
-                        console.warn('获取选中文本的 CFI 失败:', error)
-                    }
-                }
-            }, 300)
-        }
+  return {
+    // 状态
+    selectedText,
+    selectedRange,
+    selectedCfi,
+    showAnnotationMenu,
+    annotationMenuPosition,
+    showNoteDialog,
+    noteDialogContent,
+    currentAnnotation,
+    bookAnnotations,
+    chapterAnnotations,
+    stats,
 
-        doc.addEventListener('mouseup', handleSelection)
-        doc.addEventListener('touchend', handleSelection)
-    }
+    // 方法
+    handleTextSelection,
+    createHighlight,
+    createUnderline,
+    createNote,
+    showNoteDialogForSelection,
+    saveNote,
+    updateNote,
+    updateAnnotation,
+    deleteAnnotation,
+    editAnnotationNote,
+    clearSelection,
+    navigateToAnnotation,
+    exportAnnotations,
+    importAnnotations,
 
-    return {
-        notes,
-        setNotes,
-        addHighlight,
-        removeHighlight,
-        restoreHighlights,
-        clearSelection,
-        bindSelectionEvents,
-        setupContentHooks
-    }
+    // 常量
+    ANNOTATION_COLORS,
+  }
 }

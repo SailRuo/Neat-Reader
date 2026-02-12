@@ -184,14 +184,36 @@ export const useEbookStore = defineStore('ebook', () => {
 
   // Blob URL 转 Base64 工具函数
   const blobToBase64 = (blobUrl: string): Promise<string> => {
-    return new Promise(async (resolve, reject) => {
+    return new Promise((resolve, reject) => {
       try {
-        const response = await fetch(blobUrl);
-        const blob = await response.blob();
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+
+        img.onload = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth || img.width;
+            canvas.height = img.naturalHeight || img.height;
+
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              reject(new Error('Failed to get 2d context'));
+              return;
+            }
+
+            ctx.drawImage(img, 0, 0);
+            const dataUrl = canvas.toDataURL('image/png');
+            resolve(dataUrl);
+          } catch (e) {
+            reject(e);
+          }
+        };
+
+        img.onerror = () => {
+          reject(new Error('Failed to load blob image'));
+        };
+
+        img.src = blobUrl;
       } catch (e) {
         reject(e);
       }
@@ -217,7 +239,7 @@ export const useEbookStore = defineStore('ebook', () => {
           
           if (book.format === 'epub' && !book.cover) {
             try {
-              console.log('为书籍重新生成封面:', book.id);
+              //console.log('为书籍重新生成封面:', book.id);
               const fileContent = await localforage.getItem<ArrayBuffer>(`ebook_content_${book.id}`);
               if (fileContent) {
                 const epubBook = ePub(fileContent as ArrayBuffer);

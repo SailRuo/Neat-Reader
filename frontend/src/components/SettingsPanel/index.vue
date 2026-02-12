@@ -35,15 +35,11 @@
                 v-model="refreshToken" 
                 placeholder="Refresh Token（授权后自动填入或手动粘贴）" 
                 style="width: 100%; margin-bottom: 12px;"
+                @input="handleRefreshTokenInput"
               >
-              <button 
-                class="btn btn-primary" 
-                style="width: 100%;"
-                @click="refreshAccessToken"
-                :disabled="!refreshToken || isLoading"
-              >
-                {{ isLoading ? '获取中...' : '连接百度网盘' }}
-              </button>
+              <p v-if="isAutoConnecting" style="font-size: 12px; color: #4A90E2; margin: 0 0 12px 0;">
+                检测到 Token，正在自动连接...
+              </p>
             </div>
           </div>
           
@@ -200,6 +196,10 @@ const storageConfig = computed(() => ebookStore.userConfig.storage)
 const refreshToken = ref('')
 const inputAccessToken = ref('')
 const isLoading = ref(false)
+const isAutoConnecting = ref(false)
+
+// 防抖定时器
+let autoConnectTimer: number | null = null
 
 // Qwen OAuth 相关状态
 const qwenAccessToken = ref('')
@@ -507,6 +507,47 @@ const handleLanguageChange = async (event: Event) => {
   await ebookStore.updateUserConfig({
     ui: { ...ebookStore.userConfig.ui, language: target.value }
   })
+}
+
+/**
+ * 处理 Refresh Token 输入 - 自动连接
+ */
+const handleRefreshTokenInput = (event: Event) => {
+  const target = event.target as HTMLInputElement
+  const token = target.value.trim()
+  
+  // 清除之前的定时器
+  if (autoConnectTimer) {
+    clearTimeout(autoConnectTimer)
+    autoConnectTimer = null
+  }
+  
+  // 如果 token 为空，不处理
+  if (!token) {
+    isAutoConnecting.value = false
+    return
+  }
+  
+  // 验证 token 格式（基本检查：长度 > 20）
+  if (token.length < 20) {
+    isAutoConnecting.value = false
+    return
+  }
+  
+  // 防抖：等待 500ms 后自动连接
+  isAutoConnecting.value = true
+  autoConnectTimer = window.setTimeout(async () => {
+    console.log('🔄 [自动连接] 检测到有效 Token，开始自动连接...')
+    
+    try {
+      await refreshAccessToken()
+      console.log('✅ [自动连接] 连接成功')
+    } catch (error) {
+      console.error('❌ [自动连接] 连接失败:', error)
+    } finally {
+      isAutoConnecting.value = false
+    }
+  }, 500)
 }
 
 // ============ Qwen OAuth 相关函数 ============

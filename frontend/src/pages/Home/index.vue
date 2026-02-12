@@ -270,27 +270,6 @@
     <!-- AI 对话窗口 -->
     <ChatWindow v-model:visible="showChatWindow" />
 
-    <!-- 右键菜单 -->
-    <div 
-      v-if="showMenu" 
-      class="context-menu"
-      :style="{ left: menuX + 'px', top: menuY + 'px' }"
-      @contextmenu.prevent
-    >
-      <div class="menu-item" @click="handleUploadToBaidupan(selectedBook)">
-        <Icons.UploadCloud :size="18" class="menu-icon" />
-        <span class="menu-text">上传到百度网盘</span>
-      </div>
-      <div class="menu-item" @click.stop="showCategoryManageDialog">
-        <Icons.Folder :size="18" class="menu-icon" />
-        <span class="menu-text">分类管理</span>
-      </div>
-      <div class="menu-item danger" @click="handleRemoveBook(selectedBook)">
-        <Icons.Trash2 :size="18" class="menu-icon" />
-        <span class="menu-text">删除书籍</span>
-      </div>
-    </div>
-
     <!-- 分类管理对话框 -->
     <div v-if="showCategoryManage" class="dialog-overlay" @click="closeCategoryManageDialog">
       <div class="dialog-content" @click.stop>
@@ -417,7 +396,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, watch, h } from 'vue'
 import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import { useEbookStore } from '../../stores/ebook'
@@ -426,6 +405,7 @@ import SettingsPanel from '../../components/SettingsPanel/index.vue'
 import ChatWindow from '../../components/ChatWindow/index.vue'
 import * as Icons from 'lucide-vue-next'
 import { api } from '../../api/adapter'
+import ContextMenu from '@imengyu/vue3-context-menu'
 
 // 初始化路由和状态管理
 const router = useRouter()
@@ -439,10 +419,7 @@ const searchKeyword = ref('')
 const selectedCategory = ref('all')
 const showChatWindow = ref(false)
 
-// 右键菜单相关
-const showMenu = ref(false)
-const menuX = ref(0)
-const menuY = ref(0)
+// 右键菜单相关 - 使用 vue3-context-menu
 const selectedBook = ref<any>(null)
 
 // 分类对话框相关
@@ -606,48 +583,28 @@ const goToReader = async (bookId: string) => {
 
   // 检查云端书籍是否已下载到本地
   if (book.storageType === 'baidupan') {
-    // 显示下载确认对话框
-    dialogStore.showDialog({
-      title: '需要下载',
-      message: `《${book.title}》尚未下载到本地，是否立即下载？`,
-      type: 'info',
-      buttons: [
-        { text: '取消' },
-        { 
-          text: '下载', 
-          primary: true,
-          callback: async () => {
-            try {
-              // 显示下载进度
-              dialogStore.showDialog({
-                title: '正在下载',
-                message: `正在从百度网盘下载《${book.title}》...`,
-                type: 'info',
-                buttons: []
-              })
-              
-              const result = await ebookStore.downloadFromBaidupan(book.baidupanPath || book.path)
-              
-              dialogStore.closeDialog()
-              
-              if (result) {
-                dialogStore.showSuccessDialog('下载成功', '即将打开阅读器')
-                // 等待一下让用户看到成功提示
-                await new Promise(resolve => setTimeout(resolve, 500))
-                router.push(`/reader/${bookId}`)
-              } else {
-                dialogStore.showErrorDialog('下载失败', '请检查网络连接或授权状态')
-              }
-            } catch (error) {
-              dialogStore.closeDialog()
-              console.error('下载失败:', error)
-              const errorMessage = error instanceof Error ? error.message : '下载失败，请重试'
-              dialogStore.showErrorDialog('下载失败', errorMessage)
-            }
-          }
-        }
-      ]
-    })
+    // 🎯 静默下载：不弹窗确认，直接后台下载
+    try {
+      // 设置下载状态（用于 UI 显示）
+      book.downloading = true
+      
+      const result = await ebookStore.downloadFromBaidupan(book.baidupanPath || book.path)
+      
+      book.downloading = false
+      
+      if (result) {
+        // 下载成功，直接进入阅读器，不弹窗
+        router.push(`/reader/${bookId}`)
+      } else {
+        // 下载失败才提示
+        dialogStore.showErrorDialog('下载失败', '请检查网络连接或授权状态')
+      }
+    } catch (error) {
+      book.downloading = false
+      console.error('下载失败:', error)
+      const errorMessage = error instanceof Error ? error.message : '下载失败，请重试'
+      dialogStore.showErrorDialog('下载失败', errorMessage)
+    }
     return
   }
 
@@ -714,43 +671,119 @@ const formatDate = (timestamp: number) => {
 // 显示右键菜单
 const showContextMenu = (event: MouseEvent, book: any) => {
   event.preventDefault()
-  showMenu.value = true
-  menuX.value = event.clientX
-  menuY.value = event.clientY
   selectedBook.value = book
   
-  // 点击其他区域关闭菜单
-  document.addEventListener('click', closeContextMenuHandler)
+  // 构建分类子菜单项
+  const categoryMenuItems = categories.value.length > 0 
+    ? categories.value.map(category => ({
+        label: category.name,
+        icon: h('span', { 
+          class: 'category-menu-icon',
+          style: { 
+            backgroundColor: category.color + '20', 
+            color: category.color,
+            padding: '4px',
+            borderRadius: '6px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '24px',
+            height: '24px'
+          }
+        }, [h(getCategoryIcon(category.name), { size: 16 })]),
+        onClick: () => quickMoveToCategory(category.id)
+      }))
+    : [{ label: '暂无分类', disabled: true }]
+  
+  // 添加"新建分类"选项
+  categoryMenuItems.push(
+    { divided: true },
+    {
+      label: '新建分类',
+      icon: h(Icons.Plus, { size: 16 }),
+      onClick: showAddCategoryFromMenu
+    }
+  )
+  
+  // 构建主菜单
+  const menuItems: any[] = [
+    {
+      label: '移动到分类',
+      icon: h(Icons.Folder, { size: 18 }),
+      children: categoryMenuItems
+    },
+    { divided: true }
+  ]
+  
+  // 只在本地书籍时显示上传选项
+  if (book.storageType === 'local') {
+    menuItems.push(
+      {
+        label: '上传到百度网盘',
+        icon: h(Icons.UploadCloud, { size: 18 }),
+        onClick: () => handleUploadToBaidupan(book)
+      },
+      { divided: true }
+    )
+  }
+  
+  // 删除选项
+  menuItems.push({
+    label: '删除书籍',
+    icon: h(Icons.Trash2, { size: 18 }),
+    onClick: () => handleRemoveBook(book),
+    customClass: 'danger-menu-item'
+  })
+  
+  // 显示菜单
+  ContextMenu.showContextMenu({
+    x: event.x,
+    y: event.y,
+    items: menuItems,
+    zIndex: 9999,
+    minWidth: 200
+  })
 }
 
-// 关闭右键菜单
-const closeContextMenu = (clearSelectedBook = true) => {
-  showMenu.value = false
-  if (clearSelectedBook) {
+// 快捷移动到分类
+const quickMoveToCategory = async (categoryId: string) => {
+  if (!selectedBook.value) return
+  
+  const book = selectedBook.value
+  
+  try {
+    const result = await ebookStore.addBookToCategory(book.id, categoryId)
+    if (result) {
+      console.log('书籍已移动到分类:', getCategoryName(categoryId))
+    } else {
+      dialogStore.showErrorDialog('分类更新失败', '无法找到指定书籍或分类')
+    }
+  } catch (error) {
+    console.error('移动书籍到分类失败:', error)
+    dialogStore.showErrorDialog('分类更新失败', error instanceof Error ? error.message : String(error))
+  } finally {
     selectedBook.value = null
   }
 }
 
-// 事件监听器包装函数
-const closeContextMenuHandler = (event: Event) => {
-  closeContextMenu()
-  document.removeEventListener('click', closeContextMenuHandler)
+// 从菜单显示添加分类对话框
+const showAddCategoryFromMenu = () => {
+  showAddCategoryDialog()
 }
 
 // 处理上传到百度网盘
 const handleUploadToBaidupan = async (book: any) => {
   if (!book) return
-  const targetBook = book
-  closeContextMenu()
-  await uploadToBaidupan(targetBook)
+  await uploadToBaidupan(book)
+  selectedBook.value = null
 }
 
 // 处理删除书籍
 const handleRemoveBook = (book: any) => {
   if (!book) return
-  const targetBookId = book.id;
-  const targetTitle = book.title;
-  const targetStorage = book.storageType;
+  const targetBookId = book.id
+  const targetTitle = book.title
+  const targetStorage = book.storageType
 
   dialogStore.showDialog({
     title: '确认删除',
@@ -762,24 +795,23 @@ const handleRemoveBook = (book: any) => {
         text: '删除', 
         primary: true,
         callback: async () => {
-          console.log('开始执行删除逻辑, ID:', targetBookId);
           try {
-            const result = await ebookStore.removeBook(targetBookId, targetStorage);
+            const result = await ebookStore.removeBook(targetBookId, targetStorage)
             if (result) {
-              dialogStore.showSuccessDialog('书籍删除成功');
+              dialogStore.showSuccessDialog('书籍删除成功')
             } else {
-              dialogStore.showErrorDialog('删除失败', '无法删除指定书籍');
+              dialogStore.showErrorDialog('删除失败', '无法删除指定书籍')
             }
           } catch (error) {
-            console.error('删除过程报错:', error);
-            dialogStore.showErrorDialog('删除失败', error instanceof Error ? error.message : String(error));
+            console.error('删除过程报错:', error)
+            dialogStore.showErrorDialog('删除失败', error instanceof Error ? error.message : String(error))
           }
         }
       }
     ]
   })
   
-  closeContextMenu(); // 这里虽然清空了 selectedBook，但上面的局部变量已锁定数据
+  selectedBook.value = null
 }
 
 // 移动书籍到分类
@@ -819,7 +851,6 @@ const showAddCategoryDialog = () => {
   showAddCategory.value = true
   newCategoryName.value = ''
   newCategoryColor.value = '#4A90E2'
-  closeContextMenu()
 }
 
 // 关闭添加分类对话框
@@ -831,8 +862,6 @@ const closeAddCategoryDialog = () => {
 // 显示分类管理对话框
 const showCategoryManageDialog = () => {
   showCategoryManage.value = true
-  document.removeEventListener('click', closeContextMenuHandler)
-  closeContextMenu(false)
 }
 
 // 关闭分类管理对话框
@@ -840,7 +869,6 @@ const closeCategoryManageDialog = () => {
   showCategoryManage.value = false
   selectedCategoryId.value = ''
   selectedBook.value = null
-  closeContextMenu()
 }
 
 // 添加分类
@@ -2208,50 +2236,243 @@ body {
   transform: scale(1.05);
 }
 
-/* 右键菜单 */
-.context-menu {
-  position: fixed;
-  background-color: #FFFFFF;
-  border: 1px solid rgba(203, 213, 225, 0.5);
-  border-radius: 0.5rem;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  z-index: 1000;
-  min-width: 200px;
-  overflow: hidden;
+/* vue3-context-menu 优雅设计 - AI-Native UI 风格 */
+:deep(.mx-context-menu) {
+  /* 毛玻璃效果 + 优雅阴影 */
+  background: rgba(255, 255, 255, 0.98) !important;
+  backdrop-filter: blur(32px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(32px) saturate(180%) !important;
+  
+  /* 精致边框 */
+  border: 1px solid rgba(212, 175, 55, 0.1) !important;
+  border-radius: 14px !important;
+  
+  /* 多层阴影营造深度 */
+  box-shadow: 
+    0 0 0 1px rgba(0, 0, 0, 0.02),
+    0 4px 12px rgba(0, 0, 0, 0.04),
+    0 16px 48px rgba(0, 0, 0, 0.08) !important;
+  
+  padding: 6px !important;
+  min-width: 220px !important;
+  
+  /* 优雅字体 */
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+  
+  /* 入场动画 */
+  animation: menuFadeIn 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 
-.category-submenu {
-  margin-left: 0.25rem;
-  border-left: 3px solid #4A90E2;
+@keyframes menuFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
-.menu-item {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 1rem;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-size: 0.875rem;
-  color: #1E293B;
+:deep(.mx-context-menu-item) {
+  /* 优雅间距 */
+  padding: 11px 14px !important;
+  margin: 2px 0 !important;
+  
+  /* 精致排版 */
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  letter-spacing: -0.02em !important;
+  line-height: 1.4 !important;
+  
+  /* 颜色 */
+  color: #171717 !important;
+  
+  /* 圆角 */
+  border-radius: 10px !important;
+  
+  /* 流畅过渡 */
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  
+  /* 光标 */
+  cursor: pointer !important;
+  
+  /* 初始状态 */
+  position: relative !important;
 }
 
-.menu-item:hover {
-  background-color: #F8FAFC;
+/* Hover 状态 - 金色强调 */
+:deep(.mx-context-menu-item:hover) {
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.08) 0%, rgba(212, 175, 55, 0.04) 100%) !important;
+  color: #171717 !important;
+  transform: translateX(3px) !important;
+  
+  /* 左侧金色边框 */
+  box-shadow: inset 3px 0 0 #D4AF37 !important;
 }
 
-.menu-item.danger:hover {
-  background-color: rgba(239, 68, 68, 0.1);
-  color: #EF4444;
+/* Active 状态 */
+:deep(.mx-context-menu-item:active) {
+  transform: translateX(2px) scale(0.98) !important;
 }
 
-.menu-icon {
-  font-size: 1rem;
-  flex-shrink: 0;
+/* 危险操作 - 红色强调 */
+:deep(.mx-context-menu-item.danger-menu-item) {
+  color: #DC2626 !important;
 }
 
-.menu-text {
-  flex: 1;
+:deep(.mx-context-menu-item.danger-menu-item:hover) {
+  background: linear-gradient(135deg, rgba(220, 38, 38, 0.08) 0%, rgba(220, 38, 38, 0.04) 100%) !important;
+  color: #B91C1C !important;
+  box-shadow: inset 3px 0 0 #DC2626 !important;
+}
+
+/* 分隔线 - 更精致 */
+:deep(.mx-context-menu-item-sperator) {
+  margin: 8px 12px !important;
+  height: 1px !important;
+  background: linear-gradient(90deg, 
+    transparent 0%, 
+    rgba(212, 175, 55, 0.15) 50%, 
+    transparent 100%) !important;
+}
+
+/* 图标样式 */
+:deep(.mx-context-menu-item-icon) {
+  margin-right: 12px !important;
+  opacity: 0.6 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+:deep(.mx-context-menu-item:hover .mx-context-menu-item-icon) {
+  opacity: 1 !important;
+  transform: scale(1.05) !important;
+}
+
+/* 标签 */
+:deep(.mx-context-menu-item-label) {
+  flex: 1 !important;
+  white-space: nowrap !important;
+}
+
+/* 箭头 - 子菜单指示器 */
+:deep(.mx-context-menu-item-arrow) {
+  margin-left: auto !important;
+  opacity: 0.3 !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+:deep(.mx-context-menu-item:hover .mx-context-menu-item-arrow) {
+  opacity: 0.6 !important;
+  transform: translateX(2px) !important;
+}
+
+/* 分类图标特殊样式 */
+:deep(.category-menu-icon) {
+  margin-right: 10px !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+:deep(.mx-context-menu-item:hover .category-menu-icon) {
+  transform: scale(1.08) !important;
+}
+
+/* 子菜单 - 优雅偏移 */
+:deep(.mx-context-menu.mx-context-menu-sub) {
+  margin-left: 6px !important;
+  animation: submenuSlideIn 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+@keyframes submenuSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* 禁用项 */
+:deep(.mx-context-menu-item.disabled) {
+  opacity: 0.35 !important;
+  cursor: not-allowed !important;
+  color: #737373 !important;
+}
+
+:deep(.mx-context-menu-item.disabled:hover) {
+  background: transparent !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* 暗色主题 - 优雅适配 */
+.theme-dark :deep(.mx-context-menu) {
+  background: rgba(26, 26, 26, 0.98) !important;
+  border-color: rgba(212, 175, 55, 0.15) !important;
+  box-shadow: 
+    0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 4px 12px rgba(0, 0, 0, 0.3),
+    0 16px 48px rgba(0, 0, 0, 0.5) !important;
+}
+
+.theme-dark :deep(.mx-context-menu-item) {
+  color: #f5f5f5 !important;
+}
+
+.theme-dark :deep(.mx-context-menu-item:hover) {
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.12) 0%, rgba(212, 175, 55, 0.06) 100%) !important;
+  color: #ffffff !important;
+}
+
+.theme-dark :deep(.mx-context-menu-item.danger-menu-item) {
+  color: #F87171 !important;
+}
+
+.theme-dark :deep(.mx-context-menu-item.danger-menu-item:hover) {
+  background: linear-gradient(135deg, rgba(248, 113, 113, 0.12) 0%, rgba(248, 113, 113, 0.06) 100%) !important;
+  color: #FCA5A5 !important;
+  box-shadow: inset 3px 0 0 #F87171 !important;
+}
+
+.theme-dark :deep(.mx-context-menu-item-sperator) {
+  background: linear-gradient(90deg, 
+    transparent 0%, 
+    rgba(212, 175, 55, 0.2) 50%, 
+    transparent 100%) !important;
+}
+
+.theme-dark :deep(.mx-context-menu-item.disabled) {
+  color: #a3a3a3 !important;
+}
+
+/* 无障碍 - 尊重用户偏好 */
+@media (prefers-reduced-motion: reduce) {
+  :deep(.mx-context-menu),
+  :deep(.mx-context-menu.mx-context-menu-sub) {
+    animation: none !important;
+  }
+  
+  :deep(.mx-context-menu-item),
+  :deep(.mx-context-menu-item-icon),
+  :deep(.mx-context-menu-item-arrow),
+  :deep(.category-menu-icon) {
+    transition: none !important;
+  }
+  
+  :deep(.mx-context-menu-item:hover),
+  :deep(.mx-context-menu-item:active) {
+    transform: none !important;
+  }
+}
+
+/* Focus 状态 - 键盘导航 */
+:deep(.mx-context-menu-item:focus-visible) {
+  outline: 2px solid #D4AF37 !important;
+  outline-offset: 2px !important;
 }
 
 /* 对话框样式 */

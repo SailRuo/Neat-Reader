@@ -1,53 +1,79 @@
 <template>
-  <div class="bottom-bar" :class="`theme-${theme}`" @click.stop>
-    <div class="controls-section">
-      <!-- 主题 -->
-      <div class="control-group">
-        <label>主题</label>
-        <div class="theme-options">
+  <div class="bottom-bar-container" :class="`theme-${theme}`" @click.stop>
+    <!-- 进度控制 (一级) -->
+    <div class="section progress-section">
+      <div class="slider-container">
+        <input 
+          type="range" 
+          min="0" 
+          max="100" 
+          :value="progress"
+          class="progress-slider"
+          @input="handleSliderChange"
+        >
+      </div>
+      <div class="progress-info">
+        <span class="progress-percentage">{{ progress }}%</span>
+      </div>
+    </div>
+
+    <!-- 快捷设置 (一级平铺) -->
+    <div class="section quick-settings">
+      <!-- 主题选择 -->
+      <div class="setting-group">
+        <div class="theme-grid">
           <button
             v-for="t in themes"
             :key="t.value"
-            :class="['theme-btn', t.value, { active: theme === t.value }]"
+            :class="['theme-swatch', t.value, { active: theme === t.value }]"
             @click="$emit('update:theme', t.value)"
             :title="t.label"
           >
-            <div class="theme-preview" :style="{ background: t.color }"></div>
+            <div class="swatch-color" :style="{ background: t.color }"></div>
           </button>
         </div>
       </div>
-      
-      <!-- 字号 -->
-      <div class="control-group">
-        <label>字号</label>
+
+      <div class="divider"></div>
+
+      <!-- 字号调节 -->
+      <div class="setting-group">
         <div class="stepper">
-          <button @click="$emit('update:fontSize', fontSize - 1)" :disabled="fontSize <= 12">-</button>
-          <span>{{ fontSize }}px</span>
-          <button @click="$emit('update:fontSize', fontSize + 1)" :disabled="fontSize >= 30">+</button>
+          <button class="stepper-btn" @click="$emit('update:fontSize', fontSize - 1)" :disabled="fontSize <= 12">A-</button>
+          <span class="value">{{ fontSize }}</span>
+          <button class="stepper-btn" @click="$emit('update:fontSize', fontSize + 1)" :disabled="fontSize >= 30">A+</button>
         </div>
       </div>
-      
-      <!-- 行间距 -->
-      <div class="control-group">
-        <label>行间距</label>
-        <div class="segment-options">
-          <button
-            v-for="h in lineHeights"
-            :key="h"
-            :class="['segment-btn', { active: lineHeight === h }]"
+
+      <div class="divider"></div>
+
+      <!-- 行高调节 -->
+      <div class="setting-group">
+        <div class="segment-control">
+          <button 
+            v-for="h in lineHeights" 
+            :key="h" 
+            :class="{ active: lineHeight === h }"
             @click="$emit('update:lineHeight', h)"
-          >
-            {{ h }}
+          >{{ h }}</button>
+        </div>
+      </div>
+
+      <!-- PDF 模式切换 -->
+      <template v-if="format === 'pdf'">
+        <div class="divider"></div>
+        <div class="setting-group">
+          <button class="mode-toggle-btn" :class="{ active: isPdfTextMode }" @click="$emit('toggle-pdf-text-mode')" :disabled="isParsingPdf">
+            <i class="icon-reflow"></i>
+            <span>{{ isParsingPdf ? '解析中' : (isPdfTextMode ? '原生' : '重排') }}</span>
           </button>
         </div>
-      </div>
+      </template>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-
 const props = defineProps<{
   progress: number
   currentPage: number
@@ -55,6 +81,9 @@ const props = defineProps<{
   theme: string
   fontSize: number
   lineHeight: number
+  isPdfTextMode: boolean
+  isParsingPdf: boolean
+  format?: string
 }>()
 
 const emit = defineEmits<{
@@ -62,459 +91,325 @@ const emit = defineEmits<{
   'update:theme': [value: string]
   'update:fontSize': [value: number]
   'update:lineHeight': [value: number]
+  'toggle-pdf-text-mode': []
 }>()
 
 const themes = [
-  { value: 'light', label: '明亮', color: '#ffffff' },
-  { value: 'sepia', label: '护眼', color: '#f4ecd8' },
-  { value: 'green', label: '护眼绿', color: '#e8f5e9' },
-  { value: 'dark', label: '夜晚', color: '#1a1a1a' }
+  { value: 'light', label: '简约', color: '#ffffff' },
+  { value: 'sepia', label: '羊皮纸', color: '#f4ecd8' },
+  { value: 'green', label: '护眼', color: '#e8f5e9' },
+  { value: 'dark', label: '深夜', color: '#1a1a1a' }
 ]
 
 const lineHeights = [1.2, 1.5, 1.8, 2.0]
+
+const handleSliderChange = (e: Event) => {
+  const val = parseInt((e.target as HTMLInputElement).value)
+  emit('update:progress', val)
+}
 </script>
 
 <style scoped>
-.bottom-bar {
+.bottom-bar-container {
   position: fixed;
   bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
-  max-width: 900px;
-  width: calc(100% - 48px);
-  padding: 20px 28px;
-  background: rgba(255, 255, 255, 0.96);
-  -webkit-backdrop-filter: blur(24px);
-  backdrop-filter: blur(24px);
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 20px;
-  z-index: 1000;
+  width: fit-content;
+  min-width: 520px;
+  max-width: calc(100vw - 48px);
+  background: rgba(var(--bg-rgb, 255, 255, 255), 0.95);
+  backdrop-filter: blur(32px);
+  -webkit-backdrop-filter: blur(32px);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 24px;
+  padding: 18px 28px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  color: #1a1a1a;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
-  overflow: hidden;
+  gap: 16px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.12), 0 4px 16px rgba(0, 0, 0, 0.06);
+  z-index: 1000;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
-.bottom-bar::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(74, 144, 226, 0.3), transparent);
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
+/* 主题变量 */
+.theme-dark { --bg-rgb: 26, 26, 26; --text-color: #eee; --accent: #D4AF37; border-color: rgba(255, 255, 255, 0.1); }
+.theme-light { --bg-rgb: 255, 255, 255; --text-color: #333; --accent: #4a90e2; }
+.theme-sepia { --bg-rgb: 244, 236, 216; --text-color: #3d2817; --accent: #8b6914; }
+.theme-green { --bg-rgb: 232, 245, 233; --text-color: #1b4d2e; --accent: #2e7d32; }
 
-.bottom-bar:hover::before {
-  opacity: 1;
-}
-
-.bottom-bar.theme-sepia {
-  background: rgba(244, 236, 216, 0.96);
-  color: #3d2817;
-  border-color: rgba(61, 40, 23, 0.15);
-  box-shadow: 0 12px 40px rgba(61, 40, 23, 0.2);
-}
-
-.bottom-bar.theme-green {
-  background: rgba(232, 245, 233, 0.96);
-  color: #1b4d2e;
-  border-color: rgba(27, 77, 46, 0.15);
-  box-shadow: 0 12px 40px rgba(27, 77, 46, 0.2);
-}
-
-.bottom-bar.theme-dark {
-  background: rgba(26, 26, 26, 0.96);
-  color: #e8e8e8;
-  border-color: rgba(255, 255, 255, 0.15);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
-}
-
-.bottom-bar.theme-dark::before {
-  background: linear-gradient(90deg, transparent, rgba(106, 169, 244, 0.4), transparent);
-}
-
-.controls-section {
-  display: grid;
-  grid-template-columns: auto repeat(2, minmax(0, 1fr));
-  gap: 20px;
+.section {
+  display: flex;
   align-items: center;
 }
 
-.control-group {
+/* 进度条样式 */
+.progress-section {
+  gap: 16px;
+  padding: 0 6px;
+}
+
+.slider-container {
+  flex: 1;
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
+  align-items: center;
+  padding: 8px 0;
 }
 
-.control-group:first-child {
-  min-width: 180px;
+.progress-slider {
+  width: 100%;
+  height: 6px;
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 3px;
+  appearance: none;
+  outline: none;
+  cursor: pointer;
+  transition: height 0.2s;
 }
 
-.control-group label {
+.progress-slider:hover {
+  height: 8px;
+}
+
+.theme-dark .progress-slider { background: rgba(255, 255, 255, 0.12); }
+
+.progress-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  background: var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transition: transform 0.2s, box-shadow 0.2s;
+  cursor: grab;
+}
+
+.progress-slider:hover::-webkit-slider-thumb {
+  transform: scale(1.1);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.2);
+}
+
+.progress-slider:active::-webkit-slider-thumb { 
+  transform: scale(1.15);
+  cursor: grabbing;
+}
+
+.progress-info {
+  min-width: 48px;
+  text-align: right;
+}
+
+.progress-percentage {
   font-size: 13px;
   font-weight: 600;
-  opacity: 0.8;
-  letter-spacing: 0.5px;
-  transition: opacity 0.2s ease;
+  color: var(--text-color);
+  opacity: 0.75;
 }
 
-.control-group:hover label {
-  opacity: 1;
+/* 设置行平铺样式 */
+.quick-settings {
+  justify-content: space-between;
+  gap: 20px;
+  padding: 2px 0;
 }
 
-.theme-options {
+.setting-group {
   display: flex;
-  gap: 8px;
   align-items: center;
 }
 
-.theme-btn {
-  width: 40px;
-  height: 40px;
-  border: 2px solid transparent;
+.divider {
+  width: 1px;
+  height: 28px;
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 1px;
+}
+
+.theme-dark .divider { background: rgba(255, 255, 255, 0.1); }
+
+/* 主题按钮 */
+.theme-grid {
+  display: flex;
+  gap: 10px;
+}
+
+.theme-swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2.5px solid transparent;
+  padding: 3px;
   background: none;
-  border-radius: 50%;
   cursor: pointer;
-  padding: 4px;
   transition: all 0.2s ease;
-  position: relative;
-  overflow: hidden;
 }
 
-.theme-btn::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 0;
-  height: 0;
-  border-radius: 50%;
-  background: rgba(74, 144, 226, 0.1);
-  transform: translate(-50%, -50%);
-  transition: width 0.3s ease, height 0.3s ease;
+.theme-swatch:hover {
+  transform: scale(1.05);
 }
 
-.theme-btn:hover::before {
-  width: 100px;
-  height: 100px;
-}
-
-.theme-btn:hover {
-  transform: scale(1.1);
-  box-shadow: 0 4px 12px rgba(74, 144, 226, 0.2);
-}
-
-.theme-btn.active {
-  border-color: #4a90e2;
-  box-shadow: 0 0 0 1px rgba(74, 144, 226, 0.3), 0 4px 16px rgba(74, 144, 226, 0.3);
-}
-
-.theme-btn.active::after {
-  content: '';
-  position: absolute;
-  top: -2px;
-  left: -2px;
-  right: -2px;
-  bottom: -2px;
-  border: 2px solid transparent;
-  border-radius: 50%;
-  background: linear-gradient(45deg, #4a90e2, #6AA9F4, #4a90e2) border-box;
-  -webkit-mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  animation: borderRotate 3s linear infinite;
-}
-
-@keyframes borderRotate {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
-}
-
-.theme-preview {
+.swatch-color {
   width: 100%;
   height: 100%;
   border-radius: 50%;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  transition: transform 0.2s ease;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
-.theme-btn:hover .theme-preview {
-  transform: scale(0.95);
+.theme-swatch.active { 
+  border-color: var(--accent); 
+  transform: scale(1.12);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb, 74, 144, 226), 0.15);
 }
 
-.theme-dark .theme-preview {
-  border-color: rgba(255, 255, 255, 0.2);
-}
-
+/* 步进器 */
 .stepper {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: rgba(0, 0, 0, 0.04);
+  background: rgba(0, 0, 0, 0.05);
+  padding: 4px;
   border-radius: 10px;
-  padding: 8px;
-  transition: all 0.2s ease;
 }
 
-.control-group:hover .stepper {
-  background: rgba(0, 0, 0, 0.06);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-}
+.theme-dark .stepper { background: rgba(255, 255, 255, 0.08); }
 
-.theme-dark .stepper {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.theme-dark .control-group:hover .stepper {
-  background: rgba(255, 255, 255, 0.06);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-}
-
-.theme-sepia .stepper {
-  background: rgba(91, 70, 54, 0.04);
-}
-
-.theme-sepia .control-group:hover .stepper {
-  background: rgba(91, 70, 54, 0.06);
-}
-
-.theme-green .stepper {
-  background: rgba(45, 90, 61, 0.04);
-}
-
-.theme-green .control-group:hover .stepper {
-  background: rgba(45, 90, 61, 0.06);
-}
-
-.stepper button {
+.stepper-btn {
   width: 32px;
   height: 32px;
   border: none;
-  background: rgba(0, 0, 0, 0.08);
-  border-radius: 8px;
+  background: none;
+  color: var(--text-color);
+  font-size: 15px;
+  font-weight: 600;
   cursor: pointer;
-  font-size: 18px;
-  font-weight: 600;
-  transition: all 0.2s ease;
-  color: inherit;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  overflow: hidden;
+  border-radius: 8px;
+  transition: all 0.2s;
 }
 
-.stepper button::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 0;
-  height: 0;
-  border-radius: 50%;
-  background: rgba(74, 144, 226, 0.1);
-  transform: translate(-50%, -50%);
-  transition: width 0.3s ease, height 0.3s ease;
+.stepper-btn:hover:not(:disabled) { 
+  background: rgba(0, 0, 0, 0.08);
+  transform: scale(1.05);
 }
 
-.stepper button:hover::before {
-  width: 100px;
-  height: 100px;
+.stepper-btn:active:not(:disabled) {
+  transform: scale(0.95);
 }
 
-.stepper button:hover:not(:disabled) {
-  background: rgba(74, 144, 226, 0.1);
-  transform: scale(1.08);
-  box-shadow: 0 4px 12px rgba(74, 144, 226, 0.2);
-}
-
-.stepper button:disabled {
-  opacity: 0.4;
+.stepper-btn:disabled {
+  opacity: 0.3;
   cursor: not-allowed;
-  transform: none;
 }
 
-.stepper span {
-  flex: 1;
-  text-align: center;
-  font-weight: 600;
-  font-size: 14px;
-  letter-spacing: 0.5px;
-  color: inherit;
+.stepper .value { 
+  font-size: 14px; 
+  font-weight: 600; 
+  min-width: 32px; 
+  text-align: center; 
+  color: var(--text-color);
+  opacity: 0.9;
 }
 
-.segment-options {
+/* 分段控制 */
+.segment-control {
   display: flex;
-  gap: 4px;
-  background: rgba(0, 0, 0, 0.04);
-  border-radius: 10px;
+  gap: 3px;
+  background: rgba(0, 0, 0, 0.05);
   padding: 4px;
-  transition: all 0.2s ease;
+  border-radius: 10px;
 }
 
-.control-group:hover .segment-options {
-  background: rgba(0, 0, 0, 0.06);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-}
+.theme-dark .segment-control { background: rgba(255, 255, 255, 0.08); }
 
-.theme-dark .segment-options {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.theme-dark .control-group:hover .segment-options {
-  background: rgba(255, 255, 255, 0.06);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-}
-
-.theme-sepia .segment-options {
-  background: rgba(91, 70, 54, 0.04);
-}
-
-.theme-sepia .control-group:hover .segment-options {
-  background: rgba(91, 70, 54, 0.06);
-}
-
-.theme-green .segment-options {
-  background: rgba(45, 90, 61, 0.04);
-}
-
-.theme-green .control-group:hover .segment-options {
-  background: rgba(45, 90, 61, 0.06);
-}
-
-.segment-btn {
-  flex: 1;
-  padding: 8px 6px;
+.segment-control button {
+  padding: 6px 14px;
   border: none;
   background: none;
+  color: var(--text-color);
   border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  opacity: 0.7;
+}
+
+.segment-control button:hover:not(.active) {
+  background: rgba(0, 0, 0, 0.04);
+  opacity: 0.9;
+}
+
+.segment-control button.active { 
+  background: var(--accent); 
+  color: white;
+  opacity: 1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+/* PDF 切换 */
+.mode-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border: none;
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text-color);
+  border-radius: 10px;
   cursor: pointer;
   font-size: 13px;
-  font-weight: 600;
-  transition: all 0.2s ease;
-  color: inherit;
-  min-width: 0;
-  white-space: nowrap;
-  position: relative;
-  overflow: hidden;
+  font-weight: 500;
+  transition: all 0.2s;
 }
 
-.segment-btn::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 0;
-  height: 0;
-  border-radius: 50%;
-  background: rgba(74, 144, 226, 0.1);
-  transform: translate(-50%, -50%);
-  transition: width 0.3s ease, height 0.3s ease;
-}
-
-.segment-btn:hover::before {
-  width: 100px;
-  height: 100px;
-}
-
-.segment-btn:hover {
-  background: rgba(74, 144, 226, 0.08);
+.mode-toggle-btn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.08);
   transform: translateY(-1px);
 }
 
-.segment-btn.active {
-  background: linear-gradient(135deg, #4a90e2, #6AA9F4);
-  color: white;
-  box-shadow: 0 4px 16px rgba(74, 144, 226, 0.4);
-  transform: translateY(-1px);
+.mode-toggle-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
-.segment-btn.active::before {
-  display: none;
+.theme-dark .mode-toggle-btn { background: rgba(255, 255, 255, 0.08); }
+.mode-toggle-btn.active { 
+  color: var(--accent);
+  background: rgba(var(--accent-rgb, 74, 144, 226), 0.12);
 }
 
-/* 响应式设计 */
-@media (max-width: 768px) {
-  .bottom-bar {
-    bottom: 16px;
+/* 图标 */
+[class^="icon-"] {
+  width: 16px;
+  height: 16px;
+  background: currentColor;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+}
+.icon-reflow { 
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6h16'/%3E%3Cpath d='M4 12h10'/%3E%3Cpath d='M4 18h16'/%3E%3C/svg%3E"); 
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6h16'/%3E%3Cpath d='M4 12h10'/%3E%3Cpath d='M4 18h16'/%3E%3C/svg%3E");
+}
+
+@media (max-width: 600px) {
+  .bottom-bar-container { 
+    min-width: auto; 
     width: calc(100% - 32px);
-    padding: 18px 24px;
-    border-radius: 16px;
-    gap: 16px;
+    padding: 16px 20px;
+    gap: 14px;
   }
-  
-  .controls-section {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 16px;
-  }
-  
-  .control-group:first-child {
-    grid-column: 1 / -1;
-    min-width: auto;
-  }
-  
-  .theme-options {
+  .quick-settings { 
+    flex-wrap: wrap; 
     justify-content: center;
+    gap: 16px;
   }
-  
-  .theme-btn {
-    width: 36px;
-    height: 36px;
-  }
-  
-  .stepper button {
+  .theme-swatch {
     width: 28px;
     height: 28px;
-    font-size: 16px;
   }
-  
-  .segment-btn {
-    padding: 6px 4px;
-    font-size: 12px;
-  }
-}
-
-@media (max-width: 480px) {
-  .bottom-bar {
-    bottom: 12px;
-    width: calc(100% - 24px);
-    padding: 16px 20px;
-    border-radius: 14px;
-  }
-  
-  .controls-section {
-    grid-template-columns: 1fr;
-  }
-  
-  .control-group:first-child {
-    grid-column: 1;
-  }
-}
-
-/* 动画效果 */
-@keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateX(-50%) translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-  }
-}
-
-.bottom-bar {
-  animation: slideUp 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 </style>

@@ -20,6 +20,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import localforage from 'localforage'
+import type { Annotation } from '../../../types/annotation'
+import { createAnnotationOverlayer, type AnnotationOverlayer } from '../utils/annotationOverlayer'
 
 // Props
 const props = defineProps<{
@@ -29,6 +31,7 @@ const props = defineProps<{
   lineHeight: number
   initialProgress?: number
   initialCfi?: string // 添加 CFI 支持
+  annotations?: Annotation[]
 }>()
 
 // Emits
@@ -37,7 +40,8 @@ const emit = defineEmits<{
   'progress-change': [data: { progress: number; currentPage: number; totalPages: number; cfi?: string }]
   'chapter-change': [data: { index: number; title: string }]
   click: []
-  'text-selected': [data: { text: string; position: { x: number; y: number } }]
+  'text-selected': [data: { text: string; position: { x: number; y: number }; cfi?: string }]
+  'annotation-click': [annotation: any]
 }>()
 
 // 状态
@@ -67,6 +71,11 @@ const totalPages = ref(1)
 // 存储当前可见章节的文本内容
 const currentChapterTexts = ref<Map<number, string>>(new Map())
 
+let cfiFromRange: ((range: Range) => string) | null = null
+let cfiToRange: ((doc: Document, cfi: string) => Range) | null = null
+
+const annotationOverlayers = ref<Map<number, AnnotationOverlayer>>(new Map())
+
 const relocateListener = (e: any) => handleRelocate(e.detail)
 const loadListener = (e: any) => handleLoad(e.detail.doc, e.detail.index)
 
@@ -78,6 +87,9 @@ const bindDocClickForwarding = (doc: Document) => {
     // 忽略链接点击
     const target = e.target as HTMLElement | null
     if (target?.closest?.('a')) return
+
+    // 忽略注释点击（高亮/下划线/笔记）
+    if (target?.closest?.('[data-annotation-id]')) return
 
     // 忽略文本选择
     const selection = doc.getSelection ? doc.getSelection() : window.getSelection()
@@ -91,8 +103,118 @@ const bindDocClickForwarding = (doc: Document) => {
   docAny._neatReaderClickForwarder = handler
 }
 
+const rebuildAnnotationOverlay = (doc: Document, index: number) => {
+  try {
+    // 清理旧 overlay
+    const old = annotationOverlayers.value.get(index)
+    if (old) {
+      if (old.element?.parentNode) {
+        old.element.parentNode.removeChild(old.element)
+      }
+      if (typeof old.destroy === 'function') {
+        old.destroy()
+      }
+    }
+    annotationOverlayers.value.delete(index)
+
+    const all = props.annotations || []
+    const chapterAnnotations = all.filter(a => a.chapterIndex === index)
+
+    console.log(`🎨 [Foliate] 正在为章节 ${index} 重建注释 overlay, 数量: ${chapterAnnotations.length}`)
+
+    if (chapterAnnotations.length === 0) return
+
+    const normalizeForSearch = (s: string) => s.replace(/\s+/g, ' ').trim()
+
+    const findRangeByText = (targetText: string): Range | null => {
+      const text = normalizeForSearch(targetText)
+      if (!text) return null
+
+      // 兜底策略：先用完整文本，找不到再用前 20 个字符
+      const candidates = [text]
+      if (text.length > 20) candidates.push(text.slice(0, 20))
+
+      for (const needle of candidates) {
+        const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT)
+        let node: Node | null = walker.nextNode()
+        while (node) {
+          const raw = node.nodeValue || ''
+          const hay = normalizeForSearch(raw)
+          const idx = hay.indexOf(needle)
+          if (idx >= 0) {
+            // 注意：normalize 会改变索引，这里只做简单兜底：直接在原字符串里找 needle 的未归一化版本
+            const rawIdx = raw.indexOf(needle)
+            const start = rawIdx >= 0 ? rawIdx : 0
+            const end = Math.min(start + needle.length, raw.length)
+            const r = doc.createRange()
+            try {
+              r.setStart(node, start)
+              r.setEnd(node, end)
+              console.log('🧩 [注释] 已用文本匹配生成 Range 兜底')
+              return r
+            } catch (e) {
+              // 继续尝试下一个节点
+            }
+          }
+          node = walker.nextNode()
+        }
+      }
+
+      return null
+    }
+
+    const overlayer = createAnnotationOverlayer(
+      doc,
+      chapterAnnotations,
+      (annotation) => {
+        const cfi = annotation.cfi || ''
+        if (!cfiToRange) return findRangeByText(annotation.text || '')
+
+        // 🎯 核心修复：验证 CFI 格式并转换
+        let targetCfi = cfi
+        if (cfi.includes('!')) {
+          const parts = cfi.match(/!(\/.*)$/)
+          if (parts && parts[1]) {
+            targetCfi = `epubcfi(${parts[1]})`
+            console.log(`🧪 [Foliate] 转换跨文档 CFI: ${cfi} -> ${targetCfi}`)
+          }
+        }
+
+        if (!targetCfi.startsWith('epubcfi(')) {
+          console.warn('⚠️ [注释] 无效的 CFI 格式:', targetCfi)
+          return findRangeByText(annotation.text || '')
+        }
+
+        try {
+          const range = cfiToRange(doc, targetCfi)
+          return range || findRangeByText(annotation.text || '')
+        } catch (rangeError) {
+          if (rangeError instanceof TypeError && rangeError.message.includes('Node')) {
+            console.warn('⚠️ [注释] CFI 指向的节点不存在于当前章节，将使用文本匹配兜底:', targetCfi)
+            return findRangeByText(annotation.text || '')
+          }
+          console.warn('⚠️ [注释] CFI 转换异常，将使用文本匹配兜底:', targetCfi, rangeError)
+          return findRangeByText(annotation.text || '')
+        }
+      },
+      handleAnnotationClick
+    )
+
+    doc.body?.appendChild(overlayer.element)
+    annotationOverlayers.value.set(index, overlayer)
+  } catch (e) {
+    console.warn('⚠️ [注释] overlay 重建失败:', e)
+  }
+}
+
+const rebuildAllAnnotationOverlays = () => {
+  loadedDocs.value.forEach((doc, index) => {
+    rebuildAnnotationOverlay(doc, index)
+  })
+}
+
 // 绑定文本选择监听
-const bindDocSelectionListener = (doc: Document) => {
+const bindDocSelectionListener = (doc: Document, index: number) => {
   const docAny = doc as any
   if (docAny._neatReaderSelectionListener) return
 
@@ -124,7 +246,29 @@ const bindDocSelectionListener = (doc: Document) => {
       y: rect.bottom + offsetY
     }
 
-    emit('text-selected', { text: selectedText, position })
+    let cfi = ''
+    try {
+      if (cfiFromRange) {
+        // 🎯 核心改进: 在当前章节文档上下文中生成 CFI
+        cfi = cfiFromRange(range)
+        
+        // 🎯 关键修复: Foliate 生成的 CFI 可能包含章节外的路径 (如 epubcfi(/6/10...))
+        // 但我们渲染时是在单章节 Document 中解析，需要提取章节内的相对路径
+        if (cfi.includes('!')) {
+          const parts = cfi.match(/!(\/.*)$/)
+          if (parts && parts[1]) {
+            cfi = `epubcfi(${parts[1]})`
+            console.log(`🧪 [Foliate] 生成章节内相对 CFI: ${cfi}`)
+          }
+        } else {
+          console.log(`🧪 [Foliate] 章节 ${index} 生成原始 CFI:`, cfi)
+        }
+      }
+    } catch (e) {
+      console.warn('⚠️ [文本选择] CFI 生成失败:', e)
+    }
+
+    emit('text-selected', { text: selectedText, position, cfi })
   }
 
   doc.addEventListener('mouseup', handler)
@@ -168,6 +312,16 @@ const cleanupView = () => {
     delete (viewerRef.value as any)._clickHandler
   }
 
+  // 清理注释 overlay
+  annotationOverlayers.value.forEach(overlayer => {
+    try {
+      if (overlayer.element?.parentNode) {
+        overlayer.element.parentNode.removeChild(overlayer.element)
+      }
+    } catch { }
+  })
+  annotationOverlayers.value.clear()
+
   if (view.value) {
     try {
       view.value.removeEventListener?.('relocate', relocateListener)
@@ -203,7 +357,7 @@ const initialize = async () => {
     if (props.initialCfi) {
       await goToCfi(props.initialCfi)
     } else if (props.initialProgress && props.initialProgress > 0) {
-      await goToProgress(props.initialProgress)
+      await goToProgress(props.initialProgress ?? 0)
     }
     
     return
@@ -233,16 +387,44 @@ const initialize = async () => {
         return
       }
 
+      // 🎯 核心修复: 解决 "Entity 'nbsp' not defined" 错误
+      // 许多 EPUB 文件使用 &nbsp; 但未在 DTD 中定义，导致浏览器的 XML 解析器崩溃
+      // 解决办法是预处理内容，将 &nbsp; 替换为实体的十六进制数值 &#160;
+      let processedContent: ArrayBuffer = content
+      try {
+        const decoder = new TextDecoder('utf-8')
+        const encoder = new TextEncoder()
+        let text = decoder.decode(content)
+        
+        if (text.includes('&nbsp;')) {
+          console.log('🧪 [Foliate] 检测到未定义的 &nbsp; 实体，进行预处理...')
+          text = text.replace(/&nbsp;/g, '&#160;')
+          processedContent = encoder.encode(text).buffer
+        }
+      } catch (e) {
+        console.warn('⚠️ [Foliate] 内容预处理失败 (非 UTF-8 或二进制数据)，跳过替换:', e)
+      }
+
       // 转换为 File 对象并缓存
-      file = new File([content], 'book.epub', { type: 'application/epub+zip' })
-      cachedBookContent.value = content
+      file = new File([processedContent], 'book.epub', { type: 'application/epub+zip' })
+      cachedBookContent.value = processedContent
       cachedBookFile.value = file
       cachedBookId.value = props.bookId
-      console.log('✅ [Foliate] 书籍内容已缓存')
+      console.log('✅ [Foliate] 书籍内容已预处理并缓存')
     }
 
     // 动态导入 Foliate-js
-    const { View } = await import('@ray-d-song/foliate-js/view.js')
+    const [, epubCfiModule] = await Promise.all([
+      import('@ray-d-song/foliate-js/view.js'),
+      import('@ray-d-song/foliate-js/epubcfi.js').catch(() => null as any),
+    ])
+
+    if (epubCfiModule?.fromRange) {
+      cfiFromRange = (range: Range) => epubCfiModule.fromRange(range)
+    }
+    if (epubCfiModule?.toRange) {
+      cfiToRange = (doc: Document, cfi: string) => epubCfiModule.toRange(doc, cfi)
+    }
 
     // 创建视图元素
     view.value = document.createElement('foliate-view')
@@ -257,23 +439,17 @@ const initialize = async () => {
     // 打开书籍
     await view.value.open(file)
 
-    // 初始化视图 - 如果有 CFI，使用 CFI 恢复；否则使用百分比
+    // 初始化视图 - 🎯 修复：直接传递 CFI 字符串，而不是对象
+    // Foliate 的 init 方法期望 lastLocation 是一个字符串（CFI）或 null
     let lastLocation = null
     if (props.initialCfi) {
-      // 构建完整的 location 对象
-      lastLocation = {
-        cfi: props.initialCfi,
-        fraction: props.initialProgress ? props.initialProgress / 100 : 0,
-        location: props.initialProgress || 0,
-        tocItem: null,
-        section: null
-      }
-      console.log('📍 [Foliate] 准备使用 CFI 恢复:', lastLocation)
+      lastLocation = props.initialCfi
+      console.log('📍 [Foliate] 使用 CFI 定位:', props.initialCfi)
     }
     
     await view.value.init({
       lastLocation: lastLocation,
-      showTextStart: !lastLocation // 如果没有保存位置，显示开头
+      showTextStart: !lastLocation 
     })
 
     // 应用主题和样式
@@ -294,22 +470,14 @@ const initialize = async () => {
       console.log('📚 [Foliate] 目录加载完成，章节数:', chapters.value.length)
     }
     
-    // 立即触发 ready 事件，不要等待章节加载
+    // 立即触发 ready 事件
     emit('ready', { chapters: chapters.value })
     
-    // 如果没有 CFI 但有百分比进度，延迟跳转
-    if (!props.initialCfi && props.initialProgress && props.initialProgress > 0) {
-      setTimeout(() => {
-        console.log('📍 [Foliate] 使用百分比恢复进度:', props.initialProgress)
-        goToProgress(props.initialProgress)
-      }, 500)
-    } else if (props.initialCfi) {
-      console.log('✅ [Foliate] CFI 恢复已应用')
+    // 🎯 核心改进：移除所有基于 initialProgress 的 goToProgress 调用
+    if (props.initialCfi) {
+      console.log('✅ [Foliate] CFI 恢复已由 init 驱动')
     } else {
-      // 即使没有初始进度，也要等待一下让第一个章节加载
-      setTimeout(() => {
-        console.log('✅ [Foliate] 初始章节已加载')
-      }, 300)
+      console.log('ℹ️ [Foliate] 未提供 CFI，从第一页开始')
     }
 
   } catch (err) {
@@ -365,6 +533,11 @@ const handleLoad = (doc: Document, index: number) => {
           line-height: inherit !important;
           color: ${colors.color} !important;
         }
+        #neat-reader-annotation-overlay {
+          width: 100% !important;
+          height: 100% !important;
+          max-width: none !important;
+        }
         img, svg, video, canvas, table, pre, code {
           max-width: 100% !important;
           height: auto !important;
@@ -372,6 +545,18 @@ const handleLoad = (doc: Document, index: number) => {
       `
       doc.head.appendChild(style)
       console.log('✅ [样式] 字号:', props.fontSize, '行高:', props.lineHeight, '主题:', props.theme)
+      
+      // 强制触发重绘 - 修复初始加载时内容不显示的问题
+      setTimeout(() => {
+        if (doc.body) {
+          // 方法1: 触发 reflow
+          doc.body.style.display = 'none'
+          void doc.body.offsetHeight // 强制 reflow
+          doc.body.style.display = ''
+          
+          console.log('✅ [渲染] 已触发章节', index, '的重绘')
+        }
+      }, 50)
     } else {
       // 更新已存在的样式（用于响应字号/行高/主题变化）
       styleEl.textContent = `
@@ -395,6 +580,11 @@ const handleLoad = (doc: Document, index: number) => {
           font-size: inherit !important;
           line-height: inherit !important;
           color: ${colors.color} !important;
+        }
+        #neat-reader-annotation-overlay {
+          width: 100% !important;
+          height: 100% !important;
+          max-width: none !important;
         }
         img, svg, video, canvas, table, pre, code {
           max-width: 100% !important;
@@ -422,10 +612,13 @@ const handleLoad = (doc: Document, index: number) => {
 
   // 绑定文本选择监听
   try {
-    bindDocSelectionListener(doc)
+    bindDocSelectionListener(doc, index)
   } catch (e) {
     console.warn('⚠️ [文本选择] 监听绑定失败:', e)
   }
+
+  // 注入/重建注释 overlay
+  rebuildAnnotationOverlay(doc, index)
   
   // 如果是当前章节，触发文本更新
   if (index === currentChapterIndex.value) {
@@ -475,6 +668,34 @@ const handleRelocate = (location: any) => {
     currentPage: currentPage.value,
     totalPages: totalPages.value,
     cfi: cfi || '' // 传递 CFI 用于保存位置
+  })
+
+  // 🎯 核心修复: 只有在 relocation 稳定后才自动保存进度
+  // 这样可以确保保存的是准确的 CFI，而不是初始化时的临时值
+  if (isReady.value) {
+    // 延迟一小会儿保存，确保状态已同步
+    setTimeout(() => {
+      saveProgressStable()
+    }, 100)
+  }
+}
+
+// 专门用于 Relocate 事件的稳定保存
+const saveProgressStable = () => {
+  if (!isReady.value) return
+  
+  const location = getCurrentLocation()
+  if (!location || !location.cfi) return
+
+  // 检查是否是合法的 CFI（过滤掉临时/错误的 CFI）
+  if (location.cfi.includes('undefined') || location.cfi === 'epubcfi(/0)') return
+
+  // 触发父组件保存进度
+  emit('progress-change', {
+    progress: progress.value,
+    currentPage: currentPage.value,
+    totalPages: totalPages.value,
+    cfi: location.cfi
   })
 }
 
@@ -728,6 +949,7 @@ watch(() => props.theme, () => {
   applyTheme()
   // 更新所有已加载章节的主题颜色
   updateAllIframeStyles()
+  rebuildAllAnnotationOverlays()
   console.log('✅ [主题] 已应用到所有 iframe')
 })
 
@@ -740,6 +962,7 @@ watch(() => props.fontSize, (newSize, oldSize) => {
     
     // 更新所有已加载章节的样式
     updateAllIframeStyles()
+    rebuildAllAnnotationOverlays()
     console.log('✅ [字号] 已应用到所有 iframe')
   }
 })
@@ -753,20 +976,33 @@ watch(() => props.lineHeight, (newHeight, oldHeight) => {
     
     // 更新所有已加载章节的样式
     updateAllIframeStyles()
+    rebuildAllAnnotationOverlays()
     console.log('✅ [行高] 已应用到所有 iframe')
   }
 })
 
-// 更新所有 iframe 的样式
+// 处理文字点击（例如：点击已有的高亮）
+const handleAnnotationClick = (annotation: Annotation) => {
+  emit('annotation-click', annotation)
+}
+
+// 修改 watch annotations，确保实时更新
+watch(
+  () => props.annotations,
+  (newAnnos) => {
+    console.log(`🔄 [Reader] 注释列表更新, 总数: ${newAnnos?.length || 0}`)
+    rebuildAllAnnotationOverlays()
+  },
+  { deep: true, immediate: true }
+)
+
+// 重新注入/更新所有 iframe 的样式
 const updateAllIframeStyles = () => {
-  console.log('🔄 [样式更新] 开始更新所有已加载的章节')
-  
-  // 直接使用缓存的文档对象
   if (loadedDocs.value.size === 0) {
     console.log('⚠️ [样式更新] 没有已加载的章节文档')
     return
   }
-  
+
   const colors = themeColors[props.theme]
   let updatedCount = 0
   
@@ -803,8 +1039,16 @@ const updateAllIframeStyles = () => {
         `
         updatedCount++
         console.log(`✅ [样式更新] 章节 ${index} 已更新 (字号:${props.fontSize}, 行高:${props.lineHeight}, 主题:${props.theme})`)
-      } else {
-        console.log(`⚠️ [样式更新] 章节 ${index} 没有找到样式元素`)
+      }
+
+      // 🎯 核心修复: 确保 SVG 容器始终在 body 的最后，且 z-index 正确
+      const svg = doc.getElementById('neat-reader-annotation-overlay')
+      if (svg) {
+        svg.style.zIndex = '2147483647'
+        svg.style.pointerEvents = 'none'
+        if (doc.body && doc.body.lastChild !== svg) {
+          doc.body.appendChild(svg)
+        }
       }
     } catch (e) {
       console.warn(`⚠️ [样式更新] 无法更新章节 ${index}:`, e)

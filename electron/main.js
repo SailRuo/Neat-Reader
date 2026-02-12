@@ -56,7 +56,7 @@ function createWindow() {
               "style-src-elem 'self' 'unsafe-inline' blob: http://localhost:*; " +
               "img-src 'self' data: blob: http://localhost:* https:; " +
               "font-src 'self' data: blob: http://localhost:*; " +
-              "connect-src 'self' http://localhost:* ws://localhost:* wss://localhost:* https://chat.qwen.ai https://portal.qwen.ai https://*.qwen.ai https://pan.baidu.com https://d.pcs.baidu.com https://alistgo.com; " +
+              "connect-src 'self' blob: http://localhost:* ws://localhost:* wss://localhost:* https://chat.qwen.ai https://portal.qwen.ai https://*.qwen.ai https://pan.baidu.com https://d.pcs.baidu.com https://alistgo.com; " +
               "media-src 'self' blob: data:; " +
               "worker-src 'self' blob:; " +
               "frame-src 'self' blob: data:;"
@@ -67,7 +67,7 @@ function createWindow() {
               "style-src-elem 'self' 'unsafe-inline' blob:; " +
               "img-src 'self' data: blob: https:; " +
               "font-src 'self' data: blob:; " +
-              "connect-src 'self' https://chat.qwen.ai https://portal.qwen.ai https://*.qwen.ai https://pan.baidu.com https://d.pcs.baidu.com https://alistgo.com; " +
+              "connect-src 'self' blob: https://chat.qwen.ai https://portal.qwen.ai https://*.qwen.ai https://pan.baidu.com https://d.pcs.baidu.com https://alistgo.com; " +
               "media-src 'self' blob: data:; " +
               "worker-src 'self' blob:; " +
               "frame-src 'self' blob: data:;"
@@ -86,11 +86,6 @@ function createWindow() {
       console.error('❌ 渲染进程崩溃:', details)
       console.error('原因:', details.reason)
       console.error('退出码:', details.exitCode)
-    })
-    
-    // 监听页面崩溃（已废弃，但保留兼容）
-    mainWindow.webContents.on('crashed', (event) => {
-      console.error('❌ 页面崩溃')
     })
     
     // 监听未响应

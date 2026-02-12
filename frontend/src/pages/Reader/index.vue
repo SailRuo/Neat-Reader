@@ -14,7 +14,7 @@
     />
     
     <!-- 阅读内容区 -->
-    <div class="reader-content" ref="contentRef">
+    <div class="reader-content">
       <!-- Foliate EPUB 阅读器 -->
       <FoliateReader
         v-if="book?.format === 'epub'"
@@ -23,6 +23,7 @@
         :theme="theme"
         :font-size="fontSize"
         :line-height="lineHeight"
+        :annotations="bookAnnotations"
         :initial-progress="progress"
         :initial-cfi="initialCfi"
         @ready="handleReaderReady"
@@ -32,14 +33,25 @@
         @text-selected="handleTextSelected"
       />
       
+      <!-- PDF 原生渲染 -->
       <PdfReader
-        v-else-if="book?.format === 'pdf'"
+        v-else-if="book?.format === 'pdf' && !isPdfTextMode"
         ref="pdfReaderRef"
         :book-id="book.id"
         :theme="theme"
         :initial-progress="progress"
         @ready="handleReaderReady"
         @progress-change="handleProgressChange"
+        @click="handleContentClick"
+      />
+      
+      <!-- PDF 文本重排模式 -->
+      <TextReflowReader
+        v-else-if="book?.format === 'pdf' && isPdfTextMode"
+        :content="pdfReflowContent"
+        :theme="theme"
+        :font-size="fontSize"
+        :line-height="lineHeight"
         @click="handleContentClick"
       />
       
@@ -58,10 +70,14 @@
       :theme="theme"
       :font-size="fontSize"
       :line-height="lineHeight"
+      :is-pdf-text-mode="isPdfTextMode"
+      :is-parsing-pdf="isParsingPdf"
+      :format="book?.format"
       @update:progress="handleUpdateProgress"
       @update:theme="theme = $event as 'light' | 'sepia' | 'dark' | 'green'"
       @update:font-size="fontSize = $event"
       @update:line-height="lineHeight = $event"
+      @toggle-pdf-text-mode="togglePdfTextMode"
     />
     
     <!-- 侧边栏 -->
@@ -70,11 +86,13 @@
       :type="activeSidebar"
       :chapters="chapters"
       :current-chapter-index="currentChapterIndex"
+      :notes="sidebarNotes"
       :theme="theme"
       :tts="tts"
       :current-page-text="currentPageText"
       @close="activeSidebar = null"
       @navigate="handleNavigate"
+      @delete-note="handleDeleteNote"
     />
     
     <!-- 文本选择菜单 -->
@@ -82,8 +100,21 @@
       :visible="showSelectionMenu"
       :selected-text="selectedText"
       :position="selectionPosition"
+      @underline="handleCreateUnderline"
+      @note="handleCreateNote"
+      :color="selectedAnnotationColor"
+      @color-change="selectedAnnotationColor = $event"
       @ask-ai="handleAskAI"
-      @close="showSelectionMenu = false"
+      @close="handleCloseSelectionMenu"
+    />
+    
+    <!-- 笔记对话框 -->
+    <NoteDialog
+      v-model:visible="showNoteDialog"
+      :selected-text="annotationSelectedText"
+      :note="noteDialogContent"
+      :is-edit="!!currentAnnotation"
+      @save="handleSaveNote"
     />
     
     <!-- AI 浮动按钮 -->
@@ -109,7 +140,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, nextTick, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useEbookStore } from '../../stores/ebook'
 import localforage from 'localforage'
@@ -119,10 +150,14 @@ import BottomBar from './components/BottomBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import FoliateReader from './components/FoliateReader.vue'
 import PdfReader from './components/PdfReader.vue'
+import TextReflowReader from './components/TextReflowReader.vue'
 import TextSelectionMenu from './components/TextSelectionMenu.vue'
 import AIFloatingButton from './components/AIFloatingButton.vue'
 import BookAIChatPanel from './components/BookAIChatPanel.vue'
 import { useTextToSpeech } from './composables/useTextToSpeech'
+import { useAnnotationStore } from '../../stores/annotation'
+import { useAnnotations } from './composables/useAnnotations'
+import NoteDialog from './components/NoteDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -137,15 +172,15 @@ const activeSidebar = ref<'contents' | 'search' | 'notes' | 'tts' | null>(null)
 // 阅读器引用
 const foliateReaderRef = ref<any>(null)
 const pdfReaderRef = ref<any>(null)
-const contentRef = ref<HTMLElement | null>(null)
-const noteTextareaRef = ref<HTMLTextAreaElement | null>(null)
+const isPdfTextMode = ref(false)
+const pdfReflowContent = ref('')
+const isParsingPdf = ref(false)
 
 // 阅读设置
 const theme = ref<'light' | 'sepia' | 'dark' | 'green'>('light')
 const fontSize = ref(18)
 const lineHeight = ref(1.5)
 const pageMode = ref<'page' | 'scroll'>('page')
-const alignment = ref('left')
 const brightness = ref(100)
 
 // 阅读进度
@@ -168,6 +203,24 @@ const RESTORE_TIMEOUT = 5000 // 5秒超时
 // 初始化 TTS
 const tts = useTextToSpeech()
 
+// 初始化注释功能
+const bookId = computed(() => route.params.id as string)
+const annotationStore = useAnnotationStore()
+const {
+  selectedText: annotationSelectedText,
+  showNoteDialog,
+  noteDialogContent,
+  currentAnnotation,
+  bookAnnotations,
+  handleTextSelection,
+  createHighlight,
+  createUnderline,
+  showNoteDialogForSelection,
+  saveNote,
+  updateNote,
+  clearSelection: clearAnnotationSelection,
+} = useAnnotations(bookId.value)
+
 // 获取当前页面文本（用于 TTS）- 使用 ref 而不是 computed
 const currentPageText = ref('')
 
@@ -175,7 +228,9 @@ const currentPageText = ref('')
 const showSelectionMenu = ref(false)
 const selectedText = ref('')
 const selectionPosition = ref({ x: 0, y: 0 })
+const selectedCfi = ref('')
 const selectedTextForAI = ref('') // 传递给 AI 的选中文本
+const selectedAnnotationColor = ref('#FBBF24')
 
 // AI 对话相关
 const showAIChat = ref(false)
@@ -200,12 +255,6 @@ const updateCurrentPageText = (retryCount = 0) => {
   currentPageText.value = text
 }
 
-// 暂时移除的功能（后续恢复）
-// const notes = ref<any[]>([])
-// const showNoteDialog = ref(false)
-// const selectedText = ref('')
-// const searchResults = ref<any[]>([])
-
 // 内容点击处理 - 切换控制栏显示/隐藏，同时关闭 AI 对话框
 const handleContentClick = () => {
   showControls.value = !showControls.value
@@ -213,23 +262,41 @@ const handleContentClick = () => {
   // 如果 AI 对话框打开，点击阅读区域时关闭它
   if (showAIChat.value) {
     showAIChat.value = false
-    console.log('🤖 [AI 对话] 点击阅读区域，关闭对话框')
   }
 }
 
 // 侧边栏切换
 const handleToggleSidebar = (type: 'contents' | 'search' | 'notes' | 'tts') => {
-  // 支持目录和 TTS
-  if (type === 'contents' || type === 'tts') {
-    const wasOpen = activeSidebar.value === type
-    activeSidebar.value = wasOpen ? null : type
-    
-    // 如果打开 TTS 侧边栏，立即更新文本
-    if (!wasOpen && type === 'tts') {
-      updateCurrentPageText()
-    }
-  } else {
-    // ignore
+  const wasOpen = activeSidebar.value === type
+  activeSidebar.value = wasOpen ? null : type
+
+  // 如果打开 TTS 侧边栏，立即更新文本
+  if (!wasOpen && type === 'tts') {
+    updateCurrentPageText()
+  }
+}
+
+// 侧边栏笔记列表数据
+const sidebarNotes = computed(() => {
+  const annos = bookAnnotations.value || []
+  return annos
+    .filter(a => a.type === 'note')
+    .map(a => ({
+      id: a.id,
+      cfi: a.cfi,
+      chapter: a.chapterTitle || `第 ${((a.chapterIndex ?? 0) + 1)} 章`,
+      text: a.text,
+      content: a.note || '',
+      color: a.color,
+      timestamp: a.updatedAt || a.createdAt || Date.now(),
+    }))
+})
+
+const handleDeleteNote = async (noteId: string) => {
+  try {
+    await annotationStore.deleteAnnotation(bookId.value, noteId)
+  } catch (e) {
+    console.error('删除笔记失败:', e)
   }
 }
 
@@ -251,13 +318,10 @@ const handleReaderReady = (data: any) => {
 
 // 进度变化
 const handleProgressChange = (data: any) => {
-  console.log('🔄 进度变化事件 - 接收数据:', data, '恢复状态:', isRestoringProgress.value)
-  
   // 验证进度值是否有效
   if (typeof data.progress === 'number' && !isNaN(data.progress) && data.progress >= 0 && data.progress <= 100) {
     progress.value = data.progress
   } else {
-    console.warn('⚠️ 接收到无效的进度值:', data.progress, '使用当前值:', progress.value)
     return // 无效进度不保存
   }
   
@@ -272,29 +336,22 @@ const handleProgressChange = (data: any) => {
     const elapsed = Date.now() - restoreStartTime.value
     const diff = Math.abs(progress.value - restoreTargetProgress.value)
     
-    console.log('🔄 检查进度恢复状态 - 当前:', progress.value, '目标:', restoreTargetProgress.value, '差值:', diff, '耗时:', elapsed)
-    
     // 检查是否超时
     if (elapsed > RESTORE_TIMEOUT) {
-      console.warn('⚠️ 进度恢复超时，强制完成')
       isRestoringProgress.value = false
-      saveProgress()
       return
     }
     
     // 检查是否恢复成功（允许 5% 的误差）
     if (diff <= 5) {
-      console.log('✅ 进度恢复完成，目标:', restoreTargetProgress.value, '当前:', progress.value)
       isRestoringProgress.value = false
-      saveProgress()
     } else {
-      console.log('🔄 仍在恢复进度，当前:', progress.value, '目标:', restoreTargetProgress.value)
-      return // 恢复中不保存进度
+      return // 恢复中不自动保存进度
     }
   }
 
-  // 非恢复状态，保存进度
-  saveProgress()
+  // 🎯 核心修复: 进度变化时不自动保存到数据库/云端
+  // 只有在 relocate (用户翻页完成) 时才保存，或者手动调用保存
 }
 
 // 章节变化
@@ -315,6 +372,10 @@ const handleUpdateProgress = (newProgress: number) => {
 }
 
 const handleKeyDown = (e: KeyboardEvent) => {
+  if (e.key === 't' && e.altKey && book.value?.format === 'pdf') {
+    togglePdfTextMode()
+  }
+  if (showAIChat.value) return
   const reader = book.value?.format === 'epub' ? foliateReaderRef.value : pdfReaderRef.value
   if (!reader) return
 
@@ -356,16 +417,16 @@ const handleNavigate = (data: any) => {
 }
 
 // 处理文本选择
-const handleTextSelected = (data: { text: string; position: { x: number; y: number } }) => {
-  console.log('📝 [文本选择]', data.text.substring(0, 50))
+const handleTextSelected = (data: { text: string; position: { x: number; y: number }; cfi?: string }) => {
   selectedText.value = data.text
   selectionPosition.value = data.position
+  selectedCfi.value = data.cfi || ''
   showSelectionMenu.value = true
 }
 
 // 处理 AI 对话
 const handleAskAI = (text: string) => {
-  console.log('🤖 [AI 对话] 选中文本:', text.substring(0, 50))
+  console.log(' [AI 对话] 选中文本:', text.substring(0, 50))
   
   // 保存选中的文本，传递给 AI 面板
   selectedTextForAI.value = text
@@ -374,12 +435,89 @@ const handleAskAI = (text: string) => {
   showSelectionMenu.value = false
   showAIChat.value = true
   
-  console.log('✅ 选中文本已传递给 AI 面板')
+  console.log(' 选中文本已传递给 AI 面板')
+}
+
+// 处理创建高亮
+const handleCreateHighlight = async () => {
+  console.log(' [注释] 创建高亮')
+  try {
+    // 使用当前选中的文本和位置信息
+    handleTextSelection({
+      text: selectedText.value,
+      cfi: selectedCfi.value,
+      chapterIndex: currentChapterIndex.value,
+      chapterTitle: currentChapterTitle.value,
+      position: selectionPosition.value,
+    })
+
+    const created = await createHighlight(selectedAnnotationColor.value)
+    showSelectionMenu.value = false
+    if (created) console.log(' 高亮创建成功')
+  } catch (error) {
+    console.error(' 创建高亮失败:', error)
+  }
+}
+
+// 处理创建下划线
+const handleCreateUnderline = async () => {
+  console.log(' [注释] 创建下划线')
+  try {
+    handleTextSelection({
+      text: selectedText.value,
+      cfi: selectedCfi.value,
+      chapterIndex: currentChapterIndex.value,
+      chapterTitle: currentChapterTitle.value,
+      position: selectionPosition.value,
+    })
+
+    const created = await createUnderline(selectedAnnotationColor.value)
+    showSelectionMenu.value = false
+    if (created) console.log(' 下划线创建成功')
+  } catch (error) {
+    console.error(' 创建下划线失败:', error)
+  }
+}
+
+// 处理创建笔记
+const handleCreateNote = () => {
+  console.log(' [注释] 打开笔记对话框')
+  handleTextSelection({
+    text: selectedText.value,
+    cfi: selectedCfi.value,
+    chapterIndex: currentChapterIndex.value,
+    chapterTitle: currentChapterTitle.value,
+    position: selectionPosition.value,
+  })
+  
+  showNoteDialogForSelection()
+  showSelectionMenu.value = false
+}
+
+// 保存笔记
+const handleSaveNote = async (note: string) => {
+  console.log(' [注释] 保存笔记:', note.substring(0, 50))
+  try {
+    if (currentAnnotation.value) {
+      await updateNote()
+    } else {
+      await saveNote()
+    }
+    console.log(' 笔记保存成功')
+  } catch (error) {
+    console.error(' 保存笔记失败:', error)
+  }
+}
+
+// 关闭选择菜单
+const handleCloseSelectionMenu = () => {
+  showSelectionMenu.value = false
+  clearAnnotationSelection()
 }
 
 // 切换 AI 对话面板
 const handleToggleAIChat = () => {
-  console.log('🤖 [AI 对话] 切换面板:', !showAIChat.value)
+  console.log(' [AI 对话] 切换面板:', !showAIChat.value)
   
   // 如果关闭面板，清空选中文本
   if (showAIChat.value) {
@@ -398,26 +536,26 @@ const saveProgress = async () => {
   
   // 验证进度值是否有效
   if (isNaN(progress.value) || progress.value < 0 || progress.value > 100) {
-    console.warn('⚠️ 进度值无效，跳过保存:', progress.value)
     return
   }
   
   const location = reader.getCurrentLocation()
   
-  // 确保所有数据都是可序列化的，使用 toRaw 去除 Vue 响应式代理
+  // 🎯 核心修复: 确保保存时使用当前最新的 CFI 和位置信息
+  // 如果 reader 返回了 location，优先使用它
   const progressData = {
     ebookId: book.value.id,
-    chapterIndex: Number(currentChapterIndex.value), // 转换为普通数字
-    chapterTitle: String(currentChapterTitle.value), // 转换为普通字符串
-    position: Number(progress.value / 100),
-    cfi: typeof location?.start?.cfi === 'string' ? location.start.cfi : '',
+    chapterIndex: location?.chapterIndex !== undefined ? Number(location.chapterIndex) : Number(currentChapterIndex.value),
+    chapterTitle: String(currentChapterTitle.value),
+    position: location?.fraction !== undefined ? Number(location.fraction) : Number(progress.value / 100),
+    cfi: typeof location?.cfi === 'string' ? location.cfi : '',
     timestamp: Date.now(),
     readingTime: Number(readingTime.value),
     deviceId: String(ebookStore.deviceInfo.id),
     deviceName: String(ebookStore.deviceInfo.name)
   }
 
-  console.log('💾 保存进度:', progressData.position * 100, '%, CFI:', progressData.cfi)
+  console.log('💾 [进度保存] CFI:', progressData.cfi, '百分比:', (progressData.position * 100).toFixed(2) + '%')
   await ebookStore.saveReadingProgress(progressData)
 }
 
@@ -459,53 +597,80 @@ watch([theme, fontSize, lineHeight, brightness], () => {
   saveUserConfig()
 })
 
+const togglePdfTextMode = async () => {
+  console.log('按钮被点击: togglePdfTextMode', { isPdfTextMode: isPdfTextMode.value, hasContent: !!pdfReflowContent.value })
+  if (isPdfTextMode.value) {
+    isPdfTextMode.value = false
+    return
+  }
+
+  if (pdfReflowContent.value) {
+    isPdfTextMode.value = true
+    return
+  }
+
+  if (!pdfReaderRef.value) {
+    console.error('pdfReaderRef 为空，无法解析')
+    return
+  }
+
+  try {
+    isParsingPdf.value = true
+    isLoading.value = true
+    console.log('开始调用 pdfReaderRef.value.extractAllTextToHTML()')
+    const html = await pdfReaderRef.value.extractAllTextToHTML()
+    console.log('解析完成，收到 HTML 长度:', html?.length)
+    if (html) {
+      pdfReflowContent.value = html
+      isPdfTextMode.value = true
+      console.log('已切换到重排模式')
+    } else {
+      console.warn('解析出的 HTML 为空')
+      alert('该 PDF 似乎没有可提取的文本内容（可能是扫描版）')
+    }
+  } catch (e) {
+    console.error('解析 PDF 失败:', e)
+    alert('解析 PDF 文本失败')
+  } finally {
+    isParsingPdf.value = false
+    isLoading.value = false
+  }
+}
+
 // 生命周期
 onMounted(async () => {
-  console.log('🔍 [Reader] onMounted 开始')
+  console.log(' [Reader] onMounted 开始')
   const bookId = route.params.id as string
-  console.log('🔍 [Reader] 书籍ID:', bookId)
+  
+  // 初始化注释存储
+  await annotationStore.initialize()
   
   // 先设置 book，避免 v-if 闪烁
   const bookData = ebookStore.getBookById(bookId)
-  console.log('🔍 [Reader] 书籍数据:', bookData ? '已找到' : '未找到')
   
   if (!bookData) {
-    console.error('❌ 未找到书籍信息')
     router.push('/')
     return
   }
   
-  console.log('🔍 [Reader] 开始检查书籍内容...')
-  // 详细检查书籍内容是否存在
   try {
     const contentExists = await localforage.getItem(`ebook_content_${bookId}`)
-    console.log('🔍 [Reader] 内容检查结果:', contentExists ? '存在' : '不存在')
     if (!contentExists) {
-      console.error('❌ 书籍内容不存在，键名:', `ebook_content_${bookId}`)
-      
-      // 检查是否是云端书籍需要下载
       if (bookData.storageType === 'baidupan') {
         alert('该书籍尚未下载到本地，请先在首页下载后再阅读')
       } else {
         alert('书籍内容加载失败，文件可能已损坏，请重新导入')
       }
-      
       router.push('/')
       return
     }
   } catch (error) {
-    console.error('❌ 检查书籍内容时出错:', error)
-    alert('检查书籍内容时出错，请重试')
     router.push('/')
     return
   }
   
-  console.log('🔍 [Reader] 开始加载用户配置...')
-  // 立即加载用户配置（同步操作）
   loadUserConfig()
-  console.log('🔍 [Reader] 用户配置加载完成')
   
-  // 同步加载阅读进度（阻塞，确保进度在阅读器初始化前加载）
   const savedProgress = await ebookStore.loadReadingProgress(bookId)
   if (savedProgress) {
     const savedProgressPercent = Math.floor(savedProgress.position * 100)
@@ -513,24 +678,23 @@ onMounted(async () => {
     currentChapterIndex.value = savedProgress.chapterIndex || 0
     currentChapterTitle.value = savedProgress.chapterTitle || ''
     readingTime.value = savedProgress.readingTime || 0
-
     initialCfi.value = savedProgress.cfi || ''
     initialProgress.value = savedProgressPercent
 
-    if (savedProgressPercent > 0) {
+    if (initialCfi.value) {
+      console.log('📖 [Reader] 发现 CFI，将使用 CFI 精确恢复:', initialCfi.value)
       isRestoringProgress.value = true
       restoreTargetProgress.value = savedProgressPercent
       restoreStartTime.value = Date.now()
-      console.log('📖 设置进度恢复 - 目标:', savedProgressPercent, '%, CFI:', initialCfi.value)
+    } else if (savedProgressPercent > 0) {
+      console.log('📖 [Reader] 未发现 CFI，将使用百分比恢复:', savedProgressPercent)
+      isRestoringProgress.value = true
+      restoreTargetProgress.value = savedProgressPercent
+      restoreStartTime.value = Date.now()
     }
-  } else {
-    console.log('ℹ️ 无保存进度，从头开始')
   }
   
-  // 最后设置 book，触发阅读器渲染（此时所有数据已准备好）
   book.value = bookData
-  
-  // 键盘事件监听
   window.addEventListener('keydown', handleKeyDown)
 })
 
@@ -539,10 +703,7 @@ onBeforeUnmount(() => {
 })
 
 onBeforeUnmount(async () => {
-  // 保存进度但不等待完成
-  saveProgress().catch(err => console.warn('保存进度失败:', err))
-  
-  // 异步同步到云端，不阻塞页面关闭
+  saveProgress().catch(() => {})
   if (book.value) {
     ebookStore.syncCurrentBookProgress(book.value.id)
   }
@@ -558,26 +719,11 @@ onBeforeUnmount(async () => {
   transition: background-color 0.2s ease;
 }
 
-/* 主题颜色 - 优化对比度和舒适度 */
-.theme-light {
-  background: #ffffff;
-  color: #1a1a1a;
-}
-
-.theme-sepia {
-  background: #f4ecd8;
-  color: #3d2817;
-}
-
-.theme-green {
-  background: #e8f5e9;
-  color: #1b4d2e;
-}
-
-.theme-dark {
-  background: #1a1a1a;
-  color: #e8e8e8;
-}
+/* 主题颜色 */
+.theme-light { background: #ffffff; color: #1a1a1a; }
+.theme-sepia { background: #f4ecd8; color: #3d2817; }
+.theme-green { background: #e8f5e9; color: #1b4d2e; }
+.theme-dark { background: #1a1a1a; color: #e8e8e8; }
 
 .reader-content {
   position: absolute;
@@ -592,30 +738,11 @@ onBeforeUnmount(async () => {
   z-index: 1;
 }
 
-.theme-light .reader-content {
-  background: #ffffff;
-}
+.theme-light .reader-content { background: #ffffff; }
+.theme-sepia .reader-content { background: #f4ecd8; }
+.theme-green .reader-content { background: #e8f5e9; }
+.theme-dark .reader-content { background: #1a1a1a; }
 
-.theme-sepia .reader-content {
-  background: #f4ecd8;
-}
-
-.theme-green .reader-content {
-  background: #e8f5e9;
-}
-
-.theme-dark .reader-content {
-  background: #1a1a1a;
-}
-
-.floating-info {
-  position: fixed;
-  z-index: 500;
-  pointer-events: none;
-  user-select: none;
-}
-
-/* 优化浮动进度显示 - 更好的可读性 */
 .floating-progress {
   position: fixed;
   bottom: 12px;
@@ -635,24 +762,12 @@ onBeforeUnmount(async () => {
   transition: opacity 0.2s ease;
 }
 
-/* 淡入淡出动画 - 更流畅 */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
-}
+.fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-/* 亮度遮罩 - 平滑过渡 */
 .brightness-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  top: 0; left: 0; right: 0; bottom: 0;
   background: #000;
   pointer-events: none;
   z-index: 10000;

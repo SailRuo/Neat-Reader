@@ -1,4 +1,4 @@
-我<template>
+<template>
   <div class="pdf-reader" @wheel="handleWheel" @click="$emit('click')">
     <canvas ref="canvasRef" class="pdf-canvas"></canvas>
   </div>
@@ -22,8 +22,6 @@ if (isElectron) {
     import.meta.url
   ).toString()
 }
-
-console.log('PDF.js Worker 路径:', pdfjsLib.GlobalWorkerOptions.workerSrc)
 
 const props = defineProps<{
   bookId: string
@@ -230,6 +228,60 @@ const goToProgress = (progress: number) => {
   renderPage(pageNum)
 }
 
+// 提取全文为纯文本/HTML (用于重排模式)
+const extractAllTextToHTML = async () => {
+  if (!pdfDoc) {
+    console.error('❌ [PDF解析] pdfDoc 为空');
+    return ''
+  }
+  
+  let fullHTML = ''
+  console.log('🚀 [PDF解析] 开始提取全文文本, 总页数:', totalPages)
+  
+  for (let i = 1; i <= totalPages; i++) {
+    try {
+      const page = await pdfDoc.getPage(i)
+      const content = await page.getTextContent()
+      
+      console.log(`📄 [PDF解析] 开始解析第 ${i} 页`)
+      
+      // 简单的按行合并逻辑
+      let lastY = -1
+      let pageText = `<div class="pdf-page-content" data-page="${i}">`
+      
+      const items = (content.items as any[])
+      console.log(`📄 [PDF解析] 第 ${i}/${totalPages} 页, 提取到项目数:`, items.length)
+      
+      if (items.length === 0) {
+        console.log(`📄 [PDF解析] 第 ${i} 页无文本内容`)
+        pageText += `<p style="color: gray; font-style: italic;">(第 ${i} 页无文本内容)</p>`
+      } else {
+        items.forEach((item) => {
+          // item.transform[5] 是 y 坐标
+          const currentY = item.transform[5]
+          if (lastY !== -1 && Math.abs(currentY - lastY) > 5) {
+            pageText += '<br/>'
+          }
+          pageText += item.str
+          lastY = currentY
+        })
+      }
+      
+      pageText += '</div><hr/>'
+      fullHTML += pageText
+      
+      console.log(`📄 [PDF解析] 第 ${i} 页解析完成`)
+    } catch (e) {
+      console.warn(`❌ [PDF解析] 第 ${i} 页解析失败:`, e)
+    }
+    
+    if (i % 10 === 0) console.log(`⏳ [PDF解析] 已解析 ${i}/${totalPages} 页`)
+  }
+  
+  console.log('✅ [PDF解析] 全文解析完成, 总长度:', fullHTML.length)
+  return fullHTML
+}
+
 // 获取当前位置
 const getCurrentLocation = () => {
   return {
@@ -246,7 +298,8 @@ watch(() => props.theme, () => {
 // 暴露方法
 defineExpose({
   goToProgress,
-  getCurrentLocation
+  getCurrentLocation,
+  extractAllTextToHTML
 })
 
 // 生命周期
@@ -287,3 +340,4 @@ onBeforeUnmount(() => {
   transition: box-shadow 0.3s ease;
 }
 </style>
+
