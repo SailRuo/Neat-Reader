@@ -55,12 +55,17 @@ const contentStyle = computed(() => ({
 
 .text-content {
   word-break: break-word;
-  white-space: pre-wrap;
 }
 
 /* 针对解析出的 PDF 页面容器样式 */
 :deep(.pdf-page-content) {
   margin-bottom: 2em;
+}
+
+:deep(.pdf-page-content p) {
+  margin-bottom: 1em;
+  text-align: justify;
+  text-indent: 2em;
 }
 
 :deep(hr) {

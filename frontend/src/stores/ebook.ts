@@ -47,6 +47,7 @@ export interface EbookMetadata {
   categoryId?: string;
   addedAt: number;
   downloading?: boolean; // 是否正在下载
+  uploading?: boolean; // 是否正在上传
   uploadProgress?: number; // 上传进度 0-100
 }
 
@@ -687,8 +688,30 @@ export const useEbookStore = defineStore('ebook', () => {
   const updateBook = async (bookId: string, updates: Partial<EbookMetadata>) => {
     const index = books.value.findIndex(book => book.id === bookId);
     if (index !== -1) {
-      books.value[index] = { ...books.value[index], ...updates };
+      console.log('updateBook - 更新前:', { 
+        id: books.value[index].id, 
+        storageType: books.value[index].storageType,
+        uploading: books.value[index].uploading 
+      });
+      console.log('updateBook - 更新内容:', updates);
+      
+      // 使用 Object.assign 直接修改对象，确保响应式更新
+      Object.assign(books.value[index], updates);
+      
+      // 显式清除上传状态
+      if (updates.storageType === 'synced') {
+        books.value[index].uploading = false;
+      }
+      
+      console.log('updateBook - 更新后:', { 
+        id: books.value[index].id, 
+        storageType: books.value[index].storageType,
+        uploading: books.value[index].uploading 
+      });
+      
       await saveBooks();
+    } else {
+      console.error('updateBook - 未找到书籍:', bookId);
     }
   };
 
@@ -1098,11 +1121,31 @@ export const useEbookStore = defineStore('ebook', () => {
       
       if (uploadResult) {
         console.log('上传成功，更新书籍存储类型');
-        // 更新书籍的存储类型为已同步，确保保留封面信息
+        
+        // 先在内存中更新，确保响应式
+        const bookIndex = books.value.findIndex(b => b.id === book.id);
+        if (bookIndex !== -1) {
+          // 直接修改数组中的对象属性，触发响应式
+          const existingCover = books.value[bookIndex].cover || book.cover;
+          books.value[bookIndex].storageType = 'synced';
+          books.value[bookIndex].baidupanPath = `${uploadPath}/${fileName}`;
+          books.value[bookIndex].uploading = false;
+          books.value[bookIndex].cover = existingCover;
+          
+          console.log('内存状态已更新:', {
+            id: books.value[bookIndex].id,
+            storageType: books.value[bookIndex].storageType,
+            uploading: books.value[bookIndex].uploading,
+            hasCover: !!books.value[bookIndex].cover
+          });
+        }
+        
+        // 再调用 updateBook 持久化到 IndexedDB
         await updateBook(book.id, {
           storageType: 'synced',
           baidupanPath: `${uploadPath}/${fileName}`,
-          cover: book.cover
+          cover: books.value[bookIndex]?.cover || book.cover,
+          uploading: false
         });
         
         console.log('书籍上传到百度网盘成功:', book.title);

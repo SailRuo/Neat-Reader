@@ -236,46 +236,121 @@ const extractAllTextToHTML = async () => {
   }
   
   let fullHTML = ''
+  let globalParagraph = '' // 跨页的全局段落缓存
+  
+  // 中文和英文标点符号
+  const allPunctuation = "。！？；：，、\"\"''（）《》【】…—.!?;:,'\"()[]"
+  
   console.log('🚀 [PDF解析] 开始提取全文文本, 总页数:', totalPages)
   
   for (let i = 1; i <= totalPages; i++) {
     try {
       const page = await pdfDoc.getPage(i)
       const content = await page.getTextContent()
+      const viewport = page.getViewport({ scale: 1.0 })
       
       console.log(`📄 [PDF解析] 开始解析第 ${i} 页`)
-      
-      // 简单的按行合并逻辑
-      let lastY = -1
-      let pageText = `<div class="pdf-page-content" data-page="${i}">`
       
       const items = (content.items as any[])
       console.log(`📄 [PDF解析] 第 ${i}/${totalPages} 页, 提取到项目数:`, items.length)
       
       if (items.length === 0) {
         console.log(`📄 [PDF解析] 第 ${i} 页无文本内容`)
-        pageText += `<p style="color: gray; font-style: italic;">(第 ${i} 页无文本内容)</p>`
-      } else {
-        items.forEach((item) => {
-          // item.transform[5] 是 y 坐标
-          const currentY = item.transform[5]
-          if (lastY !== -1 && Math.abs(currentY - lastY) > 5) {
-            pageText += '<br/>'
-          }
-          pageText += item.str
-          lastY = currentY
-        })
+        continue
       }
       
-      pageText += '</div><hr/>'
-      fullHTML += pageText
+      // 🎯 第一步：按Y坐标分组文本行
+      const lines: Array<{ y: number; items: any[] }> = []
+      items.forEach((item) => {
+        const y = item.transform[5]
+        let line = lines.find(l => Math.abs(l.y - y) < 5)
+        if (!line) {
+          line = { y, items: [] }
+          lines.push(line)
+        }
+        line.items.push(item)
+      })
       
-      console.log(`📄 [PDF解析] 第 ${i} 页解析完成`)
+      // 按Y坐标排序（从上到下）
+      lines.sort((a, b) => b.y - a.y)
+      
+      // 🎯 第二步：识别页脚（通常在页面底部10%区域，且内容较短）
+      const pageHeight = viewport.height
+      const footerThreshold = pageHeight * 0.1 // 底部10%区域
+      const headerThreshold = pageHeight * 0.9 // 顶部10%区域
+      
+      const contentLines = lines.filter(line => {
+        const isInFooter = line.y < footerThreshold
+        const isInHeader = line.y > headerThreshold
+        const lineText = line.items.map(item => item.str).join('').trim()
+        const isShort = lineText.length < 50 // 页脚通常很短
+        const isPageNumber = /^第?\s*\d+\s*页?$|^\d+$|^-\s*\d+\s*-$/.test(lineText) // 匹配页码
+        
+        // 过滤掉页脚和页眉中的短文本（可能是页码）
+        if ((isInFooter || isInHeader) && (isShort || isPageNumber)) {
+          console.log(`🗑️ [PDF解析] 过滤页脚/页眉: "${lineText}"`)
+          return false
+        }
+        return true
+      })
+      
+      // 🎯 第三步：智能合并文本行（跨页连续）
+      let pageText = `<div class="pdf-page-content" data-page="${i}">`
+      let currentParagraph = ''
+      
+      // 中文标点符号
+      const chinesePunctuation = '。！？；：，、“”‘’（）《》【】…—'
+      // 英文标点符号
+      const englishPunctuation = '.!?;:,\'"()[]'
+      const allPunctuation = chinesePunctuation + englishPunctuation;
+      
+      contentLines.forEach((line, index) => {
+        const lineText = line.items
+          .sort((a, b) => a.transform[4] - b.transform[4]) // 按X坐标排序
+          .map(item => item.str)
+          .join('')
+          .trim()
+        
+        if (!lineText) return
+        
+        // 检查当前行末尾是否有标点符号
+        const lastChar = lineText[lineText.length - 1]
+        const hasEndPunctuation = allPunctuation.includes(lastChar)
+        
+        // 检查下一行开头是否有标点符号
+        const nextLine = contentLines[index + 1]
+        const nextLineText = nextLine ? nextLine.items.map(item => item.str).join('').trim() : ''
+        const nextStartsWithPunctuation = nextLineText && allPunctuation.includes(nextLineText[0])
+        
+        // 添加当前行文本
+        globalParagraph += lineText
+        
+        // 判断是否应该换行
+        if (hasEndPunctuation || nextStartsWithPunctuation) {
+          // 有标点符号，结束当前段落
+          if (globalParagraph.trim()) {
+            fullHTML += `<p>${globalParagraph.trim()}</p>`
+            globalParagraph = ''
+          }
+        } else {
+          // 没有标点符号，可能是行中断，不换行（但添加空格以防英文单词粘连）
+          if (/[a-zA-Z]$/.test(lineText) && nextLineText && /^[a-zA-Z]/.test(nextLineText)) {
+            globalParagraph += ' ' // 英文单词之间加空格
+          }
+        }
+      })
+      
+      console.log(`📄 [PDF解析] 第 ${i} 页解析完成，过滤后行数: ${contentLines.length}/${lines.length}`)
     } catch (e) {
       console.warn(`❌ [PDF解析] 第 ${i} 页解析失败:`, e)
     }
     
     if (i % 10 === 0) console.log(`⏳ [PDF解析] 已解析 ${i}/${totalPages} 页`)
+  }
+  
+  // 处理最后剩余的段落
+  if (globalParagraph.trim()) {
+    fullHTML += `<p>${globalParagraph.trim()}</p>`
   }
   
   console.log('✅ [PDF解析] 全文解析完成, 总长度:', fullHTML.length)

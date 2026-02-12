@@ -12,44 +12,60 @@
             </div>
           </div>
 
-          <div class="sidebar-section">
-            <h3 class="sidebar-title">书架</h3>
-            <div class="category-list">
-              <button 
-                class="category-item" 
-                :class="{ 'active': selectedCategory === 'all' }"
-                @click="selectedCategory = 'all'"
-              >
-                <span class="category-icon">
-                  <Icons.Library :size="20" />
-                </span>
-                <span class="category-name">全部书籍</span>
-                <span class="category-count">{{ books.length }}</span>
-              </button>
-              <button 
-                v-for="category in categories" 
-                :key="category.id"
-                class="category-item"
-                :class="{ 'active': selectedCategory === category.id }"
-                :style="{ '--category-color': category.color }"
-                @click="selectedCategory = category.id"
-              >
-                <span class="category-icon" :style="{ backgroundColor: category.color + '20', color: category.color }">
-                  <component :is="getCategoryIcon(category.name)" :size="20" />
-                </span>
-                <span class="category-name">{{ category.name }}</span>
-                <span class="category-count">{{ getBooksByCategory(category.id).length }}</span>
-              </button>
-              <button class="category-item add-category" @click="showAddCategoryDialog">
-                <span class="category-icon add-icon">
-                  <Icons.Plus :size="20" />
-                </span>
-                <span class="category-name">新建分类</span>
-              </button>
+          <!-- 固定的"全部书籍" -->
+          <div class="sidebar-fixed-section">
+            <button 
+              class="category-item" 
+              :class="{ 'active': selectedCategory === 'all' }"
+              @click="selectedCategory = 'all'"
+            >
+              <span class="category-icon">
+                <Icons.Library :size="20" />
+              </span>
+              <span class="category-name">全部书籍</span>
+              <span class="category-count">{{ books.length }}</span>
+            </button>
+          </div>
+
+          <!-- 可滚动的分类区域 -->
+          <div class="sidebar-content">
+            <div class="sidebar-section">
+              <h3 class="sidebar-title">我的分类</h3>
+              <div class="category-list">
+                <div 
+                  v-for="category in categories" 
+                  :key="category.id"
+                  class="category-item-wrapper"
+                >
+                  <button 
+                    class="category-item"
+                    :class="{ 'active': selectedCategory === category.id }"
+                    :style="{ '--category-color': category.color }"
+                    @click="selectedCategory = category.id"
+                    @contextmenu.prevent="showCategoryContextMenu($event, category)"
+                  >
+                    <span class="category-icon" :style="{ backgroundColor: category.color + '20', color: category.color }">
+                      <component :is="getCategoryIcon(category.name)" :size="20" />
+                    </span>
+                    <span class="category-name">{{ category.name }}</span>
+                    <span class="category-count">{{ getBooksByCategory(category.id).length }}</span>
+                  </button>
+                </div>
+                
+                <!-- 新建分类按钮 -->
+                <button class="category-item add-category" @click="showAddCategoryDialog">
+                  <span class="category-icon add-icon">
+                    <Icons.Plus :size="20" />
+                  </span>
+                  <span class="category-name">新建分类</span>
+                </button>
+              </div>
             </div>
           </div>
 
+          <!-- 固定在底部的区域 -->
           <div class="sidebar-bottom">
+            <!-- 百度网盘状态 -->
             <div class="sidebar-section">
               <div class="baidupan-status" v-if="isBaidupanAuthorized && ebookStore.baidupanUser" @click="selectedCategory = 'settings'">
                 <img :src="ebookStore.baidupanUser.avatar_url" class="baidupan-avatar" alt="头像" />
@@ -64,6 +80,7 @@
               </div>
             </div>
 
+            <!-- 设置按钮 -->
             <div class="sidebar-section">
               <button 
                 class="category-item"
@@ -94,15 +111,21 @@
             <div class="header-controls">
               <div class="search-container">
                 <div class="search-box">
+                  <Icons.Search :size="18" class="search-icon" />
                   <input 
                     type="text" 
                     v-model="searchKeyword" 
-                    placeholder="输入书名、作者" 
+                    placeholder="搜索书名、作者..." 
                     class="search-input"
                     @keyup.enter="performSearch"
                   />
-                  <button class="search-btn" @click="performSearch">
-                    <Icons.Search :size="18" />
+                  <button 
+                    v-if="searchKeyword" 
+                    class="search-clear" 
+                    @click="clearSearch"
+                    title="清除搜索"
+                  >
+                    <Icons.X :size="16" />
                   </button>
                 </div>
               </div>
@@ -111,17 +134,17 @@
                   class="view-btn" 
                   :class="{ 'active': viewMode === 'grid' }"
                   @click="viewMode = 'grid'"
+                  title="网格视图"
                 >
                   <Icons.LayoutGrid :size="16" />
-                  网格
                 </button>
                 <button 
                   class="view-btn" 
                   :class="{ 'active': viewMode === 'list' }"
                   @click="viewMode = 'list'"
+                  title="列表视图"
                 >
                   <Icons.List :size="16" />
-                  列表
                 </button>
               </div>
             </div>
@@ -148,7 +171,32 @@
 
           <!-- 电子书列表 -->
           <div v-if="selectedCategory !== 'settings'">
-            <div :class="viewMode === 'grid' ? 'books-grid' : 'books-list'">
+            <!-- 空状态 -->
+            <div v-if="displayBooks.length === 0 && !isSearching" class="empty-state">
+              <div class="empty-state-content">
+                <div class="empty-state-icon">
+                  <Icons.BookOpen :size="64" />
+                </div>
+                <h3 class="empty-state-title">
+                  {{ searchKeyword ? '未找到相关书籍' : '还没有书籍' }}
+                </h3>
+                <p class="empty-state-description">
+                  {{ searchKeyword 
+                    ? '尝试使用不同的关键词搜索，或者添加新的书籍到您的书架' 
+                    : '开始添加您的第一本电子书，建立您的个人图书馆' 
+                  }}
+                </p>
+                <div class="empty-state-actions" v-if="!searchKeyword">
+                  <button class="btn btn-primary" @click="$router.push('/file-manager')">
+                    <Icons.Plus :size="16" />
+                    添加书籍
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 书籍网格/列表 -->
+            <div v-else :class="viewMode === 'grid' ? 'books-grid' : 'books-list'">
               <div 
                 v-for="book in displayBooks" 
                 :key="book.id" 
@@ -170,6 +218,12 @@
                     <div v-if="book.downloading" class="book-downloading-overlay">
                       <div class="downloading-spinner"></div>
                       <span class="downloading-text">下载中...</span>
+                    </div>
+                    
+                    <!-- 上传状态覆盖层 -->
+                    <div v-else-if="book.uploading" class="book-uploading-overlay">
+                      <div class="uploading-spinner"></div>
+                      <span class="uploading-text">上传中...</span>
                     </div>
                     
                     <div 
@@ -421,6 +475,7 @@ const showChatWindow = ref(false)
 
 // 右键菜单相关 - 使用 vue3-context-menu
 const selectedBook = ref<any>(null)
+const selectedCategoryForMenu = ref<any>(null)
 
 // 分类对话框相关
 const showAddCategory = ref(false)
@@ -740,7 +795,7 @@ const showContextMenu = (event: MouseEvent, book: any) => {
     x: event.x,
     y: event.y,
     items: menuItems,
-    zIndex: 9999,
+    zIndex: 10000,
     minWidth: 200
   })
 }
@@ -769,6 +824,99 @@ const quickMoveToCategory = async (categoryId: string) => {
 // 从菜单显示添加分类对话框
 const showAddCategoryFromMenu = () => {
   showAddCategoryDialog()
+}
+
+// 显示分类右键菜单
+const showCategoryContextMenu = (event: MouseEvent, category: any) => {
+  event.preventDefault()
+  selectedCategoryForMenu.value = category
+  
+  // 不允许删除"未分类"
+  const canDelete = category.name !== '未分类'
+  
+  const menuItems: any[] = [
+    {
+      label: '重命名分类',
+      icon: h(Icons.Edit, { size: 16 }),
+      onClick: () => handleRenameCategory(category)
+    }
+  ]
+  
+  if (canDelete) {
+    menuItems.push(
+      { divided: true },
+      {
+        label: '删除分类',
+        icon: h(Icons.Trash2, { size: 16 }),
+        onClick: () => handleDeleteCategory(category),
+        customClass: 'danger-menu-item'
+      }
+    )
+  }
+  
+  // 显示菜单
+  ContextMenu.showContextMenu({
+    x: event.x,
+    y: event.y,
+    items: menuItems,
+    zIndex: 10000,
+    minWidth: 160
+  })
+}
+
+// 处理重命名分类
+const handleRenameCategory = (category: any) => {
+  // 这里可以添加重命名对话框的逻辑
+  console.log('重命名分类:', category.name)
+  // TODO: 实现重命名对话框
+}
+
+// 处理删除分类
+const handleDeleteCategory = async (category: any) => {
+  try {
+    // 使用自定义确认对话框
+    const bookCount = getBooksByCategory(category.id).length
+    const message = bookCount > 0 
+      ? `该分类下有 ${bookCount} 本书籍，删除后将移动到"未分类"。`
+      : `确定要删除此分类吗？`
+    
+    dialogStore.showDialog({
+      title: '删除分类',
+      message: `确定要删除分类"${category.name}"吗？\n${message}`,
+      type: 'warning',
+      buttons: [
+        {
+          text: '取消',
+          callback: () => {
+            dialogStore.closeDialog()
+            selectedCategoryForMenu.value = null
+          }
+        },
+        {
+          text: '删除',
+          primary: true,
+          callback: async () => {
+            dialogStore.closeDialog()
+            const result = await ebookStore.deleteCategory(category.id)
+            if (result) {
+              // 删除成功，不显示成功提示
+              // 如果当前选中的是被删除的分类，切换到全部书籍
+              if (selectedCategory.value === category.id) {
+                selectedCategory.value = 'all'
+              }
+            } else {
+              dialogStore.showErrorDialog('删除失败', '无法删除该分类')
+            }
+            selectedCategoryForMenu.value = null
+          }
+        }
+      ]
+    })
+  } catch (error) {
+    console.error('删除分类失败:', error)
+    dialogStore.showErrorDialog('删除失败', error instanceof Error ? error.message : String(error))
+    selectedCategoryForMenu.value = null
+  }
 }
 
 // 处理上传到百度网盘
@@ -973,24 +1121,71 @@ const uploadToBaidupan = async (book: any) => {
   }
   
   try {
-    dialogStore.showDialog({
-      title: '正在上传',
-      message: `正在上传《${book.title}》到百度网盘...`,
-      type: 'info',
-      buttons: []
+    console.log('uploadToBaidupan - 开始上传，当前状态:', {
+      id: book.id,
+      title: book.title,
+      storageType: book.storageType,
+      uploading: book.uploading
     })
+    
+    // 设置上传状态（用于 UI 显示）
+    book.uploadProgress = 0
+    book.uploading = true
     
     const result = await ebookStore.uploadLocalBookToBaidupan(book)
     
-    dialogStore.closeDialog()
+    console.log('uploadToBaidupan - 上传结果:', result)
     
     if (result) {
-      dialogStore.showSuccessDialog('上传成功')
+      // 上传成功，等待状态更新完成
+      console.log('uploadToBaidupan - 上传成功，等待状态同步')
+      
+      // 等待多次尝试获取更新后的数据
+      let attempts = 0
+      let updatedBook = null
+      
+      while (attempts < 5) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+        updatedBook = ebookStore.getBookById(book.id)
+        
+        console.log(`uploadToBaidupan - 尝试 ${attempts + 1}，获取到的书籍状态:`, {
+          storageType: updatedBook?.storageType,
+          uploading: updatedBook?.uploading,
+          baidupanPath: updatedBook?.baidupanPath
+        })
+        
+        // 如果状态已更新为 synced，跳出循环
+        if (updatedBook && updatedBook.storageType === 'synced') {
+          console.log('uploadToBaidupan - 状态已同步为 synced')
+          break
+        }
+        
+        attempts++
+      }
+      
+      if (updatedBook) {
+        // 强制更新所有属性
+        console.log('uploadToBaidupan - 强制更新本地 book 对象')
+        Object.assign(book, updatedBook)
+        // 显式确保封面也被同步（虽然 Object.assign 应该已经处理，但为了稳健性）
+        if (updatedBook.cover) {
+          book.cover = updatedBook.cover
+        }
+        book.uploading = false
+        
+        console.log('uploadToBaidupan - 最终状态:', {
+          id: book.id,
+          storageType: book.storageType,
+          uploading: book.uploading,
+          baidupanPath: book.baidupanPath
+        })
+      }
     } else {
+      book.uploading = false
       dialogStore.showErrorDialog('上传失败', '请检查网络连接或授权状态')
     }
   } catch (error) {
-    dialogStore.closeDialog()
+    book.uploading = false
     console.error('上传失败:', error)
     const errorMessage = error instanceof Error ? error.message : '上传失败，请重试'
     dialogStore.showErrorDialog('上传失败', errorMessage)
@@ -1232,19 +1427,63 @@ body {
   width: 260px;
   background: linear-gradient(180deg, #F8FAFC 0%, #FFFFFF 100%);
   border-right: 1px solid rgba(203, 213, 225, 0.5);
-  padding: 1.5rem 1.25rem;
-  overflow-y: auto;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   box-shadow: 2px 0 8px rgba(0, 0, 0, 0.03);
   position: relative;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .sidebar-header {
-  margin-bottom: 2rem;
-  padding-bottom: 1.5rem;
-  border-bottom: 1px solid rgba(203, 213, 225, 0.5);
+  flex-shrink: 0;
+  padding: 1.5rem 1.25rem 1rem;
+  border-bottom: 1px solid rgba(203, 213, 225, 0.3);
+}
+
+/* 固定的"全部书籍"区域 */
+.sidebar-fixed-section {
+  flex-shrink: 0;
+  padding: 1rem 1.25rem 0.5rem;
+  border-bottom: 1px solid rgba(203, 213, 225, 0.2);
+}
+
+/* 可滚动的内容区域 */
+.sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0.5rem 1.25rem 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+}
+
+.sidebar-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-content::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 3px;
+  transition: background var(--transition-base);
+}
+
+.sidebar-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+/* 固定在底部的区域 */
+.sidebar-bottom {
+  flex-shrink: 0;
+  border-top: 1px solid rgba(203, 213, 225, 0.3);
+  background: #FFFFFF;
+  padding: 0.75rem 1.25rem 0.5rem;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.02);
 }
 
 .logo {
@@ -1269,12 +1508,7 @@ body {
 }
 
 .sidebar-section:last-child {
-  margin-top: auto;
   margin-bottom: 0;
-}
-
-.sidebar-bottom {
-  margin-top: auto;
 }
 
 .sidebar-bottom .sidebar-section {
@@ -1287,9 +1521,8 @@ body {
   color: #64748B;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  margin-bottom: 0.875rem;
+  margin-bottom: 0.75rem;
   padding-left: 0.5rem;
-  border-left: 3px solid #4A90E2;
   opacity: 0.8;
 }
 
@@ -1297,6 +1530,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.category-item-wrapper {
+  position: relative;
 }
 
 .category-item {
@@ -1521,16 +1758,30 @@ body {
 .search-box {
   display: flex;
   align-items: center;
-  background: #F8FAFC;
-  border: 1px solid rgba(203, 213, 225, 0.5);
-  border-radius: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  transition: all 0.2s ease;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 0.75rem 1rem;
+  transition: all var(--transition-base);
+  box-shadow: var(--shadow-sm);
+  min-width: 280px;
+  position: relative;
 }
 
 .search-box:focus-within {
-  border-color: #4A90E2;
-  background: #FFFFFF;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-light);
+}
+
+.search-icon {
+  color: var(--color-text-tertiary);
+  margin-right: 0.75rem;
+  flex-shrink: 0;
+  transition: color var(--transition-fast);
+}
+
+.search-box:focus-within .search-icon {
+  color: var(--color-primary);
 }
 
 .search-input {
@@ -1538,59 +1789,69 @@ body {
   border: none;
   background: transparent;
   font-size: 0.875rem;
-  color: #1E293B;
+  color: var(--color-text-primary);
   outline: none;
-  min-width: 200px;
+  font-weight: 500;
 }
 
 .search-input::placeholder {
-  color: #94A3B8;
+  color: var(--color-text-tertiary);
+  font-weight: 400;
 }
 
-.search-btn {
+.search-clear {
   background: transparent;
   border: none;
-  color: #64748B;
+  color: var(--color-text-tertiary);
   cursor: pointer;
   padding: 0.25rem;
   display: flex;
   align-items: center;
-  transition: color 0.2s ease;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+  margin-left: 0.5rem;
 }
 
-.search-btn:hover {
-  color: #4A90E2;
+.search-clear:hover {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
 }
 
 .view-controls {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  padding: 0.25rem;
+  border: 1px solid var(--color-border);
 }
 
 .view-btn {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
+  justify-content: center;
+  padding: 0.5rem 0.75rem;
   border: none;
   background: transparent;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 0.75rem;
   font-weight: 600;
-  color: #64748B;
-  transition: all 0.2s ease;
+  color: var(--color-text-secondary);
+  transition: all var(--transition-fast);
+  min-width: 2.5rem;
 }
 
 .view-btn:hover {
-  color: #1E293B;
-  background-color: rgba(74, 144, 226, 0.05);
+  color: var(--color-text-primary);
+  background: var(--color-bg-primary);
+  box-shadow: var(--shadow-sm);
 }
 
 .view-btn.active {
-  color: #4A90E2;
-  background-color: rgba(74, 144, 226, 0.1);
+  color: var(--color-primary);
+  background: var(--color-bg-primary);
+  box-shadow: var(--shadow-sm);
 }
 
 /* 搜索结果信息 */
@@ -1602,14 +1863,14 @@ body {
   display: flex;
   align-items: center;
   gap: 1rem;
-  background-color: rgba(74, 144, 226, 0.1);
+  background: var(--color-primary-light);
   border: 1px solid rgba(74, 144, 226, 0.2);
-  border-radius: 0.75rem;
+  border-radius: var(--radius-lg);
   padding: 1rem 1.5rem;
 }
 
 .search-info-icon {
-  font-size: 1.5rem;
+  color: var(--color-primary);
   flex-shrink: 0;
 }
 
@@ -1620,13 +1881,74 @@ body {
 .search-info-text h3 {
   font-size: 1rem;
   font-weight: 600;
-  color: #1E293B;
+  color: var(--color-text-primary);
   margin: 0 0 0.25rem 0;
 }
 
 .search-info-text p {
   font-size: 0.875rem;
-  color: #64748B;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.clear-search-btn {
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 0.5rem;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+
+.clear-search-btn:hover {
+  color: var(--color-text-primary);
+  background: rgba(74, 144, 226, 0.1);
+}
+
+/* 空状态 */
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  padding: 2rem;
+}
+
+.empty-state-content {
+  text-align: center;
+  max-width: 400px;
+}
+
+.empty-state-icon {
+  color: var(--color-text-tertiary);
+  margin-bottom: 1.5rem;
+  opacity: 0.6;
+}
+
+.empty-state-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0 0 0.75rem 0;
+}
+
+.empty-state-description {
+  font-size: 1rem;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  margin: 0 0 2rem 0;
+}
+
+.empty-state-actions {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.search-info-text p {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
   margin: 0;
 }
 
@@ -1675,47 +1997,50 @@ body {
 /* 书籍网格 */
 .books-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 1.5rem;
   margin-bottom: 2rem;
+  padding: 0.5rem;
 }
 
 /* 书籍列表 */
 .books-list {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 1rem;
   margin-bottom: 2rem;
+  padding: 0.5rem;
 }
 
 /* 书籍卡片 */
 .book-card {
-  background: #FFFFFF;
-  border: 1px solid rgba(203, 213, 225, 0.5);
-  border-radius: 0.5rem;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
   overflow: hidden;
-  transition: all 0.2s ease;
+  transition: all var(--transition-base);
   cursor: pointer;
   display: flex;
   flex-direction: column;
   height: 100%;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  box-shadow: var(--shadow-sm);
   position: relative;
+  backdrop-filter: blur(8px);
 }
 
 .book-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  border-color: rgba(74, 144, 226, 0.3);
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--color-primary);
   z-index: 10;
 }
 
 .books-list .book-card {
   flex-direction: row;
   align-items: center;
-  padding: 0.75rem;
+  padding: 1rem;
   gap: 1rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-lg);
 }
 
 .book-cover-container {
@@ -1729,8 +2054,8 @@ body {
 }
 
 .books-list .book-cover-container {
-  width: 60px;
-  height: 84px;
+  width: 64px;
+  height: 88px;
 }
 
 .book-cover {
@@ -1738,15 +2063,15 @@ body {
   height: 100%;
   background-size: cover;
   background-position: center;
-  background-color: #FFFFFF;
-  border-radius: 0.5rem;
+  background-color: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
   position: relative;
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  transition: transform 0.2s ease;
+  box-shadow: var(--shadow-md);
+  transition: transform var(--transition-base);
 }
 
 .book-card:hover .book-cover {
@@ -1863,6 +2188,38 @@ body {
 }
 
 .downloading-text {
+  color: white;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+/* 上传状态覆盖层 */
+.book-uploading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(74, 144, 226, 0.9);
+  backdrop-filter: blur(4px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  z-index: 10;
+}
+
+.uploading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.uploading-text {
   color: white;
   font-size: 0.875rem;
   font-weight: 500;
@@ -2236,114 +2593,113 @@ body {
   transform: scale(1.05);
 }
 
-/* vue3-context-menu 优雅设计 - AI-Native UI 风格 */
+/* 优雅右键菜单设计 - 符合 Neat Reader 整体风格 */
 :deep(.mx-context-menu) {
-  /* 毛玻璃效果 + 优雅阴影 */
-  background: rgba(255, 255, 255, 0.98) !important;
-  backdrop-filter: blur(32px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(32px) saturate(180%) !important;
+  /* 现代毛玻璃效果 - 使用应用设计系统 */
+  background: var(--color-bg-primary) !important;
+  backdrop-filter: blur(24px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
   
-  /* 精致边框 */
-  border: 1px solid rgba(212, 175, 55, 0.1) !important;
-  border-radius: 14px !important;
+  /* 精致边框和阴影 - 使用设计系统变量 */
+  border: 1px solid var(--color-border) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-xl) !important;
   
-  /* 多层阴影营造深度 */
-  box-shadow: 
-    0 0 0 1px rgba(0, 0, 0, 0.02),
-    0 4px 12px rgba(0, 0, 0, 0.04),
-    0 16px 48px rgba(0, 0, 0, 0.08) !important;
-  
+  /* 布局优化 */
   padding: 6px !important;
-  min-width: 220px !important;
+  min-width: 200px !important;
+  max-width: 260px !important;
   
-  /* 优雅字体 */
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+  /* 统一字体 */
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 
+               'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
   
-  /* 入场动画 */
-  animation: menuFadeIn 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  /* 流畅动画 */
+  animation: contextMenuFadeIn var(--transition-base) cubic-bezier(0.16, 1, 0.3, 1) !important;
+  transform-origin: top left !important;
 }
 
-@keyframes menuFadeIn {
-  from {
+@keyframes contextMenuFadeIn {
+  0% {
     opacity: 0;
-    transform: translateY(-8px) scale(0.96);
+    transform: scale(0.96) translateY(-4px);
+    filter: blur(4px);
   }
-  to {
+  100% {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: scale(1) translateY(0);
+    filter: blur(0);
   }
 }
 
 :deep(.mx-context-menu-item) {
-  /* 优雅间距 */
-  padding: 11px 14px !important;
-  margin: 2px 0 !important;
-  
-  /* 精致排版 */
-  font-size: 13px !important;
+  /* 现代化间距和排版 */
+  padding: 10px 12px !important;
+  border-radius: var(--radius-md) !important;
+  margin: 1px 0 !important;
+  font-size: 14px !important;
   font-weight: 500 !important;
-  letter-spacing: -0.02em !important;
-  line-height: 1.4 !important;
-  
-  /* 颜色 */
-  color: #171717 !important;
-  
-  /* 圆角 */
-  border-radius: 10px !important;
-  
-  /* 流畅过渡 */
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
-  
-  /* 光标 */
+  color: var(--color-text-primary) !important;
   cursor: pointer !important;
   
-  /* 初始状态 */
+  /* 流畅过渡 */
+  transition: all var(--transition-fast) !important;
+  display: flex !important;
+  align-items: center !important;
   position: relative !important;
-}
-
-/* Hover 状态 - 金色强调 */
-:deep(.mx-context-menu-item:hover) {
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.08) 0%, rgba(212, 175, 55, 0.04) 100%) !important;
-  color: #171717 !important;
-  transform: translateX(3px) !important;
   
-  /* 左侧金色边框 */
-  box-shadow: inset 3px 0 0 #D4AF37 !important;
+  /* 微妙的初始状态 */
+  background: transparent !important;
+  border: 1px solid transparent !important;
 }
 
-/* Active 状态 */
+/* Hover 状态 - 使用应用主色调 */
+:deep(.mx-context-menu-item:hover) {
+  background: var(--color-primary-light) !important;
+  color: var(--color-primary) !important;
+  border-color: rgba(74, 144, 226, 0.1) !important;
+  transform: translateX(1px) !important;
+  box-shadow: 0 2px 4px rgba(74, 144, 226, 0.08) !important;
+}
+
+/* Active 状态 - 微妙的按压反馈 */
 :deep(.mx-context-menu-item:active) {
-  transform: translateX(2px) scale(0.98) !important;
+  transform: translateX(1px) scale(0.99) !important;
+  background: rgba(74, 144, 226, 0.15) !important;
 }
 
-/* 危险操作 - 红色强调 */
+/* 危险操作 - 统一的错误色 */
 :deep(.mx-context-menu-item.danger-menu-item) {
-  color: #DC2626 !important;
+  color: var(--color-error) !important;
 }
 
 :deep(.mx-context-menu-item.danger-menu-item:hover) {
-  background: linear-gradient(135deg, rgba(220, 38, 38, 0.08) 0%, rgba(220, 38, 38, 0.04) 100%) !important;
-  color: #B91C1C !important;
-  box-shadow: inset 3px 0 0 #DC2626 !important;
+  background: rgba(239, 68, 68, 0.08) !important;
+  color: #DC2626 !important;
+  border-color: rgba(239, 68, 68, 0.1) !important;
+  box-shadow: 0 2px 4px rgba(239, 68, 68, 0.08) !important;
 }
 
-/* 分隔线 - 更精致 */
+/* 精致分隔线 */
 :deep(.mx-context-menu-item-sperator) {
-  margin: 8px 12px !important;
+  margin: 6px 8px !important;
   height: 1px !important;
-  background: linear-gradient(90deg, 
-    transparent 0%, 
-    rgba(212, 175, 55, 0.15) 50%, 
-    transparent 100%) !important;
+  background: var(--color-border) !important;
+  border: none !important;
+  opacity: 0.6 !important;
 }
 
-/* 图标样式 */
+/* 图标优化 */
 :deep(.mx-context-menu-item-icon) {
-  margin-right: 12px !important;
-  opacity: 0.6 !important;
-  display: inline-flex !important;
+  margin-right: 10px !important;
+  opacity: 0.7 !important;
+  transition: all var(--transition-fast) !important;
+  flex-shrink: 0 !important;
+  width: 18px !important;
+  height: 18px !important;
+  display: flex !important;
   align-items: center !important;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  justify-content: center !important;
 }
 
 :deep(.mx-context-menu-item:hover .mx-context-menu-item-icon) {
@@ -2351,56 +2707,61 @@ body {
   transform: scale(1.05) !important;
 }
 
-/* 标签 */
+/* 标签文本 */
 :deep(.mx-context-menu-item-label) {
   flex: 1 !important;
   white-space: nowrap !important;
+  font-weight: 500 !important;
+  line-height: 1.4 !important;
 }
 
-/* 箭头 - 子菜单指示器 */
+/* 子菜单箭头 */
 :deep(.mx-context-menu-item-arrow) {
   margin-left: auto !important;
-  opacity: 0.3 !important;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  opacity: 0.4 !important;
+  transition: all var(--transition-fast) !important;
+  width: 16px !important;
+  height: 16px !important;
 }
 
 :deep(.mx-context-menu-item:hover .mx-context-menu-item-arrow) {
-  opacity: 0.6 !important;
-  transform: translateX(2px) !important;
+  opacity: 0.8 !important;
+  transform: translateX(1px) !important;
 }
 
-/* 分类图标特殊样式 */
+/* 分类图标特殊处理 */
 :deep(.category-menu-icon) {
-  margin-right: 10px !important;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  transition: all var(--transition-fast) !important;
+  border-radius: 4px !important;
 }
 
 :deep(.mx-context-menu-item:hover .category-menu-icon) {
-  transform: scale(1.08) !important;
+  transform: scale(1.05) !important;
+  box-shadow: var(--shadow-sm) !important;
 }
 
-/* 子菜单 - 优雅偏移 */
+/* 子菜单动画 */
 :deep(.mx-context-menu.mx-context-menu-sub) {
-  margin-left: 6px !important;
-  animation: submenuSlideIn 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  margin-left: 4px !important;
+  animation: submenuSlideIn var(--transition-base) cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
 @keyframes submenuSlideIn {
-  from {
+  0% {
     opacity: 0;
-    transform: translateX(-12px);
+    transform: scale(0.95) translateX(-8px);
   }
-  to {
+  100% {
     opacity: 1;
-    transform: translateX(0);
+    transform: scale(1) translateX(0);
   }
 }
 
-/* 禁用项 */
+/* 禁用状态 */
 :deep(.mx-context-menu-item.disabled) {
-  opacity: 0.35 !important;
+  opacity: 0.4 !important;
   cursor: not-allowed !important;
-  color: #737373 !important;
+  pointer-events: none !important;
 }
 
 :deep(.mx-context-menu-item.disabled:hover) {
@@ -2411,21 +2772,19 @@ body {
 
 /* 暗色主题 - 优雅适配 */
 .theme-dark :deep(.mx-context-menu) {
-  background: rgba(26, 26, 26, 0.98) !important;
-  border-color: rgba(212, 175, 55, 0.15) !important;
-  box-shadow: 
-    0 0 0 1px rgba(255, 255, 255, 0.03),
-    0 4px 12px rgba(0, 0, 0, 0.3),
-    0 16px 48px rgba(0, 0, 0, 0.5) !important;
+  background: var(--color-bg-primary) !important;
+  border-color: var(--color-border) !important;
+  box-shadow: var(--shadow-xl) !important;
 }
 
 .theme-dark :deep(.mx-context-menu-item) {
-  color: #f5f5f5 !important;
+  color: var(--color-text-primary) !important;
 }
 
 .theme-dark :deep(.mx-context-menu-item:hover) {
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.12) 0%, rgba(212, 175, 55, 0.06) 100%) !important;
-  color: #ffffff !important;
+  background: var(--color-primary-light) !important;
+  color: var(--color-primary) !important;
+  border-color: rgba(74, 144, 226, 0.2) !important;
 }
 
 .theme-dark :deep(.mx-context-menu-item.danger-menu-item) {
@@ -2433,20 +2792,17 @@ body {
 }
 
 .theme-dark :deep(.mx-context-menu-item.danger-menu-item:hover) {
-  background: linear-gradient(135deg, rgba(248, 113, 113, 0.12) 0%, rgba(248, 113, 113, 0.06) 100%) !important;
+  background: rgba(248, 113, 113, 0.12) !important;
   color: #FCA5A5 !important;
-  box-shadow: inset 3px 0 0 #F87171 !important;
+  border-color: rgba(248, 113, 113, 0.2) !important;
 }
 
 .theme-dark :deep(.mx-context-menu-item-sperator) {
-  background: linear-gradient(90deg, 
-    transparent 0%, 
-    rgba(212, 175, 55, 0.2) 50%, 
-    transparent 100%) !important;
+  background: var(--color-border) !important;
 }
 
 .theme-dark :deep(.mx-context-menu-item.disabled) {
-  color: #a3a3a3 !important;
+  color: var(--color-text-tertiary) !important;
 }
 
 /* 无障碍 - 尊重用户偏好 */
@@ -2471,8 +2827,9 @@ body {
 
 /* Focus 状态 - 键盘导航 */
 :deep(.mx-context-menu-item:focus-visible) {
-  outline: 2px solid #D4AF37 !important;
+  outline: 2px solid var(--color-primary) !important;
   outline-offset: 2px !important;
+  border-radius: var(--radius-md) !important;
 }
 
 /* 对话框样式 */

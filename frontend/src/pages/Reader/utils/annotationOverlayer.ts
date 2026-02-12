@@ -173,8 +173,16 @@ export function createAnnotationOverlayer(
     return null
   }
 
+  const clickHandler = (event: MouseEvent) => {
+    hitTest(event)
+  }
+
   // 初始绘制
   redraw()
+
+  // 绑定点击事件（让高亮/下划线可交互）
+  // 注意：svg 本身 pointer-events 为 none，但子元素 (rect/line/circle) 为 auto，事件会冒泡到 svg
+  svg.addEventListener('click', clickHandler, true)
 
   // 🎯 核心修复: 监听文档的各种变化，确保高亮在动态排版后依然对齐
   const win = doc.defaultView
@@ -192,6 +200,7 @@ export function createAnnotationOverlayer(
     hitTest,
     // 暴露清理函数
     destroy: () => {
+      svg.removeEventListener('click', clickHandler, true)
       if (resizeObserver) resizeObserver.disconnect()
       doc.removeEventListener('scroll', scrollHandler)
     }

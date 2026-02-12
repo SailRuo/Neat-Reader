@@ -17,9 +17,10 @@
     <div class="reader-content">
       <!-- Foliate EPUB 阅读器 -->
       <FoliateReader
-        v-if="book?.format === 'epub'"
+        v-if="book && book.format === 'epub'"
         ref="foliateReaderRef"
         :book-id="book.id"
+        :book-content="book.content"
         :theme="theme"
         :font-size="fontSize"
         :line-height="lineHeight"
@@ -31,6 +32,7 @@
         @chapter-change="handleChapterChange"
         @click="handleContentClick"
         @text-selected="handleTextSelected"
+        @annotation-click="handleAnnotationClick"
       />
       
       <!-- PDF 原生渲染 -->
@@ -90,9 +92,13 @@
       :theme="theme"
       :tts="tts"
       :current-page-text="currentPageText"
+      :search-results="searchResults"
+      :is-searching="isSearching"
       @close="activeSidebar = null"
       @navigate="handleNavigate"
       @delete-note="handleDeleteNote"
+      @search="handleSearch"
+      @go-to-result="handleGoToResult"
     />
     
     <!-- 文本选择菜单 -->
@@ -115,6 +121,7 @@
       :note="noteDialogContent"
       :is-edit="!!currentAnnotation"
       @save="handleSaveNote"
+      @delete="handleDeleteCurrentAnnotation"
     />
     
     <!-- AI 浮动按钮 -->
@@ -169,6 +176,20 @@ const isLoading = ref(true)
 const showControls = ref(false) // 控制栏默认隐藏，点击切换
 const activeSidebar = ref<'contents' | 'search' | 'notes' | 'tts' | null>(null)
 
+// 🎯 修复：增加初始化超时保护，防止卡在加载页面
+const initTimeout = ref<any>(null)
+onMounted(() => {
+  initTimeout.value = setTimeout(() => {
+    if (isLoading.value) {
+      console.warn('⚠️ [Reader] 初始化超时，强制关闭加载动画')
+      isLoading.value = false
+    }
+  }, 10000) // 10秒超时
+})
+onBeforeUnmount(() => {
+  if (initTimeout.value) clearTimeout(initTimeout.value)
+})
+
 // 阅读器引用
 const foliateReaderRef = ref<any>(null)
 const pdfReaderRef = ref<any>(null)
@@ -213,11 +234,11 @@ const {
   currentAnnotation,
   bookAnnotations,
   handleTextSelection,
-  createHighlight,
   createUnderline,
   showNoteDialogForSelection,
   saveNote,
   updateNote,
+  deleteAnnotation,
   clearSelection: clearAnnotationSelection,
 } = useAnnotations(bookId.value)
 
@@ -276,17 +297,49 @@ const handleToggleSidebar = (type: 'contents' | 'search' | 'notes' | 'tts') => {
   }
 }
 
+// 搜索相关状态
+const searchResults = ref<any[]>([])
+const isSearching = ref(false)
+
+// 搜索
+const handleSearch = (query: string) => {
+  const reader = book.value?.format === 'epub' ? foliateReaderRef.value : pdfReaderRef.value
+  if (reader && reader.search) {
+    console.log('🔍 [Reader] 触发搜索:', query)
+    isSearching.value = true
+    reader.search(query).then((results: any[]) => {
+      console.log(`✅ [Reader] 搜索完成, 结果数: ${results.length}`)
+      searchResults.value = results
+      isSearching.value = false
+    }).catch((err: any) => {
+      console.error('❌ [Reader] 搜索失败:', err)
+      isSearching.value = false
+    })
+  } else {
+    console.warn('⚠️ [Reader] 阅读器未准备好或不支持搜索')
+  }
+}
+
+// 跳转到搜索结果
+const handleGoToResult = (index: number) => {
+  const result = searchResults.value[index]
+  if (result && result.cfi) {
+    handleNavigate({ cfi: result.cfi })
+  }
+}
+
 // 侧边栏笔记列表数据
 const sidebarNotes = computed(() => {
   const annos = bookAnnotations.value || []
   return annos
-    .filter(a => a.type === 'note')
+    .filter(a => a.type === 'note' || a.type === 'underline')
     .map(a => ({
       id: a.id,
       cfi: a.cfi,
+      chapterIndex: a.chapterIndex, // 🎯 传入章节索引用于跳转兜底
       chapter: a.chapterTitle || `第 ${((a.chapterIndex ?? 0) + 1)} 章`,
       text: a.text,
-      content: a.note || '',
+      content: a.type === 'underline' ? '下划线' : (a.note || ''),
       color: a.color,
       timestamp: a.updatedAt || a.createdAt || Date.now(),
     }))
@@ -306,6 +359,12 @@ const handleReaderReady = (data: any) => {
     chapters.value = data.chapters
   }
   
+  // 清除超时计时器
+  if (initTimeout.value) {
+    clearTimeout(initTimeout.value)
+    initTimeout.value = null
+  }
+
   // 延迟隐藏加载动画，确保内容已渲染
   setTimeout(() => {
     isLoading.value = false
@@ -406,6 +465,15 @@ const handleKeyDown = (e: KeyboardEvent) => {
 const handleNavigate = (data: any) => {
   const reader = book.value?.format === 'epub' ? foliateReaderRef.value : pdfReaderRef.value
   
+  if (data.cfi) {
+    if (reader && reader.goToCfi) {
+      // 🎯 修复：增加 chapterIndex 兜底，防止 CFI 失效导致无法跳转
+      reader.goToCfi(data.cfi, data.chapterIndex)
+    }
+    activeSidebar.value = null
+    return
+  }
+
   if (data.index !== undefined) {
     // 导航到章节
     if (reader && reader.goToChapter) {
@@ -436,27 +504,6 @@ const handleAskAI = (text: string) => {
   showAIChat.value = true
   
   console.log(' 选中文本已传递给 AI 面板')
-}
-
-// 处理创建高亮
-const handleCreateHighlight = async () => {
-  console.log(' [注释] 创建高亮')
-  try {
-    // 使用当前选中的文本和位置信息
-    handleTextSelection({
-      text: selectedText.value,
-      cfi: selectedCfi.value,
-      chapterIndex: currentChapterIndex.value,
-      chapterTitle: currentChapterTitle.value,
-      position: selectionPosition.value,
-    })
-
-    const created = await createHighlight(selectedAnnotationColor.value)
-    showSelectionMenu.value = false
-    if (created) console.log(' 高亮创建成功')
-  } catch (error) {
-    console.error(' 创建高亮失败:', error)
-  }
 }
 
 // 处理创建下划线
@@ -499,13 +546,45 @@ const handleSaveNote = async (note: string) => {
   console.log(' [注释] 保存笔记:', note.substring(0, 50))
   try {
     if (currentAnnotation.value) {
-      await updateNote()
+      await updateNote(note)
     } else {
-      await saveNote()
+      await saveNote(note, selectedAnnotationColor.value)
     }
     console.log(' 笔记保存成功')
   } catch (error) {
     console.error(' 保存笔记失败:', error)
+  }
+}
+
+// 点击已存在的注释（高亮/下划线/笔记）
+const handleAnnotationClick = (annotation: any) => {
+  // 笔记：打开对话框查看/编辑
+  if (annotation?.type === 'note') {
+    currentAnnotation.value = annotation
+    noteDialogContent.value = annotation.note || ''
+    selectedAnnotationColor.value = annotation.color || selectedAnnotationColor.value
+    showNoteDialog.value = true
+    return
+  }
+
+  // 下划线：也弹出对话框，允许删除或转为笔记
+  if (annotation?.type === 'underline') {
+    currentAnnotation.value = annotation
+    noteDialogContent.value = ''
+    selectedAnnotationColor.value = annotation.color || selectedAnnotationColor.value
+    showNoteDialog.value = true
+    return
+  }
+}
+
+const handleDeleteCurrentAnnotation = async () => {
+  if (!currentAnnotation.value) return
+  try {
+    await deleteAnnotation(currentAnnotation.value.id)
+    showNoteDialog.value = false
+    currentAnnotation.value = null
+  } catch (e) {
+    console.error('删除注释失败:', e)
   }
 }
 

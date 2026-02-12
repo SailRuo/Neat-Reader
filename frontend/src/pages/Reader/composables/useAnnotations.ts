@@ -134,10 +134,11 @@ export function useAnnotations(bookId: string) {
   }
 
   // 保存笔记
-  const saveNote = async (color = DEFAULT_ANNOTATION_COLOR.value) => {
-    if (!noteDialogContent.value.trim()) return
+  const saveNote = async (note: string, color = DEFAULT_ANNOTATION_COLOR.value) => {
+    const content = (note || '').trim()
+    if (!content) return
 
-    await createNote(noteDialogContent.value.trim(), color)
+    await createNote(content, color)
     showNoteDialog.value = false
     noteDialogContent.value = ''
   }
@@ -160,11 +161,13 @@ export function useAnnotations(bookId: string) {
   }
 
   // 更新笔记内容
-  const updateNote = async () => {
+  const updateNote = async (note: string) => {
     if (!currentAnnotation.value) return
+    const content = (note || '').trim()
+    if (!content) return
 
     await updateAnnotation(currentAnnotation.value.id, {
-      note: noteDialogContent.value.trim(),
+      note: content,
     })
 
     showNoteDialog.value = false

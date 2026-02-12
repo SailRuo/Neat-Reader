@@ -1,5 +1,5 @@
 // Electron API 类型定义
-interface ElectronAPI {
+export interface ElectronAPI {
   openDirectory: () => Promise<string>
   openFile: (filters?: any[]) => Promise<string>
   readFile: (filePath: string) => Promise<number[]>

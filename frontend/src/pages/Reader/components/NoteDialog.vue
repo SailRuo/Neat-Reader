@@ -35,6 +35,13 @@
 
           <!-- 底部按钮 -->
           <div class="dialog-footer">
+            <button
+              v-if="isEdit"
+              class="btn btn-danger"
+              @click="handleDelete"
+            >
+              删除
+            </button>
             <button class="btn btn-secondary" @click="handleClose">
               取消
             </button>
@@ -67,6 +74,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:visible': [value: boolean]
   save: [note: string]
+  delete: []
   close: []
 }>()
 
@@ -93,6 +101,11 @@ const handleClose = () => {
 const handleSave = () => {
   if (!localNote.value.trim()) return
   emit('save', localNote.value.trim())
+  handleClose()
+}
+
+const handleDelete = () => {
+  emit('delete')
   handleClose()
 }
 </script>
@@ -256,6 +269,15 @@ const handleSave = () => {
 .btn-primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.btn-danger {
+  background: #ef4444;
+  color: white;
+}
+
+.btn-danger:hover {
+  background: #dc2626;
 }
 
 /* 过渡动画 */

@@ -1,23 +1,6 @@
 // API 适配器 - 统一封装 Electron API 和后端 HTTP API
 import { baiduApi } from './baidu'
-
-// Electron API 类型定义
-interface ElectronAPI {
-  openDirectory: () => Promise<string>
-  openFile: (filters?: any[]) => Promise<string>
-  readFile: (filePath: string) => Promise<number[]>
-}
-
-declare global {
-  interface Window {
-    electron?: ElectronAPI
-  }
-}
-
-// 检查是否在 Electron 环境中
-export const isElectron = (): boolean => {
-  return typeof window !== 'undefined' && window.electron !== undefined
-}
+import { isElectron } from '@/electron'
 
 // 统一的 API 适配器
 export const api = {

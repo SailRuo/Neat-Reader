@@ -447,30 +447,52 @@ const initialize = async () => {
       console.log('📍 [Foliate] 使用 CFI 定位:', props.initialCfi)
     }
     
-    await view.value.init({
-      lastLocation: lastLocation,
-      showTextStart: !lastLocation 
-    })
+    // 初始化视图
+    try {
+      console.log('📍 [Foliate] 正在初始化视图，使用 CFI:', lastLocation)
+      // 🎯 核心修复：增加全局超时保护，防止 init 内部死锁导致整个流程卡死
+      const initPromise = view.value.init({ lastLocation })
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Foliate init timeout')), 5000)
+      )
+      await Promise.race([initPromise, timeoutPromise])
+    } catch (initErr) {
+      console.warn('⚠️ [Foliate] 视图初始化异常（可能是 CFI 无效或加载超时），执行回退策略:', initErr)
+      try {
+        // 尝试最简单的无参数启动
+        await view.value.init()
+        
+        // 异步尝试进度恢复，不阻塞后续流程
+        const startProgress = props.initialProgress ?? 0
+        if (startProgress > 0) {
+          console.log('📍 [Foliate] 执行进度百分比回退:', startProgress)
+          setTimeout(async () => {
+            if (view.value?.goToFraction) {
+              await view.value.goToFraction(startProgress / 100).catch((error: Error) => console.error('回退定位失败:', error))
+            }
+          }, 200)
+        }
+      } catch (fallbackErr) {
+        console.error('❌ [Foliate] 基础初始化也失败:', fallbackErr)
+      }
+    }
 
-    // 应用主题和样式
-    applyTheme()
-
-    // 添加点击事件监听到 Foliate 内部
-    addClickListener()
-
-    isReady.value = true
-    console.log('✅ [Foliate] 阅读器初始化完成')
-    
-    // 获取目录并触发 ready 事件
+    // 确保目录加载，即使初始化报错也要尝试获取
     if (view.value?.book?.toc) {
       chapters.value = view.value.book.toc.map((item: any) => ({
         label: item.label,
         href: item.href
       }))
-      console.log('📚 [Foliate] 目录加载完成，章节数:', chapters.value.length)
     }
+
+    // 应用主题和样式
+    applyTheme()
+    addClickListener()
+
+    isReady.value = true
+    console.log('✅ [Foliate] 阅读器状态已就绪')
     
-    // 立即触发 ready 事件
+    // 📢 极其重要：无论初始化过程如何，必须触发 ready，否则外部 Loading 不会消失
     emit('ready', { chapters: chapters.value })
     
     // 🎯 核心改进：移除所有基于 initialProgress 的 goToProgress 调用
@@ -899,14 +921,23 @@ const goToProgress = async (targetProgress: number) => {
 }
 
 // 跳转到 CFI
-const goToCfi = async (cfi: string) => {
-  if (!view.value || !cfi) return
-
-  try {
-    console.log('📍 [Foliate] 跳转到 CFI:', cfi)
-    await view.value.goTo(cfi)
-  } catch (err) {
-    console.error('❌ [Foliate] CFI 跳转失败:', err)
+const goToCfi = async (cfi: string, chapterIndex?: number) => {
+  if (view.value?.goToCfi) {
+    console.log('🚀 [Foliate] 尝试跳转到 CFI:', cfi)
+    try {
+      await view.value.goToCfi(cfi)
+    } catch (err) {
+      console.warn('⚠️ [Foliate] CFI 跳转失败:', err)
+      // 🎯 兜底逻辑：如果传入了章节索引，且 CFI 跳转失败，则跳转到该章节
+      if (chapterIndex !== undefined && view.value?.goTo) {
+        console.log('📍 [Foliate] 使用章节索引作为跳转兜底:', chapterIndex)
+        try {
+          await view.value.goTo(chapterIndex)
+        } catch (chapterErr) {
+          console.error('❌ [Foliate] 章节跳转兜底也失败:', chapterErr)
+        }
+      }
+    }
   }
 }
 
@@ -936,6 +967,35 @@ const getCurrentLocation = () => {
     start: {
       cfi: cfi || ''
     }
+  }
+}
+
+// 全文搜索
+async function search(query: string) {
+  if (!view.value?.book?.search) {
+    console.warn('⚠️ [Foliate] 当前书籍不支持搜索')
+    return []
+  }
+  
+  console.log('🔍 [Foliate] 开始全文搜索:', query)
+  try {
+    const results = []
+    // Foliate 的 search 是一个异步生成器
+    for await (const result of view.value.book.search(query)) {
+      // 映射结果格式以适配 UI
+      results.push({
+        cfi: result.cfi,
+        excerpt: result.excerpt,
+        chapter: result.subchapter || result.sectionTitle || '未知章节'
+      })
+      // 限制结果数量，防止 UI 卡死
+      if (results.length >= 100) break
+    }
+    console.log(`✅ [Foliate] 搜索完成，找到 ${results.length} 个结果`)
+    return results
+  } catch (err) {
+    console.error('❌ [Foliate] 搜索出错:', err)
+    return []
   }
 }
 
@@ -1135,7 +1195,8 @@ defineExpose({
   goToCfi,
   goToChapter,
   getCurrentLocation,
-  getCurrentPageText
+  getCurrentPageText,
+  search: (query: string) => search(query)
 })
 </script>
 
