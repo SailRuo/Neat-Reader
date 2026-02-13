@@ -59,6 +59,11 @@ export const api = {
     return result
   },
 
+  async createDirectory(accessToken: string, dir: string): Promise<any> {
+    const result = await baiduApi.createDirectory(accessToken, dir)
+    return result
+  },
+
   async deleteFile(accessToken: string, filePaths: string[]): Promise<any> {
     const result = await baiduApi.deleteFile(accessToken, filePaths)
     return result

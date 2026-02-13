@@ -584,6 +584,14 @@ const selectedCategory = ref('all')
 const showChatWindow = ref(false)
 const isSpeedDialOpen = ref(false)
 
+// 监听分类切换，自动同步网盘数据
+watch(selectedCategory, (newVal) => {
+  if (newVal !== 'settings') {
+    console.log('切换分类，触发网盘数据同步:', newVal);
+    ebookStore.loadBaidupanBooks();
+  }
+})
+
 // 右键菜单相关
 const selectedBook = ref<any>(null)
 const selectedCategoryForMenu = ref<any>(null)
@@ -1453,7 +1461,11 @@ const getBooksByCategory = (categoryId: string) => {
 
 // 监听书籍或分类变化，清除缓存
 watch(
-  [() => books.value.length, () => categories.value.length],
+  [
+    () => books.value.length,
+    () => categories.value.length,
+    () => books.value.map(b => b.categoryId || '').join(',')
+  ],
   () => {
     cachedResults.value = {
       categoryBooks: {},

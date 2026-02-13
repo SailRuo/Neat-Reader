@@ -205,6 +205,18 @@ router.get('/download', async (req, res) => {
   }
 })
 
+// 创建目录
+router.post('/mkdir', async (req, res) => {
+  try {
+    const { accessToken, dir } = req.body
+    const result = await baiduService.createDirectory(accessToken, dir)
+    res.json(result)
+  } catch (error) {
+    logger.error('[API] 创建目录失败:', error.message)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 // 上传文件
 router.post('/upload', async (req, res) => {
   try {

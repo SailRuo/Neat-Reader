@@ -323,6 +323,8 @@ export const useEbookStore = defineStore('ebook', () => {
       //console.log('正在保存书籍列表，书籍数量:', booksToSave.length);
       
       await localforage.setItem('books', booksToSave);
+      // 异步同步到云端（不阻塞 UI）
+      scheduleCloudSyncBooks();
       // console.log('书籍列表保存成功');
     } catch (error) {
       console.error('保存电子书列表失败:', error);
@@ -392,7 +394,6 @@ export const useEbookStore = defineStore('ebook', () => {
   const saveCategories = async () => {
     try {
       console.log('正在保存分类列表，分类数量:', categories.value.length);
-      console.log('分类列表内容:', JSON.stringify(categories.value));
       
       // 确保数据是可序列化的
       const categoriesToSave = categories.value.map(category => ({
@@ -404,26 +405,103 @@ export const useEbookStore = defineStore('ebook', () => {
         updatedAt: category.updatedAt
       }));
       
-      console.log('准备保存的分类数据:', JSON.stringify(categoriesToSave));
-      
       await localforage.setItem('categories', categoriesToSave);
+      // 异步同步到云端（不阻塞 UI）
+      scheduleCloudSyncCategories();
       
-      // 验证保存是否成功
-      const savedData = await localforage.getItem('categories');
-      console.log('验证保存结果:', savedData);
-      
-      if (savedData && Array.isArray(savedData) && savedData.length === categoriesToSave.length) {
-        console.log('分类列表保存成功，验证通过');
-      } else {
-        console.error('分类列表保存验证失败');
+      // 验证保存是否成功并刷新内存状态
+      const savedData = await localforage.getItem<BookCategory[]>('categories');
+      if (savedData) {
+        categories.value = [...savedData]; // 强制触发响应式刷新
       }
     } catch (error) {
-      console.error('保存分类列表失败:', error);
-      if (error instanceof Error) {
-        console.error('错误详情:', error.message);
-        console.error('错误堆栈:', error.stack);
-      }
+      console.error('❌ 保存分类列表失败:', error);
       throw error;
+    }
+  };
+
+  // ===== 云端同步（全异步，先落本地） =====
+  let cloudSyncBooksTimer: number | null = null;
+  let cloudSyncCategoriesTimer: number | null = null;
+
+  const scheduleCloudSyncBooks = (delayMs: number = 800) => {
+    if (cloudSyncBooksTimer) window.clearTimeout(cloudSyncBooksTimer);
+    cloudSyncBooksTimer = window.setTimeout(() => {
+      cloudSyncBooksTimer = null;
+      void syncBooksToCloud();
+    }, delayMs);
+  };
+
+  const scheduleCloudSyncCategories = (delayMs: number = 800) => {
+    if (cloudSyncCategoriesTimer) window.clearTimeout(cloudSyncCategoriesTimer);
+    cloudSyncCategoriesTimer = window.setTimeout(() => {
+      cloudSyncCategoriesTimer = null;
+      void syncCategoriesToCloud();
+    }, delayMs);
+  };
+
+  const syncBooksToCloud = async () => {
+    try {
+      if (!await ensureBaidupanToken() || !userConfig.value.storage.baidupan) return;
+      const booksData = {
+        books: books.value,
+        lastSync: Date.now(),
+        deviceId: deviceInfo.value?.id || 'unknown',
+        deviceName: deviceInfo.value?.name || 'unknown'
+      };
+      const booksFile = new File([JSON.stringify(booksData)], 'books.json', { type: 'application/json' });
+      await uploadToBaidupanNew(booksFile, '');
+      console.log('☁️ [Cloud Sync] books.json 已异步同步到网盘');
+    } catch (error) {
+      console.warn('⚠️ [Cloud Sync] books.json 异步同步失败:', error);
+    }
+  };
+
+  const syncCategoriesToCloud = async () => {
+    try {
+      if (!await ensureBaidupanToken() || !userConfig.value.storage.baidupan) return;
+      const categoriesData = {
+        categories: categories.value.map(c => ({
+          id: c.id,
+          name: c.name,
+          color: c.color,
+          bookIds: Array.isArray(c.bookIds) ? [...c.bookIds] : [],
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt
+        })),
+        lastSync: Date.now(),
+        deviceId: deviceInfo.value?.id || 'unknown',
+        deviceName: deviceInfo.value?.name || 'unknown'
+      };
+      const categoriesFile = new File([JSON.stringify(categoriesData)], 'categories.json', { type: 'application/json' });
+      await uploadToBaidupanNew(categoriesFile, '');
+      console.log('☁️ [Cloud Sync] categories.json 已异步同步到网盘');
+    } catch (error) {
+      console.warn('⚠️ [Cloud Sync] categories.json 异步同步失败:', error);
+    }
+  };
+
+  const reconcileBooksCategoryIdFromCategoryBookIds = () => {
+    const bookIdToCategoryId = new Map<string, string>();
+    for (const cat of categories.value) {
+      if (!Array.isArray(cat.bookIds)) continue;
+      for (const bookId of cat.bookIds) {
+        if (!bookIdToCategoryId.has(bookId)) {
+          bookIdToCategoryId.set(bookId, cat.id);
+        }
+      }
+    }
+
+    let updated = 0;
+    for (const book of books.value) {
+      const newCategoryId = bookIdToCategoryId.get(book.id);
+      if (book.categoryId !== newCategoryId) {
+        book.categoryId = newCategoryId;
+        updated++;
+      }
+    }
+    if (updated > 0) {
+      books.value = [...books.value];
     }
   };
 
@@ -490,13 +568,30 @@ export const useEbookStore = defineStore('ebook', () => {
       if (index !== -1) {
         const categoryName = categories.value[index].name;
         
-        // 将该分类下的书籍移动到未分类
+        // 将该分类下的书籍移动到未分类（bookIds 为权威）
         const uncategorized = categories.value.find(cat => cat.name === '未分类');
         if (uncategorized) {
-          for (const bookId of categories.value[index].bookIds) {
+          const movedBookIds = Array.isArray(categories.value[index].bookIds) ? [...categories.value[index].bookIds] : [];
+          if (!Array.isArray(uncategorized.bookIds)) uncategorized.bookIds = [];
+
+          for (const bookId of movedBookIds) {
+            if (!uncategorized.bookIds.includes(bookId)) {
+              uncategorized.bookIds.push(bookId);
+            }
             const bookIndex = books.value.findIndex(book => book.id === bookId);
             if (bookIndex !== -1) {
               books.value[bookIndex].categoryId = uncategorized.id;
+            }
+          }
+          uncategorized.updatedAt = Date.now();
+          await saveBooks();
+        } else {
+          // 没有未分类时，至少清理掉这些书籍的冗余 categoryId
+          const movedBookIds = Array.isArray(categories.value[index].bookIds) ? categories.value[index].bookIds : [];
+          for (const bookId of movedBookIds) {
+            const bookIndex = books.value.findIndex(book => book.id === bookId);
+            if (bookIndex !== -1) {
+              books.value[bookIndex].categoryId = undefined;
             }
           }
           await saveBooks();
@@ -518,26 +613,31 @@ export const useEbookStore = defineStore('ebook', () => {
   // 将书籍添加到分类
   const addBookToCategory = async (bookId: string, categoryId: string) => {
     try {
-      // 更新书籍的分类ID
       const bookIndex = books.value.findIndex(book => book.id === bookId);
       if (bookIndex !== -1) {
-        // 从原分类中移除
-        if (books.value[bookIndex].categoryId) {
-          const oldCategoryIndex = categories.value.findIndex(cat => cat.id === books.value[bookIndex].categoryId);
-          if (oldCategoryIndex !== -1) {
-            categories.value[oldCategoryIndex].bookIds = categories.value[oldCategoryIndex].bookIds.filter(id => id !== bookId);
-            categories.value[oldCategoryIndex].updatedAt = Date.now();
+        // bookIds 为权威：先从所有分类中移除该 bookId
+        for (const cat of categories.value) {
+          if (!Array.isArray(cat.bookIds)) continue;
+          if (cat.bookIds.includes(bookId)) {
+            cat.bookIds = cat.bookIds.filter(id => id !== bookId);
+            cat.updatedAt = Date.now();
           }
         }
-        
-        // 添加到新分类
-        books.value[bookIndex].categoryId = categoryId;
-        
+
+        // 添加到目标分类
         const categoryIndex = categories.value.findIndex(cat => cat.id === categoryId);
-        if (categoryIndex !== -1 && !categories.value[categoryIndex].bookIds.includes(bookId)) {
-          categories.value[categoryIndex].bookIds.push(bookId);
+        if (categoryIndex !== -1) {
+          if (!Array.isArray(categories.value[categoryIndex].bookIds)) {
+            categories.value[categoryIndex].bookIds = [];
+          }
+          if (!categories.value[categoryIndex].bookIds.includes(bookId)) {
+            categories.value[categoryIndex].bookIds.push(bookId);
+          }
           categories.value[categoryIndex].updatedAt = Date.now();
         }
+
+        // 同步更新书籍冗余字段 categoryId
+        books.value[bookIndex].categoryId = categoryId;
         
         await saveBooks();
         await saveCategories();
@@ -556,26 +656,29 @@ export const useEbookStore = defineStore('ebook', () => {
   const removeBookFromCategory = async (bookId: string) => {
     try {
       const bookIndex = books.value.findIndex(book => book.id === bookId);
-      if (bookIndex !== -1 && books.value[bookIndex].categoryId) {
-        const categoryId = books.value[bookIndex].categoryId;
-        
-        // 从分类中移除
-        const categoryIndex = categories.value.findIndex(cat => cat.id === categoryId);
-        if (categoryIndex !== -1) {
-          categories.value[categoryIndex].bookIds = categories.value[categoryIndex].bookIds.filter(id => id !== bookId);
-          categories.value[categoryIndex].updatedAt = Date.now();
+      if (bookIndex === -1) return false;
+
+      // bookIds 为权威：从所有分类中移除
+      let touched = false;
+      for (const cat of categories.value) {
+        if (!Array.isArray(cat.bookIds)) continue;
+        if (cat.bookIds.includes(bookId)) {
+          cat.bookIds = cat.bookIds.filter(id => id !== bookId);
+          cat.updatedAt = Date.now();
+          touched = true;
         }
-        
-        // 移除书籍的分类ID
-        books.value[bookIndex].categoryId = undefined;
-        
-        await saveBooks();
-        await saveCategories();
-        
-        console.log('书籍从分类中移除成功:', bookId);
-        return true;
       }
-      return false;
+
+      // 同步更新书籍冗余字段 categoryId
+      books.value[bookIndex].categoryId = undefined;
+
+      await saveBooks();
+      if (touched) {
+        await saveCategories();
+      }
+
+      console.log('书籍从分类中移除成功:', bookId);
+      return true;
     } catch (error) {
       console.error('从分类中移除书籍失败:', error);
       return false;
@@ -783,6 +886,30 @@ export const useEbookStore = defineStore('ebook', () => {
         // 3. 本地书籍或仅删除本地记录：使用 splice 显式触发 Vue 响应式
         books.value.splice(index, 1);
       }
+
+      // 3.5 从所有分类中移除该书籍 ID，保证分类数据一致
+      let categoryTouched = false;
+      for (const category of categories.value) {
+        if (!Array.isArray(category.bookIds)) continue;
+        const before = category.bookIds.length;
+        category.bookIds = category.bookIds.filter(id => id !== bookId);
+        if (category.bookIds.length !== before) {
+          category.updatedAt = Date.now();
+          categoryTouched = true;
+        }
+      }
+      if (categoryTouched) {
+        // 只落本地，云端异步
+        await localforage.setItem('categories', categories.value.map(c => ({
+          id: c.id,
+          name: c.name,
+          color: c.color,
+          bookIds: Array.isArray(c.bookIds) ? [...c.bookIds] : [],
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt
+        })));
+        scheduleCloudSyncCategories();
+      }
       
       // 4. 异步执行持久化清理，不阻塞 UI 响应
       saveBooks(); 
@@ -986,6 +1113,25 @@ export const useEbookStore = defineStore('ebook', () => {
       return true;
     }
     return await refreshBaidupanToken();
+  };
+
+  // 🎯 核心修复：确保网盘目录存在
+  const ensureDirectoryExists = async (relativePath: string): Promise<boolean> => {
+    try {
+      if (!await ensureBaidupanToken() || !userConfig.value.storage.baidupan) return false;
+      const { accessToken } = userConfig.value.storage.baidupan;
+      
+      console.log(`📂 [Cloud Sync] 检查目录是否存在: ${relativePath}`);
+      const result = await api.createDirectory(accessToken, relativePath);
+      if (result.success) {
+        console.log(`✅ [Cloud Sync] 目录就绪: ${relativePath} (${result.exists ? '已存在' : '新创建'})`);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.warn(`⚠️ [Cloud Sync] 确保目录存在时异常: ${relativePath}`, error);
+      return false;
+    }
   };
 
   // 获取百度网盘用户信息
@@ -1226,19 +1372,21 @@ export const useEbookStore = defineStore('ebook', () => {
   // 从百度网盘下载 Blob（用于同步配置等）
   const downloadBlobFromBaidupan = async (path: string): Promise<Blob | null> => {
     try {
+      console.log(`🔍 [Cloud Sync] 尝试从网盘下载文件: ${path}`);
       // 确保令牌有效
       if (!await ensureBaidupanToken() || !userConfig.value.storage.baidupan) {
+        console.warn('⚠️ [Cloud Sync] 令牌无效或未配置网盘，取消下载');
         return null;
       }
       
-      const { accessToken, rootPath } = userConfig.value.storage.baidupan;
+      const { accessToken } = userConfig.value.storage.baidupan;
       
-      // 从路径中提取目录和文件名
-      const pathParts = path.split('/').filter(p => p);
-      const fileName = pathParts.pop() || '';
-      const dirPath = pathParts.length > 0 ? `/${pathParts.join('/')}` : (rootPath || `/apps/${AppName}`);
+      // 🎯 核心修正：规范化路径处理
+      const fullPath = `/apps/${AppName}/${path.replace(/^\/+/, '')}`;
+      const dirPath = fullPath.substring(0, fullPath.lastIndexOf('/'));
+      const fileName = fullPath.substring(fullPath.lastIndexOf('/') + 1);
       
-      console.log('下载文件 - 目录:', dirPath, '文件名:', fileName);
+      console.log(`📂 [Cloud Sync] 寻址目录: ${dirPath}, 目标文件: ${fileName}`);
       
       // 先获取文件列表
       const result = await api.getFileList(
@@ -1250,17 +1398,15 @@ export const useEbookStore = defineStore('ebook', () => {
         'list',
         1
       );
+      
       const fileListData = result;
       
       if (fileListData.error || !fileListData.list) {
-        console.log('获取文件列表失败或为空:', fileListData);
+        console.warn(`❌ [Cloud Sync] 获取目录列表失败或目录为空: ${dirPath}`, fileListData);
         return null;
       }
       
-      // 打印文件列表中的所有文件名，用于调试
-      console.log('文件列表中的所有文件名:', fileListData.list.map((f: any) => f.server_filename));
-      
-      // 查找目标文件（不区分大小写，去除空格）
+      // 查找目标文件
       const normalizedFileName = fileName.toLowerCase().trim();
       const targetFile = fileListData.list.find((file: any) => {
         const normalizedServerName = (file.server_filename || '').toLowerCase().trim();
@@ -1268,44 +1414,32 @@ export const useEbookStore = defineStore('ebook', () => {
       });
       
       if (!targetFile) {
-        console.log('未找到文件:', fileName);
-        console.log('期望的文件名:', normalizedFileName);
-        console.log('文件列表:', fileListData.list.map((f: any) => ({
-          name: f.server_filename,
-          normalized: (f.server_filename || '').toLowerCase().trim(),
-          isdir: f.isdir
-        })));
+        console.log(`ℹ️ [Cloud Sync] 网盘中未找到文件: ${fileName}`);
         return null;
       }
+      
+      console.log(`✅ [Cloud Sync] 找到目标文件，fs_id: ${targetFile.fs_id}, 大小: ${targetFile.size}`);
       
       // 获取下载链接
-      const downloadResult = await api.getFileList(
-        accessToken,
-        dirPath,
-        1,
-        1,
-        'name',
-        'download',
-        0
-      );
-      const downloadUrlData = JSON.parse(downloadResult);
-      console.log('获取下载链接响应:', downloadUrlData);
-      
-      if (downloadUrlData.error || !downloadUrlData.dlink) {
-        console.error('获取下载链接失败:', downloadUrlData);
+      const fileInfoData = await api.getFileInfo(accessToken, targetFile.fs_id.toString());
+      if (!fileInfoData.info || !fileInfoData.info[0]?.dlink) {
+        console.error('❌ [Cloud Sync] 获取下载链接失败:', fileInfoData);
         return null;
       }
       
-      const fileResponse = await fetch(downloadUrlData.dlink);
-      if (!fileResponse.ok) {
-        console.error('下载文件失败:', fileResponse.status);
+      const dlink = fileInfoData.info[0].dlink;
+      const downloadResult = await api.downloadFile(dlink, accessToken);
+      
+      if (!downloadResult.success || !downloadResult.data) {
+        console.error('❌ [Cloud Sync] 文件内容下载失败');
         return null;
       }
       
-      const blob = await fileResponse.blob();
+      const blob = new Blob([new Uint8Array(downloadResult.data)]);
+      console.log(`📦 [Cloud Sync] 文件下载完成，大小: ${blob.size} 字节`);
       return blob;
     } catch (error) {
-      console.error('从百度网盘下载文件失败:', error);
+      console.error('❌ [Cloud Sync] 下载异常:', error);
       return null;
     }
   };
@@ -1519,6 +1653,52 @@ export const useEbookStore = defineStore('ebook', () => {
       const searchDir = rootPath || `/apps/${AppName}`;
       console.log('开始加载百度网盘书籍，目录:', searchDir);
       
+      // 🎯 同步：先拉取 categories.json（分类独立存储）
+      try {
+        console.log('📥 [Cloud Sync] 开始同步云端 categories.json...');
+        const categoriesBlob = await downloadBlobFromBaidupan('categories.json');
+        if (categoriesBlob) {
+          const text = await categoriesBlob.text();
+          const cloudCategoriesData = JSON.parse(text);
+          const cloudCategories = cloudCategoriesData.categories;
+          if (cloudCategories && Array.isArray(cloudCategories)) {
+            categories.value = cloudCategories;
+            await localforage.setItem('categories', cloudCategories);
+            categories.value = [...categories.value];
+            console.log('✅ [Cloud Sync] 云端分类已覆盖本地（categories.json）');
+          }
+        } else {
+          console.log('ℹ️ [Cloud Sync] 网盘中尚无 categories.json，跳过分类同步');
+        }
+      } catch (syncErr) {
+        console.warn('⚠️ [Cloud Sync] 同步云端 categories.json 失败:', syncErr);
+      }
+
+      // 🎯 同步：再拉取 books.json（书籍列表独立存储）
+      try {
+        console.log('� [Cloud Sync] 开始同步云端 books.json...');
+        const booksBlob = await downloadBlobFromBaidupan('books.json');
+        if (booksBlob) {
+          const text = await booksBlob.text();
+          const cloudBooksData = JSON.parse(text);
+          const cloudBooks = cloudBooksData.books;
+          if (cloudBooks && Array.isArray(cloudBooks)) {
+            // 采用云端覆盖本地策略
+            books.value = cloudBooks;
+            await localforage.setItem('books', cloudBooks);
+            books.value = [...books.value];
+            console.log('✅ [Cloud Sync] 云端书籍已覆盖本地（books.json）');
+          }
+        } else {
+          console.log('ℹ️ [Cloud Sync] 网盘中尚无 books.json，跳过书籍同步');
+        }
+      } catch (syncErr) {
+        console.warn('⚠️ [Cloud Sync] 同步云端 books.json 失败:', syncErr);
+      }
+
+      // 🎯 最终对齐：以 categories.bookIds 为权威修正 books.categoryId
+      reconcileBooksCategoryIdFromCategoryBookIds();
+      
       const result = await api.getFileList(
         accessToken,
         searchDir,
@@ -1673,21 +1853,23 @@ export const useEbookStore = defineStore('ebook', () => {
       const booksData = {
         ebooks: books.value,
         timestamp: Date.now(),
-        deviceId: deviceInfo.value.id,
-        deviceName: deviceInfo.value.name
+        deviceId: deviceInfo.value?.id || 'unknown',
+        deviceName: deviceInfo.value?.name || 'unknown'
       };
       const booksFile = new File([JSON.stringify(booksData)], 'books.json', { type: 'application/json' });
-      await uploadToBaidupanNew(booksFile, '/sync');
+      // 🎯 路径对齐：统一存放在根目录
+      await uploadToBaidupanNew(booksFile, '');
       
       // 2. 上传分类列表
       const categoriesData = {
         categories: categories.value,
         timestamp: Date.now(),
-        deviceId: deviceInfo.value.id
+        deviceId: deviceInfo.value?.id || 'unknown'
       };
       const categoriesFile = new File([JSON.stringify(categoriesData)], 'categories.json', { type: 'application/json' });
-      await uploadToBaidupanNew(categoriesFile, '/sync');
-      console.log('分类列表已同步到百度网盘');
+      // 🎯 路径对齐：统一存放在根目录
+      await uploadToBaidupanNew(categoriesFile, '');
+      console.log('分类列表已同步到百度网盘根目录');
       
       // 3. 批量上传进度文件（每本书一个文件）
       let syncedCount = 0;

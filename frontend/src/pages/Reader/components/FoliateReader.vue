@@ -1045,28 +1045,44 @@ const goToCfi = async (cfi: string, chapterIndex?: number) => {
 
     // 3. 执行精准跳转
     console.log('📍 [Foliate] 步骤2: 执行候选定位尝试')
-    clearOverlays() 
     
     let resolved = false
     let lastError: unknown = null
     for (const c of candidates) {
       try {
         console.log('🧪 [Foliate] 尝试候选 CFI:', c)
+        // 🎯 再次确保清理干扰，防止 Foliate 寻址到 overlay 节点
+        clearOverlays()
+        
+        // 🎯 异步等待微任务，确保 DOM 稳定
+        await new Promise(resolve => setTimeout(resolve, 0))
+        
+        // 如果是跨章节后的跳转，给解析器一点缓冲时间
+        if (needsContextSwitch) {
+          await new Promise(resolve => setTimeout(resolve, 50))
+        }
+
         await view.value.goTo(c)
         resolved = true
         targetCfi = c
+        console.log('✅ [Foliate] 候选跳转成功:', c)
         break
       } catch (e) {
         lastError = e
-        console.warn(`⚠️ [Foliate] 候选 CFI 跳转失败 (${c}):`, e instanceof Error ? e.message : '解析异常')
+        const msg = e instanceof Error ? e.message : '解析异常'
+        console.warn(`⚠️ [Foliate] 候选 CFI 跳转失败 (${c}):`, msg)
+        // 继续尝试下一个候选，不中断流程
       }
     }
 
     if (!resolved) {
       console.error('❌ [Foliate] 无法解析任何 CFI 候选，尝试进度百分比补救')
-      // 最后的补救：如果已知进度，尝试 goToFraction (这通常比跳章节开头要准)
-      if (props.initialProgress && props.initialProgress > 0) {
-        await view.value.goToFraction(props.initialProgress / 100)
+      try {
+        if (props.initialProgress && props.initialProgress > 0) {
+          await view.value.goToFraction(props.initialProgress / 100)
+        }
+      } catch (fallbackErr) {
+        console.error('❌ [Foliate] 进度补救也失败了:', fallbackErr)
       }
     }
     

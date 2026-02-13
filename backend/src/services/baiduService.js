@@ -260,6 +260,45 @@ const baiduService = {
     }
   },
   
+  // 创建目录
+  async createDirectory(accessToken, relativePath) {
+    try {
+      const baiduPath = getBaiduPath(relativePath)
+      logger.info(`[Mkdir] 尝试创建目录: ${baiduPath}`)
+      
+      const params = new URLSearchParams()
+      params.append('access_token', accessToken)
+      params.append('opera', 'mkdir')
+      
+      const formData = new URLSearchParams()
+      formData.append('path', baiduPath)
+      formData.append('isdir', '1')
+      
+      const response = await client.post(
+        `https://pan.baidu.com/rest/2.0/xpan/file?method=filemanager&${params.toString()}`,
+        formData,
+        {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+          }
+        }
+      )
+      
+      const data = response.data
+      // errno: -8 表示目录已存在，也视为成功
+      if (data.errno === 0 || data.errno === -8) {
+        logger.info(`[Mkdir] 目录就绪: ${baiduPath} (errno: ${data.errno})`)
+        return { success: true, exists: data.errno === -8 }
+      }
+      
+      logger.error(`[Mkdir] 创建目录失败: errno=${data.errno}`)
+      return { success: false, errno: data.errno, errmsg: data.errmsg }
+    } catch (error) {
+      logger.error('[Mkdir] 创建目录异常:', error.message)
+      throw error
+    }
+  },
+  
   // 上传文件
   async uploadFile(fileName, fileBuffer, accessToken) {
     try {

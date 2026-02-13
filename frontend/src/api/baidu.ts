@@ -89,6 +89,11 @@ export const baiduApi = {
     return client.post('/baidu/upload', { fileName, fileData, accessToken })
   },
   
+  // 创建目录
+  async createDirectory(accessToken: string, dir: string) {
+    return client.post('/baidu/mkdir', { accessToken, dir })
+  },
+  
   // 删除文件（使用文件路径）
   async deleteFile(accessToken: string, filePaths: string[]) {
     return client.post('/baidu/delete', { accessToken, filePaths })
