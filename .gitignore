@@ -52,6 +52,7 @@ wails.json.bak
 vendor/
 /.kiro/
 /.trae/
-/.trae/
 /docs/
 /CLIProxyAPI/
+/.cursor/
+/.agents/
