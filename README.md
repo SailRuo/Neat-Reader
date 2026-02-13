@@ -144,14 +144,19 @@ npm run build:linux  # Linux
 ---
 
 ### 预览截图
+<img width="2158" height="1271" alt="image" src="https://github.com/user-attachments/assets/83438abb-9055-4f50-98ed-5a449d4ea4cc" />
 
-> 在 GitHub 上展示时，可以放几张关键页面截图（主页、阅读器、AI 面板等）。  
-> 例如：
->
-> ```md
-> ![Home](./image-1.png)
-> ![Reader](./image-2.png)
-> ```
+<img width="2158" height="1271" alt="image" src="https://github.com/user-attachments/assets/9dead75d-2e38-4668-b148-6f59aa8d315a" />
+
+<img width="2158" height="1271" alt="image" src="https://github.com/user-attachments/assets/ad75008e-9a5d-4342-bd23-a36905503a16" />
+
+<img width="2158" height="1271" alt="image" src="https://github.com/user-attachments/assets/eded8d41-a671-470b-9e04-10e9609a0d7b" />
+
+<img width="2158" height="1271" alt="image" src="https://github.com/user-attachments/assets/237df806-603e-4979-97f6-67d57869e1cf" />
+
+<img width="2158" height="1271" alt="image" src="https://github.com/user-attachments/assets/cf0db06d-06b0-4a66-b0dc-cd7bbac3be88" />
+
+<img width="2158" height="1271" alt="image" src="https://github.com/user-attachments/assets/197c5b5b-d67f-42ac-9e45-71ccc00b5615" />
 
 ---
 
