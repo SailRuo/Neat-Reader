@@ -76,6 +76,9 @@ let cfiToRange: ((doc: Document, cfi: string) => Range) | null = null
 
 const annotationOverlayers = ref<Map<number, AnnotationOverlayer>>(new Map())
 
+const overlayRebuildTimers = new Map<number, number>()
+const warnedAnnotationCfiErrors = new Set<string>()
+
 const relocateListener = (e: any) => handleRelocate(e.detail)
 const loadListener = (e: any) => handleLoad(e.detail.doc, e.detail.index)
 
@@ -217,10 +220,14 @@ const rebuildAnnotationOverlay = (doc: Document, index: number) => {
           }
         }
 
-        console.warn('⚠️ [注释] CFI 转换异常，将使用文本匹配兜底:', {
-          cfi: targetCfi,
-          error: lastError instanceof Error ? lastError.message : String(lastError)
-        })
+        const warnKey = `${index}:${targetCfi}`
+        if (!warnedAnnotationCfiErrors.has(warnKey)) {
+          warnedAnnotationCfiErrors.add(warnKey)
+          console.warn('⚠️ [注释] CFI 转换异常，将使用文本匹配兜底:', {
+            cfi: targetCfi,
+            error: lastError instanceof Error ? lastError.message : String(lastError)
+          })
+        }
         return findRangeByText(annotation.text || '')
       },
       handleAnnotationClick
@@ -237,6 +244,19 @@ const rebuildAllAnnotationOverlays = () => {
   loadedDocs.value.forEach((doc, index) => {
     rebuildAnnotationOverlay(doc, index)
   })
+}
+
+const scheduleRebuildAnnotationOverlay = (index: number, delayMs = 250) => {
+  const existing = overlayRebuildTimers.get(index)
+  if (existing) window.clearTimeout(existing)
+
+  const timer = window.setTimeout(() => {
+    overlayRebuildTimers.delete(index)
+    const doc = loadedDocs.value.get(index)
+    if (doc) rebuildAnnotationOverlay(doc, index)
+  }, delayMs)
+
+  overlayRebuildTimers.set(index, timer)
 }
 
 // 绑定文本选择监听
@@ -661,8 +681,8 @@ const handleLoad = (doc: Document, index: number) => {
     console.warn('⚠️ [文本选择] 监听绑定失败:', e)
   }
 
-  // 注入/重建注释 overlay
-  rebuildAnnotationOverlay(doc, index)
+  // 注入/重建注释 overlay（延迟一点，避免分页重排期间 toRange 更容易失败）
+  scheduleRebuildAnnotationOverlay(index)
   
   // 如果是当前章节，触发文本更新
   if (index === currentChapterIndex.value) {
@@ -963,24 +983,26 @@ const goToCfi = async (cfi: string, chapterIndex?: number) => {
     const inner = m[1]
     const parts = inner.split(',')
 
-    // 非 range CFI
+    // 如果不是 Range CFI，直接返回
     if (parts.length < 2) return [wrapped]
 
     const base = parts[0]
     const start = parts[1]
 
-    // 候选 1：原始 range CFI（有些情况下 Foliate 能解析，只是落点不精确）
-    const original = wrapped
-
-    // 候选 2：拼接成 point CFI（有些 base 结构下可用，如 /4/54,/1:30,/1:38）
+    // 🎯 核心修复：彻底规避带逗号的 CFI 格式（Foliate 解析器在单章节模式下容易崩）
+    // 候选 1：标准拼接式 Point CFI
     const joinedInner = `${base}${start.startsWith('/') ? '' : '/'}${start}`
     const joinedPoint = `epubcfi(${joinedInner})`
 
-    // 候选 3：保留 base + start 的逗号形式（对部分实现更友好）
-    const baseStart = `epubcfi(${base},${start})`
+    // 候选 2：更深层级的拼接尝试（有些 base 以 / 结尾）
+    const deepJoinedInner = `${base.endsWith('/') ? base.slice(0, -1) : base}${start.startsWith('/') ? '' : '/'}${start}`
+    const deepJoinedPoint = `epubcfi(${deepJoinedInner})`
 
-    // 去重并返回
-    return Array.from(new Set([joinedPoint, baseStart, original]))
+    // 候选 3：如果是在 init 时生成的全局路径，可能需要保留（作为最后的尝试）
+    const original = wrapped
+
+    // 🎯 只返回不带逗号的拼接 Point CFI 变体作为高优候选
+    return Array.from(new Set([joinedPoint, deepJoinedPoint, original]))
   }
 
   const candidates = buildCfiCandidates(cfi)
@@ -992,8 +1014,6 @@ const goToCfi = async (cfi: string, chapterIndex?: number) => {
   let targetCfi = candidates[0]
 
   // 🎯 核心修复：防止注释层干扰跳转
-  // 日志显示 current 位置指向了 [neat-reader-annotation-overlay]
-  // 我们需要在跳转前暂时“卸载”注释层
   const clearOverlays = () => {
     annotationOverlayers.value.forEach(overlayer => {
       if (overlayer.element?.parentNode) {
@@ -1002,7 +1022,7 @@ const goToCfi = async (cfi: string, chapterIndex?: number) => {
     })
   }
 
-  console.log('📍 [Foliate] 开始精准跳转流程:', targetCfi)
+  console.log('📍 [Foliate] 开始精准跳转流程:', { targetCfi, candidates })
 
   try {
     // 1. 暂时清理干扰元素
@@ -1013,7 +1033,7 @@ const goToCfi = async (cfi: string, chapterIndex?: number) => {
     if (needsContextSwitch) {
       console.log('📍 [Foliate] 步骤1: 切换章节上下文:', chapterIndex)
       await view.value.goTo(chapterIndex)
-      // 等待章节加载完成的信号
+      // 等待章节加载完成
       await new Promise(resolve => {
         const checkLoad = () => {
           if (loadedDocs.value.has(chapterIndex)) resolve(true)
@@ -1024,65 +1044,58 @@ const goToCfi = async (cfi: string, chapterIndex?: number) => {
     }
 
     // 3. 执行精准跳转
-    console.log('📍 [Foliate] 步骤2: 执行精准定位')
-    // 再次清理，确保万无一失
-    clearOverlays()
+    console.log('📍 [Foliate] 步骤2: 执行候选定位尝试')
+    clearOverlays() 
     
-    // 🎯 核心修复：针对不同形态 CFI，依次尝试候选，直到 Foliate 可以解析
     let resolved = false
     let lastError: unknown = null
     for (const c of candidates) {
       try {
-        targetCfi = c
+        console.log('🧪 [Foliate] 尝试候选 CFI:', c)
         await view.value.goTo(c)
         resolved = true
+        targetCfi = c
         break
       } catch (e) {
         lastError = e
+        console.warn(`⚠️ [Foliate] 候选 CFI 跳转失败 (${c}):`, e instanceof Error ? e.message : '解析异常')
       }
     }
+
     if (!resolved) {
-      console.error('❌ [Foliate] 无法解析任何 CFI 候选:', { candidates, lastError })
+      console.error('❌ [Foliate] 无法解析任何 CFI 候选，尝试进度百分比补救')
+      // 最后的补救：如果已知进度，尝试 goToFraction (这通常比跳章节开头要准)
+      if (props.initialProgress && props.initialProgress > 0) {
+        await view.value.goToFraction(props.initialProgress / 100)
+      }
     }
     
     // 4. 跳转后校准与恢复
     setTimeout(async () => {
       const currentLoc = view.value.lastLocation
-      console.log('🔄 [Foliate] 跳转校验，当前位置:', currentLoc?.cfi)
+      console.log('🔄 [Foliate] 跳转校验，最终位置:', currentLoc?.cfi)
       
-      // 🎯 关键判定：如果跳转后的位置包含 overlay 干扰，或者 cfi 层级不匹配，执行二次强跳
       const hasOverlayInterference = currentLoc?.cfi?.includes('neat-reader-annotation-overlay')
-      const isCfiMismatched = targetCfi.includes('!') && !currentLoc?.cfi?.includes('!')
-      
-      if (hasOverlayInterference || isCfiMismatched) {
-        console.warn('⚠️ [Foliate] 检测到跳转偏差或干扰，执行二次强跳校准')
-        // 彻底清理并强跳
+      if (hasOverlayInterference) {
+        console.warn('⚠️ [Foliate] 检测到位置被干扰，执行二次强跳校准')
         clearOverlays()
-        // 二次强跳也按候选再试一次，避免单个候选不可解析
-        for (const c of candidates) {
-          try {
-            targetCfi = c
-            await view.value.goTo(c)
-            break
-          } catch { }
-        }
+        await view.value.goTo(targetCfi).catch(() => {})
       }
       
-      // 最终同步与恢复
-      const finalLoc = view.value.lastLocation
-      if (finalLoc) {
-        handleRelocate(finalLoc)
-        rebuildAllAnnotationOverlays()
-
-        // 强制触发渲染器重排
+      if (view.value.lastLocation) {
+        handleRelocate(view.value.lastLocation)
+        // 恢复注释层（只针对当前章节）
+        const rebuildIndex = chapterIndex ?? currentChapterIndex.value
+        scheduleRebuildAnnotationOverlay(rebuildIndex, 100)
+        
         if (view.value.renderer?.render) {
           view.value.renderer.render()
         }
       }
-    }, 400) // 延迟确保布局稳定
+    }, 400)
   } catch (err) {
-    console.error('❌ [Foliate] 精准跳转失败:', err)
-    rebuildAllAnnotationOverlays() // 失败也要恢复
+    console.error('❌ [Foliate] 精准跳转流程崩溃:', err)
+    rebuildAllAnnotationOverlays() 
     if (chapterIndex !== undefined) await goToChapter(chapterIndex)
   }
 }
