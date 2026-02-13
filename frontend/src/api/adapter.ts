@@ -59,6 +59,11 @@ export const api = {
     return result
   },
 
+  async deleteFile(accessToken: string, filePaths: string[]): Promise<any> {
+    const result = await baiduApi.deleteFile(accessToken, filePaths)
+    return result
+  },
+
   // 文件系统 API (通过 Electron)
   async openDirectory(): Promise<string> {
     if (!isElectron()) {

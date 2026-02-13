@@ -715,18 +715,76 @@ export const useEbookStore = defineStore('ebook', () => {
     }
   };
 
-  const removeBook = async (bookId: string, storageType?: 'local' | 'baidupan') => {
+  const removeBook = async (bookId: string, storageType?: 'local' | 'baidupan' | 'synced', deleteFromCloud: boolean = true) => {
     try {
       // 1. 找到索引
       const index = books.value.findIndex(book => book.id === bookId);
       if (index === -1) return false;
 
-      const actualStorageType = storageType || books.value[index].storageType;
+      const book = books.value[index];
+      const actualStorageType = storageType || book.storageType;
 
-      // 2. 使用 splice 显式触发 Vue 响应式（更稳健）
-      books.value.splice(index, 1);
+      // 2. 如果是云端书籍（baidupan 或 synced）且需要删除云端文件
+      const isCloudBook = actualStorageType === 'baidupan' || actualStorageType === 'synced';
+      if (isCloudBook && book.baidupanPath && deleteFromCloud) {
+        try {
+          // 确保令牌有效
+          if (!(await ensureBaidupanToken())) {
+            console.warn('百度网盘令牌无效，仅删除本地记录');
+          } else {
+            const filesToDelete: string[] = [];
+            
+            // 1. 添加书籍文件本身
+            filesToDelete.push(book.baidupanPath);
+            
+            // 2. 添加阅读进度文件
+            const progressPath = `/apps/Neat Reader/sync/progress/${book.id}.json`;
+            filesToDelete.push(progressPath);
+            
+            // 批量删除文件
+            try {
+              await api.deleteFile(
+                userConfig.value.storage.baidupan!.accessToken,
+                filesToDelete
+              );
+              console.log('云端文件删除成功:', filesToDelete);
+            } catch (error) {
+              console.error('删除云端文件失败:', error);
+            }
+            
+            // 3. 更新 books.json（从列表中移除该书籍）
+            try {
+              // 先删除本地记录（这样 books.value 就不包含被删除的书籍了）
+              const indexBeforeSync = books.value.findIndex(b => b.id === bookId);
+              if (indexBeforeSync !== -1) {
+                books.value.splice(indexBeforeSync, 1);
+              }
+              
+              // 重新上传 books.json
+              const booksData = {
+                books: books.value,
+                categories: categories.value,
+                lastSync: Date.now(),
+                deviceId: deviceInfo.value.id,
+                deviceName: deviceInfo.value.name
+              };
+              const booksFile = new File([JSON.stringify(booksData)], 'books.json', { type: 'application/json' });
+              await uploadToBaidupanNew(booksFile, '/sync');
+              console.log('云端书籍列表已更新');
+            } catch (error) {
+              console.error('更新云端书籍列表失败:', error);
+            }
+          }
+        } catch (error) {
+          console.error('删除云端文件失败:', error);
+          // 即使云端删除失败，也继续删除本地记录
+        }
+      } else {
+        // 3. 本地书籍或仅删除本地记录：使用 splice 显式触发 Vue 响应式
+        books.value.splice(index, 1);
+      }
       
-      // 3. 异步执行持久化清理，不阻塞 UI 响应
+      // 4. 异步执行持久化清理，不阻塞 UI 响应
       saveBooks(); 
 
       if (actualStorageType === 'local') {
@@ -1012,7 +1070,7 @@ export const useEbookStore = defineStore('ebook', () => {
       const { accessToken } = userConfig.value.storage.baidupan;
       
       // 构建路径，直接使用相对路径，服务器端会添加/apps/网盘前缀
-      const relativePath = path ? path.replace(/^\/+|\/+$/g, '') : '';
+      // const relativePath = path ? path.replace(/^\/+|\/+$/g, '') : '';
 
       // console.log('准备上传文件到Go服务器:', {
       //   fileName: file.name,
@@ -1199,13 +1257,24 @@ export const useEbookStore = defineStore('ebook', () => {
         return null;
       }
       
-      // 查找目标文件
-      const targetFile = fileListData.list.find((file: any) => 
-        file.server_filename === fileName && !file.isdir
-      );
+      // 打印文件列表中的所有文件名，用于调试
+      console.log('文件列表中的所有文件名:', fileListData.list.map((f: any) => f.server_filename));
+      
+      // 查找目标文件（不区分大小写，去除空格）
+      const normalizedFileName = fileName.toLowerCase().trim();
+      const targetFile = fileListData.list.find((file: any) => {
+        const normalizedServerName = (file.server_filename || '').toLowerCase().trim();
+        return normalizedServerName === normalizedFileName && !file.isdir;
+      });
       
       if (!targetFile) {
         console.log('未找到文件:', fileName);
+        console.log('期望的文件名:', normalizedFileName);
+        console.log('文件列表:', fileListData.list.map((f: any) => ({
+          name: f.server_filename,
+          normalized: (f.server_filename || '').toLowerCase().trim(),
+          isdir: f.isdir
+        })));
         return null;
       }
       
@@ -1251,8 +1320,8 @@ export const useEbookStore = defineStore('ebook', () => {
       
       const { accessToken } = userConfig.value.storage.baidupan;
       
-      // 从完整路径中提取文件名（去除前导斜杠）
-      const fileName = path.replace(/^.*\//, '').replace(/^\//, '');
+      // 从完整路径中提取文件名
+      const fileName = path.split('/').filter(p => p).pop() || '';
       console.log('下载文件 - 原始路径:', path, '提取的文件名:', fileName);
       
       // 固定在 /apps/Neat Reader 目录下搜索
@@ -1281,10 +1350,23 @@ export const useEbookStore = defineStore('ebook', () => {
         return false;
       }
       
-      // 在文件列表中查找匹配的文件
-      const targetFile = fileListData.list.find((file: any) => file.server_filename === fileName);
+      // 打印文件列表中的所有文件名，用于调试
+      console.log('文件列表中的所有文件名:', fileListData.list.map((f: any) => f.server_filename));
+      
+      // 在文件列表中查找匹配的文件（不区分大小写，去除空格）
+      const normalizedFileName = fileName.toLowerCase().trim();
+      const targetFile = fileListData.list.find((file: any) => {
+        const normalizedServerName = (file.server_filename || '').toLowerCase().trim();
+        return normalizedServerName === normalizedFileName;
+      });
+      
       if (!targetFile) {
-        console.error('未找到目标文件:', fileName, '文件列表:', fileListData.list);
+        console.error('未找到目标文件:', fileName);
+        console.error('期望的文件名:', normalizedFileName);
+        console.error('文件列表:', fileListData.list.map((f: any) => ({
+          name: f.server_filename,
+          normalized: (f.server_filename || '').toLowerCase().trim()
+        })));
         return false;
       }
       
@@ -1449,63 +1531,88 @@ export const useEbookStore = defineStore('ebook', () => {
       const data = result;
       // console.log('百度网盘文件列表:', data);
       
-      if (data.list && Array.isArray(data.list) && data.list.length > 0) {
-        for (const fileInfo of data.list) {
-          if (fileInfo.isdir) continue;
-          if (!fileInfo.server_filename) continue;
-          
-          const ext = fileInfo.server_filename.split('.').pop()?.toLowerCase();
-          if (!['epub', 'pdf', 'txt'].includes(ext || '')) continue;
-          
-          const title = fileInfo.server_filename.replace(`.${ext}`, '');
-          const cloudPath = fileInfo.path || '';
-          
-          const normalizeTitle = (t: string): string => {
-            return t.toLowerCase()
-              .replace(/[_\s\-]+/g, '') // 移除下划线、空格、连字符
-              .replace(/[^\w\u4e00-\u9fa5]/g, '') // 移除特殊字符，保留中文和英文
-              .trim();
-          };
-          
-          const normalizedTitle = normalizeTitle(title);
-          
-          // 优先基于 baidupanPath 去重
-          const existingByPath = books.value.find(book => 
-            book.baidupanPath === cloudPath
-          );
-          
-          // 如果没有找到相同路径，检查是否有相同书名的已下载书籍（synced 或 local）
-          let existingBook = existingByPath;
-          if (!existingBook) {
-            existingBook = books.value.find(book => 
-              normalizeTitle(book.title) === normalizedTitle && 
-              (book.storageType === 'synced' || book.storageType === 'local')
-            );
-          }
-          
-          if (!existingBook) {
-            // 没有找到相同的书，创建新的云端书籍
-            const newBook: EbookMetadata = {
-              id: `baidupan_${fileInfo.fs_id || Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-              title: fileInfo.server_filename.replace(`.${ext}`, ''),
-              author: '未知作者',
-              cover: '',
-              path: fileInfo.path || '',
-              format: ext || 'txt',
-              size: fileInfo.size || 0,
-              lastRead: Date.now(),
-              totalChapters: 0,
-              readingProgress: 0,
-              storageType: 'baidupan',
-              baidupanPath: fileInfo.path || '',
-              addedAt: Date.now()
+      if (data.list && Array.isArray(data.list)) {
+        // 创建云端文件路径集合，用于验证本地书籍是否仍存在于云端
+        const cloudFilePaths = new Set<string>();
+        
+        if (data.list.length > 0) {
+          for (const fileInfo of data.list) {
+            if (fileInfo.isdir) continue;
+            if (!fileInfo.server_filename) continue;
+            
+            const ext = fileInfo.server_filename.split('.').pop()?.toLowerCase();
+            if (!['epub', 'pdf', 'txt'].includes(ext || '')) continue;
+            
+            const title = fileInfo.server_filename.replace(`.${ext}`, '');
+            const cloudPath = fileInfo.path || '';
+            
+            // 记录云端文件路径
+            cloudFilePaths.add(cloudPath);
+            
+            const normalizeTitle = (t: string): string => {
+              return t.toLowerCase()
+                .replace(/[_\s\-]+/g, '') // 移除下划线、空格、连字符
+                .replace(/[^\w\u4e00-\u9fa5]/g, '') // 移除特殊字符，保留中文和英文
+                .trim();
             };
             
-            books.value.push(newBook);
-            console.log('添加云端书籍:', newBook.title);
-          } else {
-            // console.log('跳过已存在的书籍:', title, '存储类型:', existingBook.storageType);
+            const normalizedTitle = normalizeTitle(title);
+            
+            // 优先基于 baidupanPath 去重
+            const existingByPath = books.value.find(book => 
+              book.baidupanPath === cloudPath
+            );
+            
+            // 如果没有找到相同路径，检查是否有相同书名的已下载书籍（synced 或 local）
+            let existingBook = existingByPath;
+            if (!existingBook) {
+              existingBook = books.value.find(book => 
+                normalizeTitle(book.title) === normalizedTitle && 
+                (book.storageType === 'synced' || book.storageType === 'local')
+              );
+            }
+            
+            if (!existingBook) {
+              // 没有找到相同的书，创建新的云端书籍
+              const newBook: EbookMetadata = {
+                id: `baidupan_${fileInfo.fs_id || Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                title: fileInfo.server_filename.replace(`.${ext}`, ''),
+                author: '未知作者',
+                cover: '',
+                path: fileInfo.path || '',
+                format: ext || 'txt',
+                size: fileInfo.size || 0,
+                lastRead: Date.now(),
+                totalChapters: 0,
+                readingProgress: 0,
+                storageType: 'baidupan',
+                baidupanPath: fileInfo.path || '',
+                addedAt: Date.now()
+              };
+              
+              books.value.push(newBook);
+              console.log('添加云端书籍:', newBook.title);
+            } else {
+              // console.log('跳过已存在的书籍:', title, '存储类型:', existingBook.storageType);
+            }
           }
+        }
+        
+        // 清理已经不存在于云端的纯云端书籍（storageType === 'baidupan'）
+        const booksToRemove: string[] = [];
+        for (const book of books.value) {
+          if (book.storageType === 'baidupan' && book.baidupanPath) {
+            if (!cloudFilePaths.has(book.baidupanPath)) {
+              booksToRemove.push(book.id);
+              console.log('云端文件已删除，移除书籍:', book.title, '路径:', book.baidupanPath);
+            }
+          }
+        }
+        
+        // 批量删除不存在的书籍
+        if (booksToRemove.length > 0) {
+          books.value = books.value.filter(book => !booksToRemove.includes(book.id));
+          console.log(`已清理 ${booksToRemove.length} 本云端已删除的书籍`);
         }
         
         await saveBooks();

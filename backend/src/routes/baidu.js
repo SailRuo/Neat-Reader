@@ -221,4 +221,16 @@ router.post('/upload', async (req, res) => {
   }
 })
 
+// 删除文件
+router.post('/delete', async (req, res) => {
+  try {
+    const { accessToken, filePaths } = req.body
+    const result = await baiduService.deleteFile(accessToken, filePaths)
+    res.json(result)
+  } catch (error) {
+    logger.error('[API] 删除文件失败:', error.message)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 module.exports = router

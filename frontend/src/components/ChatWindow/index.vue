@@ -173,6 +173,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:visible': [value: boolean]
+  'navigate-to-settings': []
 }>()
 
 const router = useRouter()
@@ -303,7 +304,8 @@ const close = () => {
 // 前往设置页面
 const goToSettings = () => {
   close()
-  router.push('/settings')
+  // 触发自定义事件，让父组件（Home）切换到设置面板
+  emit('navigate-to-settings')
 }
 
 // 格式化时间

@@ -73,7 +73,7 @@
               v-for="note in notes"
               :key="note.id"
               class="note-item"
-              @click="$emit('navigate', { cfi: note.cfi })"
+              @click="$emit('navigate', { cfi: note.cfi, chapterIndex: note.chapterIndex })"
             >
               <div class="note-header">
                 <span class="note-chapter">{{ note.chapter }}</span>
@@ -254,7 +254,7 @@ onMounted(() => {
   console.log('  - type:', props.type)
   console.log('  - tts 实例:', props.tts ? '存在' : '不存在')
   console.log('  - currentPageText 长度:', props.currentPageText?.length || 0)
-  console.log('  - currentPageText 前50字:', props.currentPageText?.substring(0, 50))
+  //console.log('  - currentPageText 前50字:', props.currentPageText?.substring(0, 50))
 })
 
 const title = computed(() => {

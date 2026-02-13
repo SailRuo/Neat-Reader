@@ -19,7 +19,9 @@
             <div class="header-actions">
               <button class="action-btn" @click="handleExport" title="导出对话">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M12 5v14M5 12h14"/>
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
                 </svg>
               </button>
               <button class="action-btn" @click="handleClearHistory" title="清空对话">
@@ -132,6 +134,27 @@
               </button>
             </div>
             <div class="reference-content">{{ currentSelectedText }}</div>
+            
+            <!-- AI生成的提示词建议 -->
+            <div v-if="suggestedPrompts.length > 0 || isGeneratingPrompts" class="prompt-suggestions">
+              <div v-if="isGeneratingPrompts" class="suggestions-loading">
+                <div class="loading-spinner"></div>
+                <span>AI 正在生成提示词建议...</span>
+              </div>
+              <div v-else class="suggestions-list">
+                <button
+                  v-for="(prompt, index) in suggestedPrompts"
+                  :key="index"
+                  class="suggestion-btn"
+                  @click="useSuggestedPrompt(prompt)"
+                >
+                  <svg class="suggestion-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 18l6-6-6-6"/>
+                  </svg>
+                  {{ prompt }}
+                </button>
+              </div>
+            </div>
           </div>
 
           <!-- 输入框 -->
@@ -191,6 +214,8 @@ const isLoading = ref(false)
 const messagesRef = ref<HTMLElement | null>(null)
 const inputRef = ref<HTMLTextAreaElement | null>(null)
 const currentSelectedText = ref('') // 当前选中的文本（显示在输入框上方）
+const suggestedPrompts = ref<string[]>([]) // AI生成的提示词建议
+const isGeneratingPrompts = ref(false) // 是否正在生成提示词
 
 // 获取当前书籍的对话历史
 const conversation = computed(() => ebookStore.getAIConversation(props.bookId))
@@ -482,6 +507,95 @@ const handleShiftEnter = (e: KeyboardEvent) => {
 // 清空选中文本
 const clearSelectedText = () => {
   currentSelectedText.value = ''
+  suggestedPrompts.value = []
+}
+
+// 生成提示词建议
+const generatePromptSuggestions = async (selectedText: string) => {
+  if (!selectedText || isGeneratingPrompts.value) return
+  
+  isGeneratingPrompts.value = true
+  suggestedPrompts.value = []
+  
+  try {
+    const accessToken = qwenTokenManager.getAccessToken()
+    const resourceUrl = qwenTokenManager.getResourceUrl()
+    
+    if (!accessToken || qwenTokenManager.isTokenExpired()) {
+      console.warn('⚠️ [AI] Token 无效，跳过生成提示词')
+      // 使用默认提示词
+      suggestedPrompts.value = [
+        '请解释这段话的含义',
+        '这段内容的背景是什么？',
+        '总结这段话的要点'
+      ]
+      return
+    }
+    
+    const prompt = `用户选中了以下文本：
+"${selectedText.substring(0, 200)}"
+
+请生成3个简短的提示词（每个不超过15字），帮助用户更好地理解这段文本。
+要求：
+1. 每个提示词一行
+2. 直接输出提示词，不要编号
+3. 提示词要具体、实用
+4. 不要有多余的解释
+
+示例格式：
+解释这段话的核心观点
+分析作者的写作手法
+这段话的历史背景`
+    
+    let response = ''
+    await chatStream(
+      accessToken,
+      prompt,
+      resourceUrl || '',
+      undefined,
+      (chunk) => {
+        response += chunk
+      }
+    )
+    
+    // 解析响应，提取提示词
+    const lines = response.split('\n')
+      .map(line => line.trim())
+      .filter(line => line && !line.match(/^[\d\.\-\*]+/) && line.length > 3 && line.length < 50)
+      .slice(0, 3)
+    
+    if (lines.length > 0) {
+      suggestedPrompts.value = lines
+    } else {
+      // 如果解析失败，使用默认提示词
+      suggestedPrompts.value = [
+        '请解释这段话的含义',
+        '这段内容的背景是什么？',
+        '总结这段话的要点'
+      ]
+    }
+    
+    console.log('✅ [AI] 生成提示词建议:', suggestedPrompts.value)
+  } catch (error) {
+    console.error('❌ [AI] 生成提示词失败:', error)
+    // 使用默认提示词
+    suggestedPrompts.value = [
+      '请解释这段话的含义',
+      '这段内容的背景是什么？',
+      '总结这段话的要点'
+    ]
+  } finally {
+    isGeneratingPrompts.value = false
+  }
+}
+
+// 使用建议的提示词
+const useSuggestedPrompt = (prompt: string) => {
+  inputText.value = prompt
+  nextTick(() => {
+    autoResize()
+    inputRef.value?.focus()
+  })
 }
 
 // 管理折叠/展开状态（使用 timestamp 作为 key）
@@ -504,12 +618,10 @@ const toggleExpand = (message: any) => {
   expandedMap[key] = !expandedMap[key]
 }
 
-// 清空对话历史
+// 清空对话历史（直接清空，不弹窗确认）
 const handleClearHistory = async () => {
-  if (confirm('确定要清空当前书籍的对话历史吗？')) {
-    await ebookStore.clearAIConversation(props.bookId)
-    console.log('🗑️ [AI] 已清空对话历史')
-  }
+  await ebookStore.clearAIConversation(props.bookId)
+  console.log('🗑️ [AI] 已清空对话历史')
 }
 
 // 关闭面板
@@ -523,9 +635,11 @@ watch(() => props.isOpen, async (newVal) => {
   if (newVal) {
     await nextTick()
     
-    // 如果有选中文本，显示在输入框上方
+    // 如果有选中文本，显示在输入框上方并生成提示词建议
     if (props.selectedText) {
       currentSelectedText.value = props.selectedText
+      // 异步生成提示词建议
+      generatePromptSuggestions(props.selectedText)
     }
     
     inputRef.value?.focus()
@@ -550,6 +664,8 @@ const handleEscKey = (e: KeyboardEvent) => {
 watch(() => props.selectedText, (newText) => {
   if (newText && props.isOpen) {
     currentSelectedText.value = newText
+    // 生成新的提示词建议
+    generatePromptSuggestions(newText)
   }
 })
 </script>
@@ -1643,6 +1759,99 @@ watch(() => props.selectedText, (newText) => {
 .theme-green .reference-content {
   background: #f1f8f4;
   color: #1b4d2e;
+}
+
+/* 提示词建议 */
+.prompt-suggestions {
+  margin-top: 12px;
+  animation: fadeIn 0.3s ease;
+}
+
+.suggestions-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #64748B;
+}
+
+.loading-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(74, 144, 226, 0.2);
+  border-top-color: #4a90e2;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.suggestions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.suggestion-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: white;
+  border: 1px solid rgba(74, 144, 226, 0.3);
+  border-radius: 8px;
+  font-size: 13px;
+  color: #4a90e2;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  text-align: left;
+  font-weight: 500;
+}
+
+.suggestion-btn:hover {
+  background: rgba(74, 144, 226, 0.08);
+  border-color: #4a90e2;
+  transform: translateX(4px);
+  box-shadow: 0 2px 8px rgba(74, 144, 226, 0.15);
+}
+
+.suggestion-btn:active {
+  transform: translateX(2px);
+}
+
+.suggestion-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  transition: transform 0.2s;
+}
+
+.suggestion-btn:hover .suggestion-icon {
+  transform: translateX(2px);
+}
+
+.theme-dark .suggestion-btn {
+  background: #2a2a2a;
+  border-color: rgba(74, 144, 226, 0.4);
+  color: #6AA9F4;
+}
+
+.theme-dark .suggestion-btn:hover {
+  background: rgba(74, 144, 226, 0.15);
+  border-color: #6AA9F4;
+}
+
+.theme-sepia .suggestion-btn {
+  background: #f9f5eb;
+  color: #4a90e2;
+}
+
+.theme-green .suggestion-btn {
+  background: #f1f8f4;
+  color: #2e7d5e;
 }
 
 /* 输入框 */

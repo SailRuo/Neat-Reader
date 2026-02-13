@@ -87,5 +87,10 @@ export const baiduApi = {
   // 上传文件
   async uploadFile(fileName: string, fileData: number[], accessToken: string) {
     return client.post('/baidu/upload', { fileName, fileData, accessToken })
+  },
+  
+  // 删除文件（使用文件路径）
+  async deleteFile(accessToken: string, filePaths: string[]) {
+    return client.post('/baidu/delete', { accessToken, filePaths })
   }
 }

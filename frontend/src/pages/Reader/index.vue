@@ -250,6 +250,8 @@ const showSelectionMenu = ref(false)
 const selectedText = ref('')
 const selectionPosition = ref({ x: 0, y: 0 })
 const selectedCfi = ref('')
+const selectedChapterIndex = ref(0)
+const selectedChapterTitle = ref('')
 const selectedTextForAI = ref('') // 传递给 AI 的选中文本
 const selectedAnnotationColor = ref('#FBBF24')
 
@@ -336,8 +338,8 @@ const sidebarNotes = computed(() => {
     .map(a => ({
       id: a.id,
       cfi: a.cfi,
-      chapterIndex: a.chapterIndex, // 🎯 传入章节索引用于跳转兜底
-      chapter: a.chapterTitle || `第 ${((a.chapterIndex ?? 0) + 1)} 章`,
+      chapterIndex: a.chapterIndex, // 🎯 直接使用保存的章节索引（可能是 undefined）
+      chapter: a.chapterTitle || (a.chapterIndex !== undefined ? `第 ${a.chapterIndex + 1} 章` : '未知章节'),
       text: a.text,
       content: a.type === 'underline' ? '下划线' : (a.note || ''),
       color: a.color,
@@ -463,18 +465,23 @@ const handleKeyDown = (e: KeyboardEvent) => {
 
 // 导航
 const handleNavigate = (data: any) => {
+  console.log('🎯 [Reader] handleNavigate 被调用:', data)
   const reader = book.value?.format === 'epub' ? foliateReaderRef.value : pdfReaderRef.value
   
   if (data.cfi) {
+    console.log('📍 [Reader] 准备跳转到 CFI:', data.cfi, '章节索引:', data.chapterIndex)
     if (reader && reader.goToCfi) {
       // 🎯 修复：增加 chapterIndex 兜底，防止 CFI 失效导致无法跳转
       reader.goToCfi(data.cfi, data.chapterIndex)
+    } else {
+      console.warn('⚠️ [Reader] reader 或 goToCfi 方法不存在')
     }
     activeSidebar.value = null
     return
   }
 
   if (data.index !== undefined) {
+    console.log('📍 [Reader] 准备跳转到章节:', data.index)
     // 导航到章节
     if (reader && reader.goToChapter) {
       reader.goToChapter(data.index)
@@ -485,11 +492,16 @@ const handleNavigate = (data: any) => {
 }
 
 // 处理文本选择
-const handleTextSelected = (data: { text: string; position: { x: number; y: number }; cfi?: string }) => {
+const handleTextSelected = (data: { text: string; position: { x: number; y: number }; cfi?: string; chapterIndex?: number; chapterTitle?: string }) => {
   selectedText.value = data.text
   selectionPosition.value = data.position
   selectedCfi.value = data.cfi || ''
+  selectedChapterIndex.value = data.chapterIndex ?? 0
+  selectedChapterTitle.value = data.chapterTitle || ''
   showSelectionMenu.value = true
+  
+  // 🎯 传递章节信息给注释系统
+  console.log('📍 [Reader] 文本选择包含章节信息:', selectedChapterIndex.value, selectedChapterTitle.value)
 }
 
 // 处理 AI 对话
@@ -508,32 +520,32 @@ const handleAskAI = (text: string) => {
 
 // 处理创建下划线
 const handleCreateUnderline = async () => {
-  console.log(' [注释] 创建下划线')
+  console.log('🎯 [注释] 创建下划线')
   try {
     handleTextSelection({
       text: selectedText.value,
       cfi: selectedCfi.value,
-      chapterIndex: currentChapterIndex.value,
-      chapterTitle: currentChapterTitle.value,
+      chapterIndex: selectedChapterIndex.value,
+      chapterTitle: selectedChapterTitle.value,
       position: selectionPosition.value,
     })
 
     const created = await createUnderline(selectedAnnotationColor.value)
     showSelectionMenu.value = false
-    if (created) console.log(' 下划线创建成功')
+    if (created) console.log('✅ 下划线创建成功')
   } catch (error) {
-    console.error(' 创建下划线失败:', error)
+    console.error('❌ 创建下划线失败:', error)
   }
 }
 
 // 处理创建笔记
 const handleCreateNote = () => {
-  console.log(' [注释] 打开笔记对话框')
+  console.log('🎯 [注释] 打开笔记对话框')
   handleTextSelection({
     text: selectedText.value,
     cfi: selectedCfi.value,
-    chapterIndex: currentChapterIndex.value,
-    chapterTitle: currentChapterTitle.value,
+    chapterIndex: selectedChapterIndex.value,
+    chapterTitle: selectedChapterTitle.value,
     position: selectionPosition.value,
   })
   

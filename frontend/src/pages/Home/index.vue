@@ -98,8 +98,8 @@
 
         <!-- 右侧内容区：书籍列表 -->
         <section class="content">
-          <!-- 内容头部 -->
-          <div class="content-header" v-if="selectedCategory !== 'settings'">
+          <!-- 固定的内容头部 -->
+          <div class="content-header-fixed" v-if="selectedCategory !== 'settings'">
             <div class="section-info">
               <h2 class="section-title">
                 {{ selectedCategory === 'all' ? '我的书架' : getCategoryName(selectedCategory) }}
@@ -117,7 +117,6 @@
                     v-model="searchKeyword" 
                     placeholder="搜索书名、作者..." 
                     class="search-input"
-                    @keyup.enter="performSearch"
                   />
                   <button 
                     v-if="searchKeyword" 
@@ -150,53 +149,29 @@
             </div>
           </div>
 
-          <!-- 搜索结果提示 -->
-          <div v-if="isSearching && selectedCategory !== 'settings'" class="search-loading">
-            <div class="loading-spinner"></div>
-            <p>正在搜索...</p>
-          </div>
-
-          <div v-else-if="searchResults.length > 0 && searchKeyword && selectedCategory !== 'settings'" class="search-results-info">
-            <div class="search-info-content">
-              <Icons.SearchCheck :size="24" class="search-info-icon" />
-              <div class="search-info-text">
-                <h3>搜索结果</h3>
-                <p>找到 {{ searchResults.length }} 个结果，关键词: {{ searchKeyword }}</p>
-              </div>
-              <button class="clear-search-btn" @click="clearSearch">
-                <Icons.X :size="16" />
-              </button>
+          <!-- 可滚动的内容区域 -->
+          <div class="content-scrollable" v-if="selectedCategory !== 'settings'">
+            <!-- 搜索结果提示 -->
+            <div v-if="isSearching" class="search-loading">
+              <div class="loading-spinner"></div>
+              <p>正在搜索...</p>
             </div>
-          </div>
 
-          <!-- 电子书列表 -->
-          <div v-if="selectedCategory !== 'settings'">
-            <!-- 空状态 -->
-            <div v-if="displayBooks.length === 0 && !isSearching" class="empty-state">
-              <div class="empty-state-content">
-                <div class="empty-state-icon">
-                  <Icons.BookOpen :size="64" />
+            <div v-else-if="searchResults.length > 0 && searchKeyword" class="search-results-info">
+              <div class="search-info-content">
+                <Icons.SearchCheck :size="24" class="search-info-icon" />
+                <div class="search-info-text">
+                  <h3>搜索结果</h3>
+                  <p>找到 {{ searchResults.length }} 个结果，关键词: {{ searchKeyword }}</p>
                 </div>
-                <h3 class="empty-state-title">
-                  {{ searchKeyword ? '未找到相关书籍' : '还没有书籍' }}
-                </h3>
-                <p class="empty-state-description">
-                  {{ searchKeyword 
-                    ? '尝试使用不同的关键词搜索，或者添加新的书籍到您的书架' 
-                    : '开始添加您的第一本电子书，建立您的个人图书馆' 
-                  }}
-                </p>
-                <div class="empty-state-actions" v-if="!searchKeyword">
-                  <button class="btn btn-primary" @click="$router.push('/file-manager')">
-                    <Icons.Plus :size="16" />
-                    添加书籍
-                  </button>
-                </div>
+                <button class="clear-search-btn" @click="clearSearch">
+                  <Icons.X :size="16" />
+                </button>
               </div>
             </div>
 
             <!-- 书籍网格/列表 -->
-            <div v-else :class="viewMode === 'grid' ? 'books-grid' : 'books-list'">
+            <div v-if="displayBooks.length > 0" :class="viewMode === 'grid' ? 'books-grid' : 'books-list'">
               <div 
                 v-for="book in displayBooks" 
                 :key="book.id" 
@@ -226,20 +201,20 @@
                       <span class="uploading-text">上传中...</span>
                     </div>
                     
-                    <div 
-                      v-else
-                      class="book-storage-badge" 
-                      :class="{ 
-                        'local': book.storageType === 'local',
-                        'synced': book.storageType === 'synced',
-                        'baidupan': book.storageType === 'baidupan'
-                      }"
-                      @click.stop="handleStorageBadgeClick(book)"
-                      :title="getStorageBadgeTitle(book.storageType)"
-                    >
-                      <Icons.HardDrive v-if="book.storageType === 'local'" :size="14" />
-                      <Icons.Cloud v-else-if="book.storageType === 'synced'" :size="14" />
-                      <Icons.Download v-else-if="book.storageType === 'baidupan'" :size="14" />
+                    <!-- 云端未下载状态覆盖层 -->
+                    <div v-else-if="book.storageType === 'baidupan'" class="book-cloud-overlay">
+                      <div class="cloud-icon-wrapper">
+                        <Icons.CloudDownload :size="32" />
+                      </div>
+                      <span class="cloud-text">点击下载</span>
+                    </div>
+                    
+                    <!-- 本地书籍上传提示覆盖层 -->
+                    <div v-else-if="book.storageType === 'local' && isBaidupanAuthorized" class="book-upload-hint-overlay" @click.stop="handleUploadToBaidupan(book)">
+                      <div class="upload-hint-icon-wrapper">
+                        <Icons.CloudUpload :size="28" />
+                      </div>
+                      <span class="upload-hint-text">上传到云端</span>
                     </div>
                   </div>
                 </div>
@@ -268,26 +243,66 @@
               </div>
             </div>
 
-            <!-- 空状态 -->
-            <div v-if="displayBooks.length === 0 && !isSearching && selectedCategory !== 'settings'" class="empty-state">
-              <Icons.BookOpen :size="64" class="empty-icon" />
-              <h3>{{ selectedCategory === 'all' ? '书架是空的' : '该分类下没有书籍' }}</h3>
-              <p>{{ selectedCategory === 'all' ? '添加一些电子书开始阅读吧' : '点击左侧添加书籍' }}</p>
-              <button class="btn btn-primary add-books-btn" @click="triggerFileImport">
-                <Icons.Upload :size="16" />
-                添加书籍
-              </button>
-            </div>
+            <!-- 空状态 - 统一处理所有空状态 -->
+            <div v-else class="empty-state">
+              <div class="empty-state-content">
+                <!-- 搜索无结果状态 -->
+                <template v-if="searchKeyword">
+                  <div class="empty-state-illustration">
+                    <div class="illustration-circle search-circle">
+                      <Icons.SearchX :size="32" class="illustration-icon" />
+                    </div>
+                  </div>
+                  <h3 class="empty-state-title">未找到 "{{ searchKeyword }}"</h3>
+                  <p class="empty-state-description">
+                    没有找到与您搜索内容相关的书籍
+                  </p>
+                  <div class="empty-state-suggestions">
+                    <div class="suggestion-title">
+                      <Icons.Lightbulb :size="16" />
+                      <span>搜索建议</span>
+                    </div>
+                    <ul class="suggestion-list">
+                      <li>检查关键词拼写是否正确</li>
+                      <li>尝试使用更简短或更通用的关键词</li>
+                      <li>使用书名或作者名进行搜索</li>
+                    </ul>
+                  </div>
+                  <div class="empty-state-actions">
+                    <button class="btn btn-secondary btn-action" @click="clearSearch">
+                      <Icons.RotateCcw :size="16" />
+                      清除搜索
+                    </button>
+                    <button class="btn btn-primary btn-action" @click="handleAddBookFromEmpty">
+                      <Icons.Plus :size="16" />
+                      添加新书籍
+                    </button>
+                  </div>
+                </template>
 
-            <!-- 搜索无结果状态 -->
-            <div v-if="searchResults.length === 0 && searchKeyword && !isSearching && selectedCategory !== 'settings'" class="empty-state">
-              <Icons.SearchX :size="64" class="empty-icon" />
-              <h3>没有找到匹配的书籍</h3>
-              <p>尝试其他关键词或检查拼写</p>
-              <button class="btn btn-secondary" @click="clearSearch">
-                <Icons.X :size="16" />
-                清除搜索
-              </button>
+                <!-- 无书籍状态 -->
+                <template v-else>
+                  <div class="empty-state-illustration">
+                    <div class="illustration-circle book-circle">
+                      <Icons.BookOpen :size="38" class="illustration-icon" />
+                    </div>
+                    <div class="illustration-sparkles">
+                      <Icons.Sparkles :size="16" class="sparkle sparkle-1" />
+                      <Icons.Sparkles :size="12" class="sparkle sparkle-2" />
+                      <Icons.Sparkles :size="14" class="sparkle sparkle-3" />
+                    </div>
+                  </div>
+                  <h3 class="empty-state-title">
+                    {{ selectedCategory === 'all' ? '该分类暂无书籍' : '该分类暂无书籍' }}
+                  </h3>
+                  <p class="empty-state-description">
+                    {{ selectedCategory === 'all' 
+                      ? '将书籍添加到此分类，让您的书架更有条理' 
+                      : '将书籍添加到此分类，让您的书架更有条理'
+                    }}
+                  </p>
+                </template>
+              </div>
             </div>
           </div>
 
@@ -302,15 +317,41 @@
       </div>
     </main>
 
-    <!-- 底部添加按钮 -->
-    <button v-if="selectedCategory !== 'settings'" class="floating-add-btn" @click="triggerFileImport">
-      <Icons.Plus :size="24" />
-    </button>
-
-    <!-- AI 对话按钮 -->
-    <button v-if="selectedCategory !== 'settings'" class="floating-chat-btn" @click="showChatWindow = true">
-      <Icons.MessageCircle :size="24" />
-    </button>
+    <!-- 浮动操作按钮组 (Speed Dial) -->
+    <div 
+      v-if="selectedCategory !== 'settings'" 
+      class="floating-action-menu" 
+      :class="{ 'is-open': isSpeedDialOpen }"
+    >
+      <!-- 子按钮 -->
+      <div class="floating-action-items">
+        <button 
+          class="floating-action-item" 
+          @click="handleAddBook"
+          title="添加书籍"
+        >
+          <Icons.Plus :size="20" />
+          <span class="floating-action-label">添加书籍</span>
+        </button>
+        <button 
+          class="floating-action-item" 
+          @click="handleOpenChat"
+          title="AI 助手"
+        >
+          <Icons.MessageCircle :size="20" />
+          <span class="floating-action-label">AI 助手</span>
+        </button>
+      </div>
+      
+      <!-- 主按钮 -->
+      <button 
+        class="floating-action-main" 
+        @click="toggleSpeedDial"
+      >
+        <Icons.Plus :size="24" class="icon-plus" />
+        <Icons.X :size="24" class="icon-close" />
+      </button>
+    </div>
     
     <!-- 隐藏的文件输入框 -->
     <input 
@@ -322,7 +363,10 @@
     />
 
     <!-- AI 对话窗口 -->
-    <ChatWindow v-model:visible="showChatWindow" />
+    <ChatWindow 
+      v-model:visible="showChatWindow" 
+      @navigate-to-settings="handleNavigateToSettings"
+    />
 
     <!-- 分类管理对话框 -->
     <div v-if="showCategoryManage" class="dialog-overlay" @click="closeCategoryManageDialog">
@@ -364,40 +408,96 @@
 
     <!-- 添加分类对话框 -->
     <div v-if="showAddCategory" class="dialog-overlay" @click="closeAddCategoryDialog">
-      <div class="dialog-content" @click.stop>
+      <div class="dialog-content add-category-dialog" @click.stop>
         <div class="dialog-header">
-          <h3 class="dialog-title">新建分类</h3>
+          <div class="dialog-header-content">
+            <div class="dialog-icon">
+              <Icons.FolderPlus :size="24" />
+            </div>
+            <div>
+              <h3 class="dialog-title">新建分类</h3>
+              <p class="dialog-subtitle">为你的书籍创建一个新的分类</p>
+            </div>
+          </div>
           <button class="dialog-close" @click="closeAddCategoryDialog">
             <Icons.X :size="20" />
           </button>
         </div>
         <div class="dialog-body">
           <div class="form-group">
-            <label class="form-label">分类名称</label>
+            <label class="form-label">
+              <Icons.Tag :size="16" />
+              <span>分类名称</span>
+            </label>
             <input 
+              ref="categoryNameInput"
               type="text" 
               v-model="newCategoryName" 
-              placeholder="输入分类名称"
+              placeholder="例如：小说、技术、历史..."
               class="form-input"
+              maxlength="20"
               @keyup.enter="addCategory"
             />
+            <div class="form-hint">
+              <span v-if="newCategoryName.trim()" class="char-count">{{ newCategoryName.length }}/20</span>
+              <span v-else class="hint-text">最多20个字符</span>
+            </div>
           </div>
           <div class="form-group">
-            <label class="form-label">分类颜色</label>
-            <div class="color-picker-container">
-              <input 
-                type="color" 
-                v-model="newCategoryColor" 
-                class="color-picker"
-              />
-              <span class="color-preview" :style="{ backgroundColor: newCategoryColor }"></span>
-              <span class="color-value">{{ newCategoryColor }}</span>
+            <label class="form-label">
+              <Icons.Palette :size="16" />
+              <span>分类颜色</span>
+            </label>
+            <div class="color-options">
+              <button
+                v-for="color in presetColors"
+                :key="color.value"
+                class="color-option"
+                :class="{ active: newCategoryColor === color.value }"
+                :style="{ backgroundColor: color.value }"
+                :title="color.name"
+                @click="newCategoryColor = color.value"
+              >
+                <Icons.Check v-if="newCategoryColor === color.value" :size="16" class="check-icon" />
+              </button>
+              <div class="color-custom">
+                <input 
+                  type="color" 
+                  v-model="newCategoryColor" 
+                  class="color-picker-input"
+                  title="自定义颜色"
+                />
+                <span class="custom-label">自定义</span>
+              </div>
+            </div>
+          </div>
+          <div class="category-preview">
+            <label class="form-label">
+              <Icons.Eye :size="16" />
+              <span>预览效果</span>
+            </label>
+            <div class="preview-item">
+              <span class="preview-icon" :style="{ backgroundColor: newCategoryColor }">
+                <Icons.Folder :size="18" />
+              </span>
+              <span class="preview-name">{{ newCategoryName || '分类名称' }}</span>
+              <span class="preview-count">0 本书</span>
             </div>
           </div>
         </div>
         <div class="dialog-footer">
-          <button class="btn btn-secondary" @click="closeAddCategoryDialog">取消</button>
-          <button class="btn btn-primary" @click="addCategory" :disabled="!newCategoryName.trim()">创建</button>
+          <button class="btn btn-secondary" @click="closeAddCategoryDialog">
+            <Icons.X :size="16" />
+            取消
+          </button>
+          <button 
+            class="btn btn-primary" 
+            @click="addCategory" 
+            :disabled="!newCategoryName.trim()"
+          >
+            <Icons.Check :size="16" />
+            创建分类
+          </button>
         </div>
       </div>
     </div>
@@ -446,20 +546,30 @@
         </div>
       </div>
     </div>
+
+    <!-- 右键菜单 -->
+    <ContextMenu
+      :visible="contextMenuVisible"
+      :x="contextMenuX"
+      :y="contextMenuY"
+      :items="contextMenuItems"
+      @close="closeContextMenu"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, h } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import { useEbookStore } from '../../stores/ebook'
 import { useDialogStore } from '../../stores/dialog'
 import SettingsPanel from '../../components/SettingsPanel/index.vue'
 import ChatWindow from '../../components/ChatWindow/index.vue'
+import ContextMenu from '../../components/ContextMenu/index.vue'
+import type { MenuItem } from '../../components/ContextMenu/index.vue'
 import * as Icons from 'lucide-vue-next'
 import { api } from '../../api/adapter'
-import ContextMenu from '@imengyu/vue3-context-menu'
 
 // 初始化路由和状态管理
 const router = useRouter()
@@ -472,15 +582,38 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 const searchKeyword = ref('')
 const selectedCategory = ref('all')
 const showChatWindow = ref(false)
+const isSpeedDialOpen = ref(false)
 
-// 右键菜单相关 - 使用 vue3-context-menu
+// 右键菜单相关
 const selectedBook = ref<any>(null)
 const selectedCategoryForMenu = ref<any>(null)
+const contextMenuVisible = ref(false)
+const contextMenuX = ref(0)
+const contextMenuY = ref(0)
+const contextMenuItems = ref<MenuItem[]>([])
 
 // 分类对话框相关
 const showAddCategory = ref(false)
 const newCategoryName = ref('')
 const newCategoryColor = ref('#4A90E2')
+const categoryNameInput = ref<HTMLInputElement | null>(null)
+
+// 预设颜色
+const presetColors = [
+  { name: '蓝色', value: '#4A90E2' },
+  { name: '紫色', value: '#9B59B6' },
+  { name: '绿色', value: '#2ECC71' },
+  { name: '橙色', value: '#E67E22' },
+  { name: '红色', value: '#E74C3C' },
+  { name: '青色', value: '#1ABC9C' },
+  { name: '粉色', value: '#EC407A' },
+  { name: '靛蓝', value: '#5C6BC0' },
+  { name: '黄色', value: '#F39C12' },
+  { name: '深蓝', value: '#34495E' },
+  { name: '薄荷绿', value: '#16A085' },
+  { name: '珊瑚红', value: '#FF6B6B' }
+]
+
 const showCategoryManage = ref(false)
 const selectedCategoryId = ref<string>('')
 
@@ -609,9 +742,11 @@ const filteredBooks = computed(() => {
 
 // 计算属性：显示的书籍
 const displayBooks = computed(() => {
-  if (searchKeyword.value && searchResults.value.length > 0) {
+  // 如果有搜索关键词，只显示搜索结果（即使为空）
+  if (searchKeyword.value.trim()) {
     return searchResults.value
   }
+  // 否则显示过滤后的书籍
   return filteredBooks.value
 })
 
@@ -674,6 +809,31 @@ const triggerFileImport = () => {
   }
 }
 
+// 速度拨号菜单控制
+const toggleSpeedDial = () => {
+  isSpeedDialOpen.value = !isSpeedDialOpen.value
+}
+
+const handleAddBook = () => {
+  triggerFileImport()
+  isSpeedDialOpen.value = false
+}
+
+const handleOpenChat = () => {
+  showChatWindow.value = true
+  isSpeedDialOpen.value = false
+}
+
+const handleAddBookFromEmpty = () => {
+  clearSearch()
+  triggerFileImport()
+}
+
+// 处理导航到设置
+const handleNavigateToSettings = () => {
+  selectedCategory.value = 'settings'
+}
+
 // 处理文件选择
 const handleFileSelect = async (event: Event) => {
   const target = event.target as HTMLInputElement
@@ -729,75 +889,55 @@ const showContextMenu = (event: MouseEvent, book: any) => {
   selectedBook.value = book
   
   // 构建分类子菜单项
-  const categoryMenuItems = categories.value.length > 0 
+  const categoryMenuItems: MenuItem[] = categories.value.length > 0 
     ? categories.value.map(category => ({
         label: category.name,
-        icon: h('span', { 
-          class: 'category-menu-icon',
-          style: { 
-            backgroundColor: category.color + '20', 
-            color: category.color,
-            padding: '4px',
-            borderRadius: '6px',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '24px',
-            height: '24px'
-          }
-        }, [h(getCategoryIcon(category.name), { size: 16 })]),
+        icon: getCategoryIcon(category.name),
         onClick: () => quickMoveToCategory(category.id)
       }))
     : [{ label: '暂无分类', disabled: true }]
   
   // 添加"新建分类"选项
-  categoryMenuItems.push(
-    { divided: true },
-    {
-      label: '新建分类',
-      icon: h(Icons.Plus, { size: 16 }),
-      onClick: showAddCategoryFromMenu
-    }
-  )
+  categoryMenuItems.push({
+    label: '新建分类',
+    icon: Icons.Plus,
+    onClick: showAddCategoryFromMenu,
+    divided: true
+  })
   
   // 构建主菜单
-  const menuItems: any[] = [
+  const menuItems: MenuItem[] = [
     {
       label: '移动到分类',
-      icon: h(Icons.Folder, { size: 18 }),
+      icon: Icons.Folder,
       children: categoryMenuItems
-    },
-    { divided: true }
+    }
   ]
   
   // 只在本地书籍时显示上传选项
   if (book.storageType === 'local') {
-    menuItems.push(
-      {
-        label: '上传到百度网盘',
-        icon: h(Icons.UploadCloud, { size: 18 }),
-        onClick: () => handleUploadToBaidupan(book)
-      },
-      { divided: true }
-    )
+    menuItems.push({
+      label: '上传到百度网盘',
+      icon: Icons.UploadCloud,
+      onClick: () => handleUploadToBaidupan(book),
+      divided: true
+    })
   }
   
   // 删除选项
   menuItems.push({
     label: '删除书籍',
-    icon: h(Icons.Trash2, { size: 18 }),
+    icon: Icons.Trash2,
     onClick: () => handleRemoveBook(book),
-    customClass: 'danger-menu-item'
+    danger: true,
+    divided: true
   })
   
   // 显示菜单
-  ContextMenu.showContextMenu({
-    x: event.x,
-    y: event.y,
-    items: menuItems,
-    zIndex: 10000,
-    minWidth: 200
-  })
+  contextMenuX.value = event.clientX
+  contextMenuY.value = event.clientY
+  contextMenuItems.value = menuItems
+  contextMenuVisible.value = true
 }
 
 // 快捷移动到分类
@@ -826,6 +966,13 @@ const showAddCategoryFromMenu = () => {
   showAddCategoryDialog()
 }
 
+// 关闭右键菜单
+const closeContextMenu = () => {
+  contextMenuVisible.value = false
+  selectedBook.value = null
+  selectedCategoryForMenu.value = null
+}
+
 // 显示分类右键菜单
 const showCategoryContextMenu = (event: MouseEvent, category: any) => {
   event.preventDefault()
@@ -834,34 +981,29 @@ const showCategoryContextMenu = (event: MouseEvent, category: any) => {
   // 不允许删除"未分类"
   const canDelete = category.name !== '未分类'
   
-  const menuItems: any[] = [
+  const menuItems: MenuItem[] = [
     {
       label: '重命名分类',
-      icon: h(Icons.Edit, { size: 16 }),
+      icon: Icons.Edit,
       onClick: () => handleRenameCategory(category)
     }
   ]
   
   if (canDelete) {
-    menuItems.push(
-      { divided: true },
-      {
-        label: '删除分类',
-        icon: h(Icons.Trash2, { size: 16 }),
-        onClick: () => handleDeleteCategory(category),
-        customClass: 'danger-menu-item'
-      }
-    )
+    menuItems.push({
+      label: '删除分类',
+      icon: Icons.Trash2,
+      onClick: () => handleDeleteCategory(category),
+      danger: true,
+      divided: true
+    })
   }
   
   // 显示菜单
-  ContextMenu.showContextMenu({
-    x: event.x,
-    y: event.y,
-    items: menuItems,
-    zIndex: 10000,
-    minWidth: 160
-  })
+  contextMenuX.value = event.clientX
+  contextMenuY.value = event.clientY
+  contextMenuItems.value = menuItems
+  contextMenuVisible.value = true
 }
 
 // 处理重命名分类
@@ -932,32 +1074,79 @@ const handleRemoveBook = (book: any) => {
   const targetBookId = book.id
   const targetTitle = book.title
   const targetStorage = book.storageType
+  const isCloudBook = targetStorage === 'baidupan' || targetStorage === 'synced'
 
-  dialogStore.showDialog({
-    title: '确认删除',
-    message: `确定要删除《${targetTitle}》吗？`,
-    type: 'warning',
-    buttons: [
-      { text: '取消' },
-      { 
-        text: '删除', 
-        primary: true,
-        callback: async () => {
-          try {
-            const result = await ebookStore.removeBook(targetBookId, targetStorage)
-            if (result) {
-              dialogStore.showSuccessDialog('书籍删除成功')
-            } else {
-              dialogStore.showErrorDialog('删除失败', '无法删除指定书籍')
+  // 如果是云端书籍（包括 baidupan 和 synced），提供两个删除选项
+  if (isCloudBook) {
+    dialogStore.showDialog({
+      title: '删除书籍',
+      message: `《${targetTitle}》是云端书籍，请选择删除方式：`,
+      type: 'warning',
+      buttons: [
+        { text: '取消' },
+        { 
+          text: '仅删除本地', 
+          callback: async () => {
+            try {
+              const result = await ebookStore.removeBook(targetBookId, targetStorage, false)
+              if (result) {
+                dialogStore.showSuccessDialog('本地记录已删除', '云端文件保留')
+              } else {
+                dialogStore.showErrorDialog('删除失败', '无法删除指定书籍')
+              }
+            } catch (error) {
+              console.error('删除过程报错:', error)
+              dialogStore.showErrorDialog('删除失败', error instanceof Error ? error.message : String(error))
             }
-          } catch (error) {
-            console.error('删除过程报错:', error)
-            dialogStore.showErrorDialog('删除失败', error instanceof Error ? error.message : String(error))
+          }
+        },
+        { 
+          text: '删除本地和云端', 
+          primary: true,
+          callback: async () => {
+            try {
+              const result = await ebookStore.removeBook(targetBookId, targetStorage, true)
+              if (result) {
+                dialogStore.showSuccessDialog('书籍删除成功', '本地和云端文件已删除')
+              } else {
+                dialogStore.showErrorDialog('删除失败', '无法删除指定书籍')
+              }
+            } catch (error) {
+              console.error('删除过程报错:', error)
+              dialogStore.showErrorDialog('删除失败', error instanceof Error ? error.message : String(error))
+            }
           }
         }
-      }
-    ]
-  })
+      ]
+    })
+  } else {
+    // 本地书籍，直接删除
+    dialogStore.showDialog({
+      title: '确认删除',
+      message: `确定要删除《${targetTitle}》吗？`,
+      type: 'warning',
+      buttons: [
+        { text: '取消' },
+        { 
+          text: '删除', 
+          primary: true,
+          callback: async () => {
+            try {
+              const result = await ebookStore.removeBook(targetBookId, targetStorage)
+              if (result) {
+                dialogStore.showSuccessDialog('书籍删除成功')
+              } else {
+                dialogStore.showErrorDialog('删除失败', '无法删除指定书籍')
+              }
+            } catch (error) {
+              console.error('删除过程报错:', error)
+              dialogStore.showErrorDialog('删除失败', error instanceof Error ? error.message : String(error))
+            }
+          }
+        }
+      ]
+    })
+  }
   
   selectedBook.value = null
 }
@@ -999,12 +1188,18 @@ const showAddCategoryDialog = () => {
   showAddCategory.value = true
   newCategoryName.value = ''
   newCategoryColor.value = '#4A90E2'
+  
+  // 自动聚焦到输入框
+  nextTick(() => {
+    categoryNameInput.value?.focus()
+  })
 }
 
 // 关闭添加分类对话框
 const closeAddCategoryDialog = () => {
   showAddCategory.value = false
   newCategoryName.value = ''
+  newCategoryColor.value = '#4A90E2'
 }
 
 // 显示分类管理对话框
@@ -1036,7 +1231,7 @@ const addCategory = async () => {
     console.log('当前分类列表:', ebookStore.categories);
     console.log('分类数量:', ebookStore.categories.length);
     
-    dialogStore.showSuccessDialog('分类创建成功')
+    // 移除成功弹窗，直接关闭对话框
     closeAddCategoryDialog()
   } catch (error) {
     console.error('添加分类失败:', error)
@@ -1053,8 +1248,17 @@ const performSearch = async () => {
   
   isSearching.value = true
   try {
-    const results = await ebookStore.searchBooks(searchKeyword.value.trim())
-    searchResults.value = results
+    // 先获取全局搜索结果
+    const allResults = await ebookStore.searchBooks(searchKeyword.value.trim())
+    
+    // 根据当前选中的分类进行过滤
+    if (selectedCategory.value === 'all') {
+      // 全部书籍，不过滤
+      searchResults.value = allResults
+    } else {
+      // 只显示当前分类的搜索结果
+      searchResults.value = allResults.filter(book => book.categoryId === selectedCategory.value)
+    }
   } catch (error) {
     console.error('搜索失败:', error)
     dialogStore.showErrorDialog('搜索失败', error instanceof Error ? error.message : String(error))
@@ -1068,49 +1272,6 @@ const performSearch = async () => {
 const clearSearch = () => {
   searchKeyword.value = ''
   searchResults.value = []
-}
-
-// 获取存储类型标题
-const getStorageBadgeTitle = (storageType: string) => {
-  const titles: Record<string, string> = {
-    'local': '本地存储',
-    'synced': '已同步到云端',
-    'baidupan': '点击下载到本地'
-  }
-  return titles[storageType] || '未知'
-}
-
-// 处理存储徽章点击
-const handleStorageBadgeClick = async (book: any) => {
-  if (book.storageType === 'baidupan') {
-    // 云端书籍，下载到本地
-    try {
-      dialogStore.showDialog({
-        title: '正在下载',
-        message: `正在从百度网盘下载《${book.title}》...`,
-        type: 'info',
-        buttons: []
-      })
-      
-      const result = await ebookStore.downloadFromBaidupan(book.baidupanPath || book.path)
-      
-      dialogStore.closeDialog()
-      
-      if (result) {
-        dialogStore.showSuccessDialog('下载成功')
-      } else {
-        dialogStore.showErrorDialog('下载失败', '请检查网络连接或授权状态')
-      }
-    } catch (error) {
-      dialogStore.closeDialog()
-      console.error('下载失败:', error)
-      const errorMessage = error instanceof Error ? error.message : '下载失败，请重试'
-      dialogStore.showErrorDialog('下载失败', errorMessage)
-    }
-  } else if (book.storageType === 'local') {
-    // 本地书籍，上传到云端
-    await uploadToBaidupan(book)
-  }
 }
 
 // 上传到百度网盘
@@ -1302,6 +1463,34 @@ watch(
   }
 )
 
+// 监听搜索关键词变化，实时搜索（带防抖）
+let searchDebounceTimer: number | null = null
+watch(
+  searchKeyword,
+  async (newKeyword) => {
+    // 清除之前的定时器
+    if (searchDebounceTimer) {
+      clearTimeout(searchDebounceTimer)
+    }
+    
+    if (!newKeyword.trim()) {
+      // 清空搜索
+      searchResults.value = []
+      isSearching.value = false
+      return
+    }
+    
+    // 显示搜索中状态
+    isSearching.value = true
+    
+    // 防抖：300ms 后执行搜索
+    searchDebounceTimer = window.setTimeout(async () => {
+      await performSearch()
+    }, 300)
+  },
+  { immediate: false }
+)
+
 // 生命周期钩子
 onMounted(async () => {
   try {
@@ -1317,10 +1506,32 @@ onMounted(async () => {
     
     // 初始化深色模式
     initDarkMode();
+    
+    // 添加全局点击监听，点击外部关闭速度拨号菜单
+    document.addEventListener('click', handleClickOutside)
   } catch (error) {
     console.error('初始化电子书存储失败:', error);
   }
 })
+
+onUnmounted(() => {
+  // 清理全局点击监听
+  document.removeEventListener('click', handleClickOutside)
+  
+  // 清理搜索防抖定时器
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer)
+  }
+})
+
+// 点击外部关闭速度拨号菜单
+const handleClickOutside = (event: MouseEvent) => {
+  const target = event.target as HTMLElement
+  const menu = document.querySelector('.floating-action-menu')
+  if (menu && !menu.contains(target) && isSpeedDialOpen.value) {
+    isSpeedDialOpen.value = false
+  }
+}
 
 // 初始化深色模式
 const initDarkMode = () => {
@@ -1712,9 +1923,29 @@ body {
 /* 右侧内容区 */
 .content {
   flex: 1;
-  padding: 2rem;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: linear-gradient(135deg, #FFFFFF, #F8FAFC);
+}
+
+/* 固定的内容头部 */
+.content-header-fixed {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 2rem 2rem 1rem;
+  border-bottom: 1px solid rgba(203, 213, 225, 0.5);
+  background: linear-gradient(135deg, #FFFFFF, #F8FAFC);
+  z-index: 10;
+}
+
+/* 可滚动的内容区域 */
+.content-scrollable {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2rem;
 }
 
 .content-header {
@@ -1883,12 +2114,15 @@ body {
   font-weight: 600;
   color: var(--color-text-primary);
   margin: 0 0 0.25rem 0;
+  white-space: nowrap;
 }
 
 .search-info-text p {
   font-size: 0.875rem;
   color: var(--color-text-secondary);
   margin: 0;
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 .clear-search-btn {
@@ -1911,19 +2145,118 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 400px;
-  padding: 2rem;
+  min-height: 450px;
+  padding: 3rem 2rem;
+  animation: fadeIn 0.4s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(15px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .empty-state-content {
   text-align: center;
-  max-width: 400px;
+  max-width: 520px;
+  width: 100%;
 }
 
-.empty-state-icon {
-  color: var(--color-text-tertiary);
+/* 插图容器 */
+.empty-state-illustration {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
   margin-bottom: 1.5rem;
-  opacity: 0.6;
+  height: 100px;
+}
+
+.illustration-circle {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  animation: float 3s ease-in-out infinite;
+  transition: all 0.3s ease;
+}
+
+.search-circle {
+  background: linear-gradient(135deg, #f59e0b 0%, #f97316 100%);
+  box-shadow: 0 8px 32px rgba(245, 158, 11, 0.2);
+}
+
+.book-circle {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  box-shadow: 0 8px 32px rgba(102, 126, 234, 0.2);
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+.illustration-icon {
+  color: white;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.12));
+}
+
+/* 闪光装饰 */
+.illustration-sparkles {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+
+.sparkle {
+  position: absolute;
+  color: #fbbf24;
+  opacity: 0;
+  animation: sparkle 2.5s ease-in-out infinite;
+}
+
+.sparkle-1 {
+  top: 8%;
+  right: 18%;
+  animation-delay: 0s;
+}
+
+.sparkle-2 {
+  bottom: 12%;
+  left: 12%;
+  animation-delay: 0.8s;
+}
+
+.sparkle-3 {
+  top: 18%;
+  left: 22%;
+  animation-delay: 1.6s;
+}
+
+@keyframes sparkle {
+  0%, 100% {
+    opacity: 0;
+    transform: scale(0) rotate(0deg);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1) rotate(180deg);
+  }
 }
 
 .empty-state-title {
@@ -1931,19 +2264,147 @@ body {
   font-weight: 600;
   color: var(--color-text-primary);
   margin: 0 0 0.75rem 0;
+  letter-spacing: -0.02em;
+  text-align: center;
+  line-height: 1.3;
 }
 
 .empty-state-description {
-  font-size: 1rem;
+  font-size: 0.9375rem;
   color: var(--color-text-secondary);
   line-height: 1.6;
-  margin: 0 0 2rem 0;
+  margin: 0 auto 2rem auto;
+  text-align: center;
+  max-width: 100%;
+}
+
+/* 搜索建议 */
+.empty-state-suggestions {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.04) 0%, rgba(249, 115, 22, 0.04) 100%);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 2rem;
+  text-align: left;
+  border: 1px solid rgba(245, 158, 11, 0.15);
+}
+
+.suggestion-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 0.875rem;
+}
+
+.suggestion-title svg {
+  color: #f59e0b;
+  flex-shrink: 0;
+}
+
+.suggestion-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.suggestion-list li {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  padding-left: 1.25rem;
+  position: relative;
+  line-height: 1.5;
+}
+
+.suggestion-list li::before {
+  content: "•";
+  position: absolute;
+  left: 0.375rem;
+  color: #f59e0b;
+  font-weight: bold;
+  font-size: 1.125rem;
+}
+
+/* 功能特性 */
+.empty-state-features {
+  display: flex;
+  justify-content: center;
+  gap: 2rem;
+  margin-bottom: 2rem;
+  flex-wrap: wrap;
+}
+
+.feature-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.625rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  transition: all 0.25s ease;
+  cursor: default;
+}
+
+.feature-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(118, 75, 162, 0.08) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #667eea;
+  transition: all 0.25s ease;
+  border: 1px solid rgba(102, 126, 234, 0.12);
+}
+
+.feature-item:hover {
+  color: var(--color-text-primary);
+}
+
+.feature-item:hover .feature-icon {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 16px rgba(102, 126, 234, 0.15);
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.12) 0%, rgba(118, 75, 162, 0.12) 100%);
+  border-color: rgba(102, 126, 234, 0.2);
 }
 
 .empty-state-actions {
   display: flex;
   justify-content: center;
-  gap: 1rem;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.btn-action {
+  padding: 0.625rem 1.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 8px;
+  transition: all 0.25s ease;
+}
+
+.btn-action:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.btn-action-large {
+  padding: 0.75rem 2rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(74, 144, 226, 0.25);
+  transition: all 0.25s ease;
+}
+
+.btn-action-large:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(74, 144, 226, 0.35);
 }
 
 .search-info-text p {
@@ -1997,8 +2458,8 @@ body {
 /* 书籍网格 */
 .books-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 1.25rem;
   margin-bottom: 2rem;
   padding: 0.5rem;
 }
@@ -2012,72 +2473,84 @@ body {
   padding: 0.5rem;
 }
 
-/* 书籍卡片 */
+/* 书籍卡片 - 基础样式 */
 .book-card {
   background: var(--color-bg-primary);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: 12px;
   overflow: hidden;
-  transition: all var(--transition-base);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   cursor: pointer;
   display: flex;
   flex-direction: column;
   height: 100%;
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   position: relative;
-  backdrop-filter: blur(8px);
 }
 
+/* Hover 状态 - 遵循 UX 最佳实践 */
 .book-card:hover {
-  transform: translateY(-4px);
-  box-shadow: var(--shadow-lg);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(74, 144, 226, 0.12);
   border-color: var(--color-primary);
   z-index: 10;
 }
 
-.books-list .book-card {
-  flex-direction: row;
-  align-items: center;
-  padding: 1rem;
-  gap: 1rem;
-  border-radius: var(--radius-lg);
+/* Focus 状态 - 键盘导航可访问性 */
+.book-card:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
+/* 列表模式卡片 */
+.books-list .book-card {
+  flex-direction: row;
+  align-items: stretch;
+  padding: 1rem;
+  gap: 1.25rem;
+}
+
+/* 封面容器 */
 .book-cover-container {
   position: relative;
   flex-shrink: 0;
+  overflow: hidden;
 }
 
+/* 网格模式封面 */
 .books-grid .book-cover-container {
   width: 100%;
   aspect-ratio: 3/4;
 }
 
+/* 列表模式封面 */
 .books-list .book-cover-container {
-  width: 64px;
-  height: 88px;
+  width: 80px;
+  height: 110px;
+  border-radius: 6px;
 }
 
+/* 封面图片 */
 .book-cover {
   width: 100%;
   height: 100%;
   background-size: cover;
   background-position: center;
   background-color: var(--color-bg-secondary);
-  border-radius: var(--radius-md);
   position: relative;
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: var(--shadow-md);
-  transition: transform var(--transition-base);
+  transition: transform 0.3s ease;
 }
 
+/* 封面 Hover 效果 */
 .book-card:hover .book-cover {
-  transform: scale(1.02);
+  transform: scale(1.03);
 }
 
+/* 封面占位符 */
 .book-cover-placeholder {
   display: flex;
   flex-direction: column;
@@ -2085,28 +2558,29 @@ body {
   justify-content: center;
   width: 100%;
   height: 100%;
-  background: linear-gradient(135deg, #4A90E2, #6366F1);
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   text-align: center;
-  border-radius: 0.5rem;
 }
 
 .placeholder-icon {
-  font-size: 1.5rem;
-  margin-bottom: 0.25rem;
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+  opacity: 0.9;
 }
 
 .placeholder-text {
   font-size: 2rem;
   font-weight: 700;
-  opacity: 0.9;
+  opacity: 0.95;
 }
 
+/* 格式标签 */
 .book-format-badge {
   position: absolute;
   top: 0.5rem;
   right: 0.5rem;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.75);
   color: white;
   font-size: 0.65rem;
   font-weight: 600;
@@ -2120,11 +2594,11 @@ body {
   position: absolute;
   bottom: 0.5rem;
   left: 0.5rem;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.75);
   color: white;
   font-size: 0.7rem;
   font-weight: 600;
-  padding: 0.25rem 0.5rem;
+  padding: 0.375rem 0.625rem;
   border-radius: 9999px;
   backdrop-filter: blur(10px);
   transition: all 0.2s ease;
@@ -2132,34 +2606,36 @@ body {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
 .book-storage-badge:hover {
-  transform: scale(1.1);
+  transform: scale(1.08);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .book-storage-badge.local {
-  background: rgba(100, 116, 139, 0.9);
+  background: linear-gradient(135deg, rgba(100, 116, 139, 0.95), rgba(71, 85, 105, 0.95));
 }
 
 .book-storage-badge.local:hover {
-  background: #64748B;
+  background: linear-gradient(135deg, #64748B, #475569);
 }
 
 .book-storage-badge.synced {
-  background: rgba(74, 144, 226, 0.9);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.95), rgba(37, 99, 235, 0.95));
 }
 
 .book-storage-badge.synced:hover {
-  background: #4A90E2;
+  background: linear-gradient(135deg, #3B82F6, #2563EB);
 }
 
 .book-storage-badge.baidupan {
-  background: rgba(16, 185, 129, 0.9);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.95), rgba(5, 150, 105, 0.95));
 }
 
 .book-storage-badge.baidupan:hover {
-  background: #10B981;
+  background: linear-gradient(135deg, #10B981, #059669);
 }
 
 .book-downloading-overlay {
@@ -2225,6 +2701,97 @@ body {
   font-weight: 500;
 }
 
+/* 云端未下载状态覆盖层 */
+.book-cloud-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  z-index: 10;
+  transition: all 0.3s ease;
+  border-radius: 6px;
+}
+
+.book-card:hover .book-cloud-overlay {
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.cloud-icon-wrapper {
+  color: white;
+  opacity: 0.9;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.book-card:hover .cloud-icon-wrapper {
+  opacity: 1;
+  transform: translateY(-2px);
+}
+
+.cloud-text {
+  color: white;
+  font-size: 0.875rem;
+  font-weight: 500;
+  opacity: 0.9;
+}
+
+/* 本地书籍上传提示覆盖层 */
+.book-upload-hint-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(59, 130, 246, 0.15);
+  backdrop-filter: blur(2px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  z-index: 10;
+  opacity: 0;
+  transition: all 0.3s ease;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.book-card:hover .book-upload-hint-overlay {
+  opacity: 1;
+  background: rgba(59, 130, 246, 0.85);
+}
+
+.upload-hint-icon-wrapper {
+  color: white;
+  opacity: 0.9;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.book-card:hover .upload-hint-icon-wrapper {
+  opacity: 1;
+  transform: translateY(-2px);
+}
+
+.upload-hint-text {
+  color: white;
+  font-size: 0.875rem;
+  font-weight: 500;
+  opacity: 0.9;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -2232,11 +2799,11 @@ body {
 }
 
 .book-info {
-  padding: 0.5rem;
+  padding: 0.75rem;
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.25rem;
 }
 
 .books-list .book-info {
@@ -2247,7 +2814,7 @@ body {
 }
 
 .book-title {
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   font-weight: 600;
   color: #1E293B;
   margin: 0;
@@ -2268,7 +2835,7 @@ body {
 }
 
 .book-author {
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   color: #64748B;
   margin: 0;
   overflow: hidden;
@@ -2361,7 +2928,6 @@ body {
 .empty-state p {
   font-size: 1rem;
   margin: 0 0 2rem 0;
-  max-width: 400px;
 }
 
 /* 设置面板样式 */
@@ -2533,11 +3099,73 @@ body {
   gap: 0.5rem;
 }
 
-/* 浮动添加按钮 */
-.floating-add-btn {
+/* 浮动操作菜单 (Speed Dial) */
+.floating-action-menu {
   position: fixed;
   bottom: 2rem;
   right: 2rem;
+  z-index: 100;
+}
+
+/* 子按钮容器 */
+.floating-action-items {
+  position: absolute;
+  bottom: 4.5rem;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  opacity: 0;
+  transform: translateY(20px);
+  pointer-events: none;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.floating-action-menu.is-open .floating-action-items {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: all;
+}
+
+/* 子按钮 */
+.floating-action-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: white;
+  border: 1px solid rgba(203, 213, 225, 0.5);
+  border-radius: 2rem;
+  color: #475569;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  min-width: 140px;
+}
+
+.floating-action-item:hover {
+  background: linear-gradient(135deg, #4A90E2, #357ABD);
+  color: white;
+  border-color: transparent;
+  transform: translateX(-4px);
+  box-shadow: 0 6px 16px rgba(74, 144, 226, 0.4);
+}
+
+.floating-action-item:active {
+  transform: translateX(-4px) scale(0.96);
+}
+
+/* 标签文字 */
+.floating-action-label {
+  font-weight: 500;
+}
+
+/* 主按钮 */
+.floating-action-main {
+  position: relative;
   width: 3.5rem;
   height: 3.5rem;
   border-radius: 50%;
@@ -2549,48 +3177,64 @@ body {
   align-items: center;
   justify-content: center;
   box-shadow: 0 4px 12px rgba(74, 144, 226, 0.4);
-  transition: all 0.2s ease;
-  z-index: 50;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.floating-add-btn:hover {
-  transform: scale(1.1) rotate(90deg);
+.floating-action-main:hover {
+  transform: scale(1.1);
   box-shadow: 0 8px 24px rgba(74, 144, 226, 0.5);
   background: linear-gradient(135deg, #357ABD, #4f46e5);
 }
 
-.floating-add-btn:active {
-  transform: scale(1.05) rotate(90deg);
-}
-
-/* AI 对话按钮 */
-.floating-chat-btn {
-  position: fixed;
-  bottom: 2rem;
-  right: 6.5rem;
-  width: 3.5rem;
-  height: 3.5rem;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #10B981, #059669);
-  color: white;
-  border: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
-  transition: all 0.2s ease;
-  z-index: 50;
-}
-
-.floating-chat-btn:hover {
-  transform: scale(1.1);
-  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.5);
-  background: linear-gradient(135deg, #059669, #047857);
-}
-
-.floating-chat-btn:active {
+.floating-action-main:active {
   transform: scale(1.05);
+}
+
+/* 图标切换动画 */
+.floating-action-main .icon-plus,
+.floating-action-main .icon-close {
+  position: absolute;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.floating-action-main .icon-plus {
+  opacity: 1;
+  transform: rotate(0deg);
+}
+
+.floating-action-main .icon-close {
+  opacity: 0;
+  transform: rotate(-90deg);
+}
+
+.floating-action-menu.is-open .floating-action-main .icon-plus {
+  opacity: 0;
+  transform: rotate(90deg);
+}
+
+.floating-action-menu.is-open .floating-action-main .icon-close {
+  opacity: 1;
+  transform: rotate(0deg);
+}
+
+/* 子按钮进入动画 */
+.floating-action-menu.is-open .floating-action-item:nth-child(1) {
+  animation: slideInUp 0.3s cubic-bezier(0.4, 0, 0.2, 1) 0.05s both;
+}
+
+.floating-action-menu.is-open .floating-action-item:nth-child(2) {
+  animation: slideInUp 0.3s cubic-bezier(0.4, 0, 0.2, 1) 0.1s both;
+}
+
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* 优雅右键菜单设计 - 符合 Neat Reader 整体风格 */
@@ -2845,6 +3489,16 @@ body {
   justify-content: center;
   z-index: 2000;
   backdrop-filter: blur(4px);
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .dialog-content {
@@ -2857,6 +3511,23 @@ body {
   max-height: 90vh;
   overflow-y: auto;
   border: 1px solid rgba(203, 213, 225, 0.5);
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 新建分类对话框特殊样式 */
+.add-category-dialog {
+  max-width: 480px;
 }
 
 .dialog-header {
@@ -2868,11 +3539,36 @@ body {
   border-bottom: 1px solid rgba(203, 213, 225, 0.5);
 }
 
+.dialog-header-content {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex: 1;
+}
+
+.dialog-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  background: linear-gradient(135deg, #4A90E2, #357ABD);
+  border-radius: 0.75rem;
+  color: white;
+  flex-shrink: 0;
+}
+
 .dialog-title {
   font-size: 1.125rem;
   font-weight: 600;
   color: #1E293B;
   margin: 0;
+}
+
+.dialog-subtitle {
+  font-size: 0.8125rem;
+  color: #64748B;
+  margin: 0.25rem 0 0 0;
 }
 
 .dialog-close {
@@ -2883,11 +3579,13 @@ body {
   color: #64748B;
   transition: all 0.2s ease;
   border-radius: 0.375rem;
+  flex-shrink: 0;
 }
 
 .dialog-close:hover {
   background: rgba(203, 213, 225, 0.3);
   color: #1E293B;
+  transform: rotate(90deg);
 }
 
 .dialog-body {
@@ -2895,15 +3593,21 @@ body {
 }
 
 .form-group {
-  margin-bottom: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.form-group:last-child {
+  margin-bottom: 0;
 }
 
 .form-label {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   font-size: 0.875rem;
   font-weight: 500;
   color: #475569;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.625rem;
 }
 
 .form-input {
@@ -2926,6 +3630,135 @@ body {
 
 .form-input::placeholder {
   color: #94A3B8;
+}
+
+.form-hint {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.375rem;
+  font-size: 0.75rem;
+}
+
+.char-count {
+  color: #4A90E2;
+  font-weight: 500;
+}
+
+.hint-text {
+  color: #94A3B8;
+}
+
+/* 颜色选择器 */
+.color-options {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.625rem;
+}
+
+.color-option {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  border: 2px solid transparent;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.color-option:hover {
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.color-option.active {
+  border-color: #1E293B;
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.check-icon {
+  color: white;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+}
+
+.color-custom {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.color-picker-input {
+  width: 100%;
+  aspect-ratio: 1;
+  border: 2px dashed rgba(203, 213, 225, 0.5);
+  border-radius: 0.5rem;
+  cursor: pointer;
+  padding: 0;
+  background: transparent;
+  transition: all 0.2s ease;
+}
+
+.color-picker-input:hover {
+  border-color: #4A90E2;
+  border-style: solid;
+}
+
+.custom-label {
+  font-size: 0.625rem;
+  color: #64748B;
+  text-align: center;
+  position: absolute;
+  bottom: -1.25rem;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+/* 预览效果 */
+.category-preview {
+  background: #F8FAFC;
+  border: 1px solid rgba(203, 213, 225, 0.5);
+  border-radius: 0.5rem;
+  padding: 1rem;
+}
+
+.preview-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: white;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(203, 213, 225, 0.3);
+}
+
+.preview-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 0.5rem;
+  color: white;
+  flex-shrink: 0;
+}
+
+.preview-name {
+  flex: 1;
+  font-weight: 500;
+  color: #1E293B;
+  font-size: 0.875rem;
+}
+
+.preview-count {
+  font-size: 0.75rem;
+  color: #64748B;
 }
 
 .color-picker-container {
@@ -3022,16 +3855,17 @@ body {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  border: 1px solid transparent;
-  border-radius: var(--border-radius-md);
+  padding: 0.625rem 1.25rem;
+  border: none;
+  border-radius: 0.5rem;
   font-size: 0.875rem;
   font-weight: 500;
   cursor: pointer;
-  transition: all var(--transition-normal);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   text-decoration: none;
   position: relative;
   overflow: hidden;
+  min-width: 100px;
 }
 
 .btn::before {
@@ -3041,8 +3875,8 @@ body {
   left: -100%;
   width: 100%;
   height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
-  transition: left var(--transition-slow);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+  transition: left 0.5s ease;
 }
 
 .btn:hover::before {
@@ -3051,44 +3885,72 @@ body {
 
 .btn:active {
   transform: scale(0.96);
-  transition: all var(--transition-fast);
 }
 
 .btn:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
+  transform: none !important;
 }
 
+.btn:disabled::before {
+  display: none;
+}
+
+/* 主要按钮 */
 .btn-primary {
-  background-color: #4A90E2;
+  background: linear-gradient(135deg, #4A90E2, #357ABD);
   color: white;
-  border-color: #4A90E2;
+  box-shadow: 0 2px 8px rgba(74, 144, 226, 0.3);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background-color: #357ABD;
-  border-color: #357ABD;
+  background: linear-gradient(135deg, #357ABD, #2868A8);
+  box-shadow: 0 4px 12px rgba(74, 144, 226, 0.4);
+  transform: translateY(-1px);
 }
 
+.btn-primary:active:not(:disabled) {
+  transform: translateY(0) scale(0.96);
+  box-shadow: 0 1px 4px rgba(74, 144, 226, 0.3);
+}
+
+/* 次要按钮 */
 .btn-secondary {
-  background-color: #F1F5F9;
-  color: #1E293B;
-  border-color: #CBD5E1;
+  background: linear-gradient(to bottom, #FFFFFF, #F8FAFC);
+  color: #475569;
+  border: 1px solid rgba(203, 213, 225, 0.5);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background-color: #E2E8F0;
+  background: linear-gradient(to bottom, #F8FAFC, #F1F5F9);
+  border-color: rgba(203, 213, 225, 0.8);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
 }
 
+.btn-secondary:active:not(:disabled) {
+  transform: translateY(0) scale(0.96);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+/* 危险按钮 */
 .btn-danger {
-  background-color: #EF4444;
+  background: linear-gradient(135deg, #EF4444, #DC2626);
   color: white;
-  border-color: #EF4444;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
 }
 
 .btn-danger:hover:not(:disabled) {
-  background-color: #DC2626;
-  border-color: #DC2626;
+  background: linear-gradient(135deg, #DC2626, #B91C1C);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-danger:active:not(:disabled) {
+  transform: translateY(0) scale(0.96);
+  box-shadow: 0 1px 4px rgba(239, 68, 68, 0.3);
 }
 
 /* 响应式设计 */
@@ -3099,11 +3961,19 @@ body {
   }
   
   .books-grid {
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 1.25rem;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 1rem;
   }
   
   .content {
+    padding: 1.5rem;
+  }
+  
+  .content-header-fixed {
+    padding: 1.5rem 1.5rem 1rem;
+  }
+  
+  .content-scrollable {
     padding: 1.5rem;
   }
 }
@@ -3160,11 +4030,20 @@ body {
     height: 90px;
   }
   
-  .floating-add-btn {
+  .floating-action-menu {
     bottom: 1.5rem;
     right: 1.5rem;
-    width: 2.5rem;
-    height: 2.5rem;
+  }
+  
+  .floating-action-main {
+    width: 3rem;
+    height: 3rem;
+  }
+  
+  .floating-action-item {
+    min-width: 120px;
+    padding: 0.625rem 0.875rem;
+    font-size: 0.8125rem;
   }
   
   .section-title {

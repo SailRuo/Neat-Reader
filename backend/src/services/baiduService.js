@@ -302,6 +302,49 @@ const baiduService = {
         error: error.message
       }
     }
+  },
+  
+  // 删除文件
+  async deleteFile(accessToken, filePaths) {
+    try {
+      logger.info(`[Delete] 删除文件: ${JSON.stringify(filePaths)}`)
+      
+      // filePaths 应该是文件路径数组，例如: ["/apps/Neat Reader/book.epub"]
+      const fileListStr = JSON.stringify(filePaths)
+      
+      logger.info(`[Delete] filelist 参数: ${fileListStr}`)
+      
+      const params = new URLSearchParams()
+      params.append('access_token', accessToken)
+      params.append('opera', 'delete')
+      params.append('async', '2')
+      
+      const formData = new URLSearchParams()
+      formData.append('filelist', fileListStr)
+      
+      const response = await client.post(
+        `https://pan.baidu.com/rest/2.0/xpan/file?method=filemanager&${params.toString()}`,
+        formData,
+        {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+          }
+        }
+      )
+      
+      logger.info(`[Delete] 响应数据: ${JSON.stringify(response.data)}`)
+      
+      if (response.data.errno !== 0) {
+        logger.error(`[Delete] 删除失败: errno=${response.data.errno}`)
+        throw new Error(`删除失败: ${response.data.errmsg || '未知错误'}`)
+      }
+      
+      logger.info('[Delete] 删除成功')
+      return response.data
+    } catch (error) {
+      logger.error('[Delete] 删除文件失败:', error.message)
+      throw error
+    }
   }
 }
 

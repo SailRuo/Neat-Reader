@@ -55,6 +55,12 @@ async function startDeviceFlow() {
       code_challenge_method: 'S256'
     });
     
+    logger.info('发送 Device Code 请求', {
+      url: QWEN_CONFIG.deviceAuthUrl,
+      client_id: QWEN_CONFIG.clientId,
+      scope: QWEN_CONFIG.scope
+    });
+    
     const response = await axios.post(
       QWEN_CONFIG.deviceAuthUrl,
       params.toString(),
@@ -64,9 +70,14 @@ async function startDeviceFlow() {
           'Accept': 'application/json',
           'User-Agent': 'Neat-Reader/1.0'
         },
-        timeout: 10000
+        timeout: 30000  // 增加超时时间到 30 秒
       }
     );
+    
+    logger.info('Device Code 响应成功', {
+      status: response.status,
+      data: response.data
+    });
     
     const {
       device_code,
@@ -108,15 +119,32 @@ async function startDeviceFlow() {
       status: error.response?.status,
       statusText: error.response?.statusText,
       data: error.response?.data,
+      code: error.code,
       stack: error.stack
     });
     
     // 返回详细的错误信息
-    const errorMsg = error.response?.data?.error_description || 
-                     error.response?.data?.error || 
-                     error.message;
+    let errorMsg = '启动授权失败';
     
-    throw new Error(`启动授权失败: ${errorMsg}`);
+    if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+      errorMsg = '无法连接到 Qwen 服务器，请检查网络连接';
+    } else if (error.code === 'ETIMEDOUT') {
+      errorMsg = '连接 Qwen 服务器超时，请检查网络';
+    } else if (error.response?.status === 502) {
+      errorMsg = 'Qwen 服务暂时不可用（502 Bad Gateway），请稍后重试';
+    } else if (error.response?.status === 503) {
+      errorMsg = 'Qwen 服务正在维护中（503 Service Unavailable），请稍后重试';
+    } else if (error.response?.status >= 500) {
+      errorMsg = `Qwen 服务器错误（${error.response.status}），请稍后重试`;
+    } else if (error.response?.data?.error_description) {
+      errorMsg = error.response.data.error_description;
+    } else if (error.response?.data?.error) {
+      errorMsg = error.response.data.error;
+    } else {
+      errorMsg = error.message;
+    }
+    
+    throw new Error(errorMsg);
   }
 }
 

@@ -96,7 +96,7 @@ export function createAnnotationOverlayer(
           line.style.cursor = 'pointer'
           svg.appendChild(line)
         } else if (annotation.type === 'note') {
-          // 笔记：绘制高亮 + 图标
+          // 笔记：绘制高亮（不添加图标，避免遮挡内容）
           const highlightRect = doc.createElementNS('http://www.w3.org/2000/svg', 'rect')
           highlightRect.setAttribute('x', rect.left.toString())
           highlightRect.setAttribute('y', rect.top.toString())
@@ -108,19 +108,6 @@ export function createAnnotationOverlayer(
           highlightRect.style.pointerEvents = 'auto'
           highlightRect.style.cursor = 'pointer'
           svg.appendChild(highlightRect)
-
-          // 在第一个矩形右上角添加笔记图标
-          if (rect === rects[0]) {
-            const icon = doc.createElementNS('http://www.w3.org/2000/svg', 'circle')
-            icon.setAttribute('cx', (rect.right - 8).toString())
-            icon.setAttribute('cy', (rect.top + 8).toString())
-            icon.setAttribute('r', '6')
-            icon.setAttribute('fill', annotation.color || '#2196f3')
-            icon.setAttribute('data-annotation-id', annotation.id)
-            icon.style.pointerEvents = 'auto'
-            icon.style.cursor = 'pointer'
-            svg.appendChild(icon)
-          }
         }
       })
     } catch (e) {
