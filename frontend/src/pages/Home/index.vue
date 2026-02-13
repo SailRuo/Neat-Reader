@@ -83,7 +83,7 @@
             <!-- 设置按钮 -->
             <div class="sidebar-section">
               <button 
-                class="category-item"
+                class="category-item settings-button"
                 :class="{ 'active': selectedCategory === 'settings' }"
                 @click="selectedCategory = 'settings'"
               >
@@ -584,13 +584,14 @@ const selectedCategory = ref('all')
 const showChatWindow = ref(false)
 const isSpeedDialOpen = ref(false)
 
-// 监听分类切换，自动同步网盘数据
-watch(selectedCategory, (newVal) => {
-  if (newVal !== 'settings') {
-    console.log('切换分类，触发网盘数据同步:', newVal);
-    ebookStore.loadBaidupanBooks();
-  }
-})
+// 移除分类切换时的云盘同步
+// 云盘同步只在分类相关操作（新建、删除、修改）时触发
+// watch(selectedCategory, (newVal) => {
+//   if (newVal !== 'settings') {
+//     console.log('切换分类，触发网盘数据同步:', newVal);
+//     ebookStore.loadBaidupanBooks();
+//   }
+// })
 
 // 右键菜单相关
 const selectedBook = ref<any>(null)
@@ -870,7 +871,7 @@ const handleFileSelect = async (event: Event) => {
     
     if (result) {
       dialogStore.closeDialog()
-      dialogStore.showSuccessDialog('导入成功')
+      // 导入成功，静默处理，不显示弹窗
     } else {
       dialogStore.closeDialog()
       dialogStore.showErrorDialog('导入失败', '无法导入所选文件')
@@ -1869,6 +1870,22 @@ body {
 .category-item.add-category:hover .add-icon {
   background: linear-gradient(135deg, rgba(74, 144, 226, 0.2), rgba(99, 102, 241, 0.15));
   color: #4A90E2;
+}
+
+/* 设置按钮特殊样式 - 添加边框 */
+.category-item.settings-button {
+  border: 1px solid rgba(203, 213, 225, 0.5);
+  background: #FFFFFF;
+}
+
+.category-item.settings-button:hover {
+  border-color: rgba(74, 144, 226, 0.3);
+  background: #F8FAFC;
+}
+
+.category-item.settings-button.active {
+  border-color: #4A90E2;
+  background: linear-gradient(135deg, rgba(74, 144, 226, 0.1), rgba(74, 144, 226, 0.05));
 }
 
 .baidupan-status {

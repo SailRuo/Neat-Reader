@@ -46,6 +46,15 @@
           <div class="setting-row" v-else>
             <div class="setting-info" style="width: 100%;">
               <button 
+                class="btn btn-primary" 
+                style="width: 100%; margin-bottom: 12px;"
+                @click="syncFromCloud"
+                :disabled="isSyncing"
+              >
+                <Icons.RefreshCw :size="16" :class="{ 'spinning': isSyncing }" />
+                {{ isSyncing ? '同步中...' : '从云端同步数据' }}
+              </button>
+              <button 
                 class="btn btn-danger" 
                 style="width: 100%;"
                 @click="disconnect"
@@ -177,6 +186,7 @@ import { useDialogStore } from '../../stores/dialog'
 import { api } from '../../api/adapter'
 import * as qwenAPI from '../../api/qwen'
 import { qwenTokenManager } from '../../utils/qwenTokenManager'
+import * as Icons from 'lucide-vue-next'
 
 const ebookStore = useEbookStore()
 const dialogStore = useDialogStore()
@@ -197,6 +207,7 @@ const refreshToken = ref('')
 const inputAccessToken = ref('')
 const isLoading = ref(false)
 const isAutoConnecting = ref(false)
+const isSyncing = ref(false)
 
 // 防抖定时器
 let autoConnectTimer: number | null = null
@@ -500,6 +511,28 @@ const disconnect = async () => {
   await ebookStore.fetchBaidupanUserInfo(true)
   
   dialogStore.showSuccessDialog('已取消授权')
+}
+
+/**
+ * 从云端同步数据
+ */
+const syncFromCloud = async () => {
+  if (isSyncing.value) return
+  
+  try {
+    isSyncing.value = true
+    console.log('🔄 [手动同步] 开始从云端同步数据...')
+    
+    await ebookStore.loadBaidupanBooks()
+    
+    dialogStore.showSuccessDialog('同步成功', '已从云端同步最新数据')
+    console.log('✅ [手动同步] 同步完成')
+  } catch (error) {
+    console.error('❌ [手动同步] 同步失败:', error)
+    dialogStore.showErrorDialog('同步失败', '请检查网络连接或授权状态')
+  } finally {
+    isSyncing.value = false
+  }
 }
 
 const handleLanguageChange = async (event: Event) => {
@@ -959,6 +992,15 @@ const disconnectQwen = () => {
   cursor: pointer;
   transition: all 0.2s;
   border: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .btn-primary {
@@ -966,7 +1008,7 @@ const disconnectQwen = () => {
   color: white;
 }
 
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
   background-color: #357ABD;
 }
 
@@ -975,11 +1017,7 @@ const disconnectQwen = () => {
   color: white;
 }
 
-.btn-danger:hover {
-  background-color: #f23c3c;
-}
-
-.btn-danger:hover {
+.btn-danger:hover:not(:disabled) {
   background-color: #f23c3c;
 }
 
@@ -988,8 +1026,22 @@ const disconnectQwen = () => {
   color: white;
 }
 
-.btn-secondary:hover {
+.btn-secondary:hover:not(:disabled) {
   background-color: #73767a;
+}
+
+/* 旋转动画 */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
 }
 
 .test-result {

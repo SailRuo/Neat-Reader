@@ -295,7 +295,7 @@ export const useEbookStore = defineStore('ebook', () => {
     }
   };
 
-  const saveBooks = async () => {
+  const saveBooks = async (syncToCloud: boolean = true) => {
     try {
       // 保存书籍列表，确保数据可序列化
       const booksToSave = books.value.map(book => {
@@ -323,8 +323,10 @@ export const useEbookStore = defineStore('ebook', () => {
       //console.log('正在保存书籍列表，书籍数量:', booksToSave.length);
       
       await localforage.setItem('books', booksToSave);
-      // 异步同步到云端（不阻塞 UI）
-      scheduleCloudSyncBooks();
+      // 只在需要时异步同步到云端（不阻塞 UI）
+      if (syncToCloud) {
+        scheduleCloudSyncBooks();
+      }
       // console.log('书籍列表保存成功');
     } catch (error) {
       console.error('保存电子书列表失败:', error);
@@ -443,15 +445,22 @@ export const useEbookStore = defineStore('ebook', () => {
   const syncBooksToCloud = async () => {
     try {
       if (!await ensureBaidupanToken() || !userConfig.value.storage.baidupan) return;
+      
+      // 🎯 关键修复：只同步已上传到云端的书籍（storageType 为 'synced' 或 'baidupan'）
+      // 避免同步本地书籍元数据，导致云端恢复时找不到实际文件
+      const cloudBooks = books.value.filter(book => 
+        book.storageType === 'synced' || book.storageType === 'baidupan'
+      );
+      
       const booksData = {
-        books: books.value,
+        books: cloudBooks,
         lastSync: Date.now(),
         deviceId: deviceInfo.value?.id || 'unknown',
         deviceName: deviceInfo.value?.name || 'unknown'
       };
       const booksFile = new File([JSON.stringify(booksData)], 'books.json', { type: 'application/json' });
       await uploadToBaidupanNew(booksFile, '');
-      console.log('☁️ [Cloud Sync] books.json 已异步同步到网盘');
+      console.log(`☁️ [Cloud Sync] books.json 已异步同步到网盘 (${cloudBooks.length}/${books.value.length} 本云端书籍)`);
     } catch (error) {
       console.warn('⚠️ [Cloud Sync] books.json 异步同步失败:', error);
     }
@@ -827,67 +836,10 @@ export const useEbookStore = defineStore('ebook', () => {
       const book = books.value[index];
       const actualStorageType = storageType || book.storageType;
 
-      // 2. 如果是云端书籍（baidupan 或 synced）且需要删除云端文件
-      const isCloudBook = actualStorageType === 'baidupan' || actualStorageType === 'synced';
-      if (isCloudBook && book.baidupanPath && deleteFromCloud) {
-        try {
-          // 确保令牌有效
-          if (!(await ensureBaidupanToken())) {
-            console.warn('百度网盘令牌无效，仅删除本地记录');
-          } else {
-            const filesToDelete: string[] = [];
-            
-            // 1. 添加书籍文件本身
-            filesToDelete.push(book.baidupanPath);
-            
-            // 2. 添加阅读进度文件
-            const progressPath = `/apps/Neat Reader/sync/progress/${book.id}.json`;
-            filesToDelete.push(progressPath);
-            
-            // 批量删除文件
-            try {
-              await api.deleteFile(
-                userConfig.value.storage.baidupan!.accessToken,
-                filesToDelete
-              );
-              console.log('云端文件删除成功:', filesToDelete);
-            } catch (error) {
-              console.error('删除云端文件失败:', error);
-            }
-            
-            // 3. 更新 books.json（从列表中移除该书籍）
-            try {
-              // 先删除本地记录（这样 books.value 就不包含被删除的书籍了）
-              const indexBeforeSync = books.value.findIndex(b => b.id === bookId);
-              if (indexBeforeSync !== -1) {
-                books.value.splice(indexBeforeSync, 1);
-              }
-              
-              // 重新上传 books.json
-              const booksData = {
-                books: books.value,
-                categories: categories.value,
-                lastSync: Date.now(),
-                deviceId: deviceInfo.value.id,
-                deviceName: deviceInfo.value.name
-              };
-              const booksFile = new File([JSON.stringify(booksData)], 'books.json', { type: 'application/json' });
-              await uploadToBaidupanNew(booksFile, '/sync');
-              console.log('云端书籍列表已更新');
-            } catch (error) {
-              console.error('更新云端书籍列表失败:', error);
-            }
-          }
-        } catch (error) {
-          console.error('删除云端文件失败:', error);
-          // 即使云端删除失败，也继续删除本地记录
-        }
-      } else {
-        // 3. 本地书籍或仅删除本地记录：使用 splice 显式触发 Vue 响应式
-        books.value.splice(index, 1);
-      }
-
-      // 3.5 从所有分类中移除该书籍 ID，保证分类数据一致
+      // 2. 立即从 UI 中移除（响应式更新）
+      books.value.splice(index, 1);
+      
+      // 3. 从所有分类中移除该书籍 ID
       let categoryTouched = false;
       for (const category of categories.value) {
         if (!Array.isArray(category.bookIds)) continue;
@@ -898,28 +850,62 @@ export const useEbookStore = defineStore('ebook', () => {
           categoryTouched = true;
         }
       }
-      if (categoryTouched) {
-        // 只落本地，云端异步
-        await localforage.setItem('categories', categories.value.map(c => ({
+      
+      // 4. 立即保存到本地存储（不阻塞）
+      Promise.all([
+        saveBooks(false), // 不触发云端同步，后面统一处理
+        categoryTouched ? localforage.setItem('categories', categories.value.map(c => ({
           id: c.id,
           name: c.name,
           color: c.color,
           bookIds: Array.isArray(c.bookIds) ? [...c.bookIds] : [],
           createdAt: c.createdAt,
           updatedAt: c.updatedAt
-        })));
-        scheduleCloudSyncCategories();
-      }
-      
-      // 4. 异步执行持久化清理，不阻塞 UI 响应
-      saveBooks(); 
+        }))) : Promise.resolve(),
+        actualStorageType === 'local' ? Promise.all([
+          localforage.removeItem(`ebook_content_${bookId}`),
+          localforage.removeItem(`ebook_cover_${bookId}`)
+        ]) : Promise.resolve()
+      ]).catch(err => console.error('本地清理失败:', err));
 
-      if (actualStorageType === 'local') {
-        localforage.removeItem(`ebook_content_${bookId}`);
-        localforage.removeItem(`ebook_cover_${bookId}`);
+      // 5. 异步处理云端删除（不阻塞 UI）
+      const isCloudBook = actualStorageType === 'baidupan' || actualStorageType === 'synced';
+      if (isCloudBook && book.baidupanPath && deleteFromCloud) {
+        // 完全异步，不等待结果
+        (async () => {
+          try {
+            if (!(await ensureBaidupanToken())) {
+              console.warn('百度网盘令牌无效，仅删除本地记录');
+              return;
+            }
+            
+            const filesToDelete: string[] = [];
+            filesToDelete.push(book.baidupanPath);
+            filesToDelete.push(`/apps/Neat Reader/sync/progress/${book.id}.json`);
+            
+            await api.deleteFile(
+              userConfig.value.storage.baidupan!.accessToken,
+              filesToDelete
+            );
+            console.log('☁️ [异步删除] 云端文件删除成功:', filesToDelete);
+            
+            // 更新云端 books.json
+            await syncBooksToCloud();
+            if (categoryTouched) {
+              await syncCategoriesToCloud();
+            }
+          } catch (error) {
+            console.error('❌ [异步删除] 云端文件删除失败:', error);
+          }
+        })();
+      } else {
+        // 本地书籍也需要同步云端元数据
+        if (categoryTouched) {
+          scheduleCloudSyncCategories();
+        }
       }
       
-      console.log('书籍删除成功');
+      console.log('✅ 书籍删除成功（UI 已更新，云端操作异步进行）');
       return true;
     } catch (error) {
       console.error('删除书籍失败:', error);
@@ -1676,18 +1662,23 @@ export const useEbookStore = defineStore('ebook', () => {
 
       // 🎯 同步：再拉取 books.json（书籍列表独立存储）
       try {
-        console.log('� [Cloud Sync] 开始同步云端 books.json...');
+        console.log('📥 [Cloud Sync] 开始同步云端 books.json...');
         const booksBlob = await downloadBlobFromBaidupan('books.json');
         if (booksBlob) {
           const text = await booksBlob.text();
           const cloudBooksData = JSON.parse(text);
           const cloudBooks = cloudBooksData.books;
           if (cloudBooks && Array.isArray(cloudBooks)) {
-            // 采用云端覆盖本地策略
-            books.value = cloudBooks;
-            await localforage.setItem('books', cloudBooks);
+            // 🎯 关键修复：智能合并策略
+            // 1. 保留本地书籍（storageType === 'local'）
+            // 2. 用云端书籍覆盖云端书籍（storageType === 'synced' 或 'baidupan'）
+            const localBooks = books.value.filter(book => book.storageType === 'local');
+            const mergedBooks = [...localBooks, ...cloudBooks];
+            
+            books.value = mergedBooks;
+            await localforage.setItem('books', mergedBooks);
             books.value = [...books.value];
-            console.log('✅ [Cloud Sync] 云端书籍已覆盖本地（books.json）');
+            console.log(`✅ [Cloud Sync] 云端书籍已合并到本地 (本地: ${localBooks.length}, 云端: ${cloudBooks.length}, 总计: ${mergedBooks.length})`);
           }
         } else {
           console.log('ℹ️ [Cloud Sync] 网盘中尚无 books.json，跳过书籍同步');
@@ -1795,7 +1786,8 @@ export const useEbookStore = defineStore('ebook', () => {
           console.log(`已清理 ${booksToRemove.length} 本云端已删除的书籍`);
         }
         
-        await saveBooks();
+        // 保存到本地，但不触发云端同步（因为数据本来就是从云端来的）
+        await saveBooks(false);
         console.log('百度网盘书籍加载完成，总数:', books.value.length);
       }
     } catch (error) {
@@ -2268,38 +2260,17 @@ export const useEbookStore = defineStore('ebook', () => {
       loadAIConversations()
     ]);
     
-    // 尝试从百度网盘同步配置和书籍
-    try {
-      if (await ensureBaidupanToken()) {
-        // 1. 同步配置
-        const configBlob = await downloadBlobFromBaidupan('/sync/config.json');
-        if (configBlob) {
-          try {
-            const configText = await configBlob.text();
-            const configData = JSON.parse(configText);
-            if (configData.config && configData.timestamp) {
-              // 检查云端配置是否比本地新
-              const localConfig = await localforage.getItem<UserConfig>('userConfig');
-              const localTimestamp = localConfig ? await localforage.getItem<number>('userConfigTimestamp') || 0 : 0;
-              
-              if (configData.timestamp > localTimestamp) {
-                console.log('从百度网盘同步用户配置');
-                userConfig.value = { ...userConfig.value, ...configData.config };
-                await saveUserConfig();
-                await localforage.setItem('userConfigTimestamp', configData.timestamp);
-              }
-            }
-          } catch (error) {
-            console.warn('解析云端配置失败:', error);
-          }
-        }
-        
-        // 2. 加载云端书籍
-        await loadBaidupanBooks();
-      }
-    } catch (error) {
-      console.warn('从百度网盘同步用户配置失败:', error);
-    }
+    // 🎯 优化：移除自动云端同步，只在用户主动操作时同步
+    // 这样可以：
+    // 1. 减少不必要的网络请求
+    // 2. 加快应用启动速度
+    // 3. 避免每次刷新页面都同步
+    // 
+    // 云端同步会在以下场景自动触发：
+    // - 用户在设置中点击"同步"按钮
+    // - 添加/删除/修改书籍
+    // - 添加/删除/修改分类
+    // - 上传书籍到云端
   };
 
   return {
