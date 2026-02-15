@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>性能基准测试 - Tauri WebView2</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            color: #2d3748;
+            margin-bottom: 10px;
+            font-size: 32px;
+        }
+
+        .subtitle {
+            color: #718096;
+            margin-bottom: 30px;
+            font-size: 16px;
+        }
+
+        .test-section {
+            margin-bottom: 40px;
+            padding: 24px;
+            background: #f7fafc;
+            border-radius: 12px;
+            border: 2px solid #e2e8f0;
+        }
+
+        .test-section h2 {
+            color: #2d3748;
+            margin-bottom: 16px;
+            font-size: 24px;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .metric-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .metric-label {
+            color: #718096;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .metric-value {
+            color: #2d3748;
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        .metric-unit {
+            color: #a0aec0;
+            font-size: 16px;
+            margin-left: 4px;
+        }
+
+        .metric-status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-top: 8px;
+        }
+
+        .status-excellent {
+            background: #c6f6d5;
+            color: #22543d;
+        }
+
+        .status-good {
+            background: #bee3f8;
+            color: #2c5282;
+        }
+
+        .status-warning {
+            background: #feebc8;
+            color: #7c2d12;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 32px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-right: 12px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn-secondary {
+            background: #e2e8f0;
+            color: #2d3748;
+        }
+
+        .btn-secondary:hover {
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .log-container {
+            background: #1a202c;
+            color: #e2e8f0;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            max-height: 400px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+
+        .log-entry {
+            margin-bottom: 8px;
+            padding: 4px 0;
+        }
+
+        .log-time {
+            color: #90cdf4;
+        }
+
+        .log-info {
+            color: #68d391;
+        }
+
+        .log-warning {
+            color: #f6ad55;
+        }
+
+        .log-error {
+            color: #fc8181;
+        }
+
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        .comparison-table th,
+        .comparison-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .comparison-table th {
+            background: #edf2f7;
+            color: #2d3748;
+            font-weight: 600;
+        }
+
+        .comparison-table tr:hover {
+            background: #f7fafc;
+        }
+
+        .better {
+            color: #38a169;
+            font-weight: 600;
+        }
+
+        .worse {
+            color: #e53e3e;
+            font-weight: 600;
+        }
+
+        #testCanvas {
+            display: none;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e2e8f0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 12px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>⚡ 性能基准测试</h1>
+        <p class="subtitle">Tauri WebView2 vs Electron - Windows 平台</p>
+
+        <!-- 系统信息 -->
+        <div class="test-section">
+            <h2>📊 系统信息</h2>
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-label">平台</div>
+                    <div class="metric-value" id="platform">-</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">用户代理</div>
+                    <div class="metric-value" style="font-size: 14px;" id="userAgent">-</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">内存限制</div>
+                    <div class="metric-value" id="memoryLimit">-</div>
+                    <span class="metric-unit">MB</span>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">CPU 核心数</div>
+                    <div class="metric-value" id="cpuCores">-</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 启动性能 -->
+        <div class="test-section">
+            <h2>🚀 启动性能</h2>
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-label">页面加载时间</div>
+                    <div class="metric-value" id="loadTime">-</div>
+                    <span class="metric-unit">ms</span>
+                    <div class="metric-status status-excellent" id="loadTimeStatus">-</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">DOM 就绪时间</div>
+                    <div class="metric-value" id="domReady">-</div>
+                    <span class="metric-unit">ms</span>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">首次渲染时间</div>
+                    <div class="metric-value" id="firstPaint">-</div>
+                    <span class="metric-unit">ms</span>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">首次内容渲染</div>
+                    <div class="metric-value" id="firstContentfulPaint">-</div>
+                    <span class="metric-unit">ms</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 内存使用 -->
+        <div class="test-section">
+            <h2>💾 内存使用</h2>
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-label">当前内存使用</div>
+                    <div class="metric-value" id="currentMemory">-</div>
+                    <span class="metric-unit">MB</span>
+                    <div class="metric-status status-good" id="memoryStatus">-</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">JS 堆大小</div>
+                    <div class="metric-value" id="jsHeapSize">-</div>
+                    <span class="metric-unit">MB</span>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">JS 堆限制</div>
+                    <div class="metric-value" id="jsHeapLimit">-</div>
+                    <span class="metric-unit">MB</span>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">堆使用率</div>
+                    <div class="metric-value" id="heapUsage">-</div>
+                    <span class="metric-unit">%</span>
+                </div>
+            </div>
+            <button class="btn" onclick="updateMemoryMetrics()">🔄 刷新内存数据</button>
+        </div>
+
+        <!-- 渲染性能测试 -->
+        <div class="test-section">
+            <h2>🎨 渲染性能测试</h2>
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-label">iframe 创建时间</div>
+                    <div class="metric-value" id="iframeTime">-</div>
+                    <span class="metric-unit">ms</span>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Canvas 渲染时间</div>
+                    <div class="metric-value" id="canvasTime">-</div>
+                    <span class="metric-unit">ms</span>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Worker 初始化时间</div>
+                    <div class="metric-value" id="workerTime">-</div>
+                    <span class="metric-unit">ms</span>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">DOM 操作性能</div>
+                    <div class="metric-value" id="domOpsTime">-</div>
+                    <span class="metric-unit">ms</span>
+                </div>
+            </div>
+            <button class="btn" onclick="runRenderingTests()">▶️ 运行渲染测试</button>
+            <div class="progress-bar" id="renderProgress" style="display: none;">
+                <div class="progress-fill" id="renderProgressFill"></div>
+            </div>
+        </div>
+
+        <!-- 性能对比 -->
+        <div class="test-section">
+            <h2>📈 性能对比 (Tauri vs Electron)</h2>
+            <table class="comparison-table">
+                <thead>
+                    <tr>
+                        <th>指标</th>
+                        <th>Tauri WebView2 (预期)</th>
+                        <th>Electron (当前)</th>
+                        <th>改进</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>启动时间</td>
+                        <td class="better">~500ms</td>
+                        <td>~1500ms</td>
+                        <td class="better">↓ 67%</td>
+                    </tr>
+                    <tr>
+                        <td>空闲内存</td>
+                        <td class="better">~50MB</td>
+                        <td>~150MB</td>
+                        <td class="better">↓ 67%</td>
+                    </tr>
+                    <tr>
+                        <td>阅读时内存</td>
+                        <td class="better">~80MB</td>
+                        <td>~250MB</td>
+                        <td class="better">↓ 68%</td>
+                    </tr>
+                    <tr>
+                        <td>打包体积</td>
+                        <td class="better">&lt; 20MB</td>
+                        <td>~150MB</td>
+                        <td class="better">↓ 87%</td>
+                    </tr>
+                    <tr>
+                        <td>EPUB 渲染</td>
+                        <td class="better">~100ms</td>
+                        <td>~150ms</td>
+                        <td class="better">↓ 33%</td>
+                    </tr>
+                    <tr>
+                        <td>PDF 渲染</td>
+                        <td class="better">~200ms</td>
+                        <td>~300ms</td>
+                        <td class="better">↓ 33%</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 操作按钮 -->
+        <div class="test-section">
+            <h2>🎯 测试操作</h2>
+            <button class="btn" onclick="runAllTests()">▶️ 运行所有测试</button>
+            <button class="btn btn-secondary" onclick="exportResults()">📥 导出结果</button>
+            <button class="btn btn-secondary" onclick="clearLog()">🗑️ 清空日志</button>
+        </div>
+
+        <!-- 日志输出 -->
+        <div class="test-section">
+            <h2>📝 测试日志</h2>
+            <div class="log-container" id="logContainer"></div>
+        </div>
+    </div>
+
+    <canvas id="testCanvas" width="800" height="600"></canvas>
+
+    <script>
+        // 日志系统
+        function log(message, type = 'info') {
+            const logContainer = document.getElementById('logContainer');
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            entry.innerHTML = `<span class="log-time">[${time}]</span> ${message}`;
+            logContainer.appendChild(entry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+            console.log(`[${type.toUpperCase()}] ${message}`);
+        }
+
+        function clearLog() {
+            document.getElementById('logContainer').innerHTML = '';
+            log('日志已清空', 'info');
+        }
+
+        // 系统信息
+        function collectSystemInfo() {
+            log('收集系统信息...', 'info');
+            
+            document.getElementById('platform').textContent = navigator.platform;
+            document.getElementById('userAgent').textContent = navigator.userAgent.substring(0, 50) + '...';
+            document.getElementById('cpuCores').textContent = navigator.hardwareConcurrency || 'N/A';
+            
+            if (performance.memory) {
+                const memLimit = (performance.memory.jsHeapSizeLimit / 1024 / 1024).toFixed(0);
+                document.getElementById('memoryLimit').textContent = memLimit;
+            }
+            
+            log('系统信息收集完成', 'info');
+        }
+
+        // 启动性能
+        function measureStartupPerformance() {
+            log('测量启动性能...', 'info');
+            
+            const perfData = performance.timing;
+            const loadTime = perfData.loadEventEnd - perfData.navigationStart;
+            const domReady = perfData.domContentLoadedEventEnd - perfData.navigationStart;
+            
+            document.getElementById('loadTime').textContent = loadTime;
+            document.getElementById('domReady').textContent = domReady;
+            
+            // 获取 Paint Timing
+            const paintEntries = performance.getEntriesByType('paint');
+            paintEntries.forEach(entry => {
+                if (entry.name === 'first-paint') {
+                    document.getElementById('firstPaint').textContent = Math.round(entry.startTime);
+                } else if (entry.name === 'first-contentful-paint') {
+                    document.getElementById('firstContentfulPaint').textContent = Math.round(entry.startTime);
+                }
+            });
+            
+            // 状态评估
+            const status = loadTime < 1000 ? 'excellent' : loadTime < 2000 ? 'good' : 'warning';
+            const statusText = loadTime < 1000 ? '优秀' : loadTime < 2000 ? '良好' : '需优化';
+            document.getElementById('loadTimeStatus').textContent = statusText;
+            document.getElementById('loadTimeStatus').className = `metric-status status-${status}`;
+            
+            log(`页面加载时间: ${loadTime}ms (${statusText})`, 'info');
+        }
+
+        // 内存使用
+        function updateMemoryMetrics() {
+            log('更新内存指标...', 'info');
+            
+            if (performance.memory) {
+                const used = (performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(1);
+                const total = (performance.memory.totalJSHeapSize / 1024 / 1024).toFixed(1);
+                const limit = (performance.memory.jsHeapSizeLimit / 1024 / 1024).toFixed(0);
+                const usage = ((performance.memory.usedJSHeapSize / performance.memory.jsHeapSizeLimit) * 100).toFixed(1);
+                
+                document.getElementById('currentMemory').textContent = used;
+                document.getElementById('jsHeapSize').textContent = total;
+                document.getElementById('jsHeapLimit').textContent = limit;
+                document.getElementById('heapUsage').textContent = usage;
+                
+                // 状态评估
+                const status = usage < 50 ? 'excellent' : usage < 75 ? 'good' : 'warning';
+                const statusText = usage < 50 ? '优秀' : usage < 75 ? '良好' : '需注意';
+                document.getElementById('memoryStatus').textContent = statusText;
+                document.getElementById('memoryStatus').className = `metric-status status-${status}`;
+                
+                log(`内存使用: ${used}MB / ${limit}MB (${usage}%)`, 'info');
+            } else {
+                log('浏览器不支持 performance.memory API', 'warning');
+            }
+        }
+
+        // 渲染性能测试
+        async function runRenderingTests() {
+            log('开始渲染性能测试...', 'info');
+            
+            const progress = document.getElementById('renderProgress');
+            const progressFill = document.getElementById('renderProgressFill');
+            progress.style.display = 'block';
+            
+            // Test 1: iframe 创建
+            progressFill.style.width = '25%';
+            const iframeStart = performance.now();
+            const iframe = document.createElement('iframe');
+            iframe.srcdoc = '<html><body><h1>Test Content</h1></body></html>';
+            document.body.appendChild(iframe);
+            await new Promise(resolve => setTimeout(resolve, 100));
+            const iframeTime = (performance.now() - iframeStart).toFixed(2);
+            document.getElementById('iframeTime').textContent = iframeTime;
+            document.body.removeChild(iframe);
+            log(`iframe 创建时间: ${iframeTime}ms`, 'info');
+            
+            // Test 2: Canvas 渲染
+            progressFill.style.width = '50%';
+            const canvas = document.getElementById('testCanvas');
+            const ctx = canvas.getContext('2d');
+            const canvasStart = performance.now();
+            for (let i = 0; i < 1000; i++) {
+                ctx.fillStyle = `rgb(${i % 255}, ${(i * 2) % 255}, ${(i * 3) % 255})`;
+                ctx.fillRect(Math.random() * 800, Math.random() * 600, 10, 10);
+            }
+            const canvasTime = (performance.now() - canvasStart).toFixed(2);
+            document.getElementById('canvasTime').textContent = canvasTime;
+            log(`Canvas 渲染时间: ${canvasTime}ms`, 'info');
+            
+            // Test 3: Worker 初始化
+            progressFill.style.width = '75%';
+            const workerStart = performance.now();
+            const workerCode = `
+                self.onmessage = function(e) {
+                    self.postMessage('pong');
+                };
+            `;
+            const blob = new Blob([workerCode], { type: 'application/javascript' });
+            const worker = new Worker(URL.createObjectURL(blob));
+            await new Promise(resolve => {
+                worker.onmessage = () => {
+                    const workerTime = (performance.now() - workerStart).toFixed(2);
+                    document.getElementById('workerTime').textContent = workerTime;
+                    log(`Worker 初始化时间: ${workerTime}ms`, 'info');
+                    worker.terminate();
+                    resolve();
+                };
+                worker.postMessage('ping');
+            });
+            
+            // Test 4: DOM 操作
+            progressFill.style.width = '100%';
+            const domStart = performance.now();
+            const container = document.createElement('div');
+            for (let i = 0; i < 1000; i++) {
+                const div = document.createElement('div');
+                div.textContent = `Item ${i}`;
+                container.appendChild(div);
+            }
+            document.body.appendChild(container);
+            await new Promise(resolve => setTimeout(resolve, 10));
+            document.body.removeChild(container);
+            const domTime = (performance.now() - domStart).toFixed(2);
+            document.getElementById('domOpsTime').textContent = domTime;
+            log(`DOM 操作时间: ${domTime}ms`, 'info');
+            
+            setTimeout(() => {
+                progress.style.display = 'none';
+                progressFill.style.width = '0%';
+            }, 1000);
+            
+            log('渲染性能测试完成', 'info');
+        }
+
+        // 运行所有测试
+        async function runAllTests() {
+            log('========================================', 'info');
+            log('开始完整性能基准测试', 'info');
+            log('========================================', 'info');
+            
+            collectSystemInfo();
+            measureStartupPerformance();
+            updateMemoryMetrics();
+            await runRenderingTests();
+            
+            log('========================================', 'info');
+            log('所有测试完成！', 'info');
+            log('========================================', 'info');
+        }
+
+        // 导出结果
+        function exportResults() {
+            const results = {
+                timestamp: new Date().toISOString(),
+                platform: navigator.platform,
+                userAgent: navigator.userAgent,
+                metrics: {
+                    startup: {
+                        loadTime: document.getElementById('loadTime').textContent,
+                        domReady: document.getElementById('domReady').textContent,
+                        firstPaint: document.getElementById('firstPaint').textContent,
+                        firstContentfulPaint: document.getElementById('firstContentfulPaint').textContent
+                    },
+                    memory: {
+                        current: document.getElementById('currentMemory').textContent,
+                        jsHeapSize: document.getElementById('jsHeapSize').textContent,
+                        jsHeapLimit: document.getElementById('jsHeapLimit').textContent,
+                        heapUsage: document.getElementById('heapUsage').textContent
+                    },
+                    rendering: {
+                        iframeTime: document.getElementById('iframeTime').textContent,
+                        canvasTime: document.getElementById('canvasTime').textContent,
+                        workerTime: document.getElementById('workerTime').textContent,
+                        domOpsTime: document.getElementById('domOpsTime').textContent
+                    }
+                }
+            };
+            
+            const json = JSON.stringify(results, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `performance-benchmark-${Date.now()}.json`;
+            a.click();
+            
+            log('测试结果已导出', 'info');
+        }
+
+        // 页面加载时自动运行
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                collectSystemInfo();
+                measureStartupPerformance();
+                updateMemoryMetrics();
+            }, 100);
+        });
+    </script>
+</body>
+</html>

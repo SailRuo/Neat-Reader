@@ -238,8 +238,8 @@ const extractAllTextToHTML = async () => {
   let fullHTML = ''
   let globalParagraph = '' // 跨页的全局段落缓存
   
-  // 中文和英文标点符号
-  const allPunctuation = "。！？；：，、\"\"''（）《》【】…—.!?;:,'\"()[]"
+  // 中文和英文标点符号（已在后面重新定义，这里注释掉）
+  // const allPunctuation = "。！？；：，、\"\"''（）《》【】…—.!?;:,'\"()[]"
   
   console.log('🚀 [PDF解析] 开始提取全文文本, 总页数:', totalPages)
   
@@ -295,8 +295,8 @@ const extractAllTextToHTML = async () => {
       })
       
       // 🎯 第三步：智能合并文本行（跨页连续）
-      let pageText = `<div class="pdf-page-content" data-page="${i}">`
-      let currentParagraph = ''
+      // let pageText = `<div class="pdf-page-content" data-page="${i}">`
+      // let currentParagraph = ''
       
       // 中文标点符号
       const chinesePunctuation = '。！？；：，、“”‘’（）《》【】…—'

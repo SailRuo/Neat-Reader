@@ -1,4 +1,4 @@
-import { ref, shallowRef, Ref } from 'vue'
+import { ref, Ref } from 'vue'
 import JSZip from 'jszip'
 import localforage from 'localforage'
 
@@ -93,9 +93,9 @@ export function useCustomEpubCore(
             metadata.value = {
                 title: metadataEl.querySelector('title')?.textContent || 'Unknown',
                 author: metadataEl.querySelector('creator')?.textContent || 'Unknown',
-                publisher: metadataEl.querySelector('publisher')?.textContent,
-                language: metadataEl.querySelector('language')?.textContent,
-                identifier: metadataEl.querySelector('identifier')?.textContent
+                publisher: metadataEl.querySelector('publisher')?.textContent || undefined,
+                language: metadataEl.querySelector('language')?.textContent || undefined,
+                identifier: metadataEl.querySelector('identifier')?.textContent || undefined
             }
         }
         

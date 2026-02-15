@@ -135,8 +135,8 @@ export function useEpubCore(
             // 🎯 使用 epub.js Themes API 注册和应用主题
             // 这比直接注入 CSS 更可靠
             if (isPageMode) {
-                const columnWidth = actualWidth - 80
-                const columnGap = 40
+                // const columnWidth = actualWidth - 80
+                // const columnGap = 40
                 
                 try {
                     // 🎯 关键修复：使用 epub.js 内置的分页机制，不要手动设置列布局

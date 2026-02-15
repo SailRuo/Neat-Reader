@@ -275,7 +275,7 @@ const addCopyButtons = () => {
 }
 
 // 自动调整 textarea 高度
-const autoResize = (e?: Event) => {
+const autoResize = (_e?: Event) => {
   const ta = inputRef.value
   if (!ta) return
   ta.style.height = 'auto'
@@ -499,7 +499,7 @@ const handleOverlayClick = () => {
 }
 
 // Shift+Enter 换行处理
-const handleShiftEnter = (e: KeyboardEvent) => {
+const handleShiftEnter = (_e: KeyboardEvent) => {
   // 允许默认行为（换行）
   // 不需要额外处理，浏览器会自动插入换行
 }

@@ -1047,7 +1047,6 @@ const goToCfi = async (cfi: string, chapterIndex?: number) => {
     console.log('📍 [Foliate] 步骤2: 执行候选定位尝试')
     
     let resolved = false
-    let lastError: unknown = null
     for (const c of candidates) {
       try {
         console.log('🧪 [Foliate] 尝试候选 CFI:', c)
@@ -1068,7 +1067,7 @@ const goToCfi = async (cfi: string, chapterIndex?: number) => {
         console.log('✅ [Foliate] 候选跳转成功:', c)
         break
       } catch (e) {
-        lastError = e
+        // _lastError = e
         const msg = e instanceof Error ? e.message : '解析异常'
         console.warn(`⚠️ [Foliate] 候选 CFI 跳转失败 (${c}):`, msg)
         // 继续尝试下一个候选，不中断流程

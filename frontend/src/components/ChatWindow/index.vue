@@ -145,7 +145,7 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
-import { useRouter } from 'vue-router'
+// import { useRouter } from 'vue-router'
 import * as qwenAPI from '../../api/qwen'
 import { qwenTokenManager } from '../../utils/qwenTokenManager'
 
@@ -176,7 +176,7 @@ const emit = defineEmits<{
   'navigate-to-settings': []
 }>()
 
-const router = useRouter()
+// const router = useRouter()
 const messagesContainer = ref<HTMLElement>()
 const inputRef = ref<HTMLTextAreaElement>()
 const inputMessage = ref('')

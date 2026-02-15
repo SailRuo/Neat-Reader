@@ -26,7 +26,8 @@ export interface QwenPollResponse {
   refresh_token?: string
   expires_in?: number
   token_type?: string
-  resource_url?: string  // 添加 resource_url
+  resource_url?: string
+  is_mock?: boolean  // 添加 mock 标记
 }
 
 export interface QwenTestResponse {

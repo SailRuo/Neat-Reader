@@ -1,4 +1,4 @@
-import { ref, Ref, computed } from 'vue'
+import { ref, Ref } from 'vue'
 import { Book, Rendition } from 'epubjs'
 
 export interface ProgressData {

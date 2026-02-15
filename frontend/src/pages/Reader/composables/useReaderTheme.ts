@@ -1,4 +1,4 @@
-import { ref, Ref, watch } from 'vue'
+import { ref, Ref } from 'vue'
 import { Rendition } from 'epubjs'
 
 export interface ThemeColors {

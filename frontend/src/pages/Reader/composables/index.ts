@@ -11,7 +11,7 @@ export { useReaderProgress } from './useReaderProgress'
 export type { ProgressData, ChapterData } from './useReaderProgress'
 
 export { useAnnotations } from './useAnnotations'
-export type { Note } from './useAnnotations'
+// export type { Note } from './useAnnotations'  // Note 类型不存在，已移除
 
 export { usePageNavigation } from './usePageNavigation'
 export type { PageNavigationOptions } from './usePageNavigation'

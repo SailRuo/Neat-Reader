@@ -1,0 +1,31 @@
+{
+  "timestamp": "2026-02-13T15:02:21.763Z",
+  "platform": "win32",
+  "nodeVersion": "v22.6.0",
+  "electronVersion": "^28.0.0",
+  "measurements": {
+    "buildSize": {
+      "totalSize": 378452804,
+      "formattedSize": "360.92 MB",
+      "installers": [
+        {
+          "name": "Neat Reader-1.0.0-x64.exe",
+          "size": 83148706
+        }
+      ]
+    },
+    "startup": {
+      "manual": true
+    },
+    "memory": {
+      "manual": true,
+      "instructions": [
+        "启动应用: npm run dev",
+        "打开任务管理器查看内存使用",
+        "记录空闲状态内存",
+        "打开 EPUB 文件，记录阅读状态内存",
+        "打开 PDF 文件，记录阅读状态内存"
+      ]
+    }
+  }
+}

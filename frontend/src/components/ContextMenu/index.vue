@@ -177,7 +177,7 @@ const thirdMenuStyle = computed(() => {
   }
 })
 
-const handleMouseEnter = (item: MenuItem, index: number, event: MouseEvent) => {
+const handleMouseEnter = (item: MenuItem, _index: number, event: MouseEvent) => {
   if (item.disabled || !item.children) {
     activeSubmenu.value = null
     activeThirdMenu.value = null
@@ -215,7 +215,7 @@ const handleMouseEnter = (item: MenuItem, index: number, event: MouseEvent) => {
   })
 }
 
-const handleSubmenuMouseEnter = (item: MenuItem, index: number, event: MouseEvent) => {
+const handleSubmenuMouseEnter = (item: MenuItem, _index: number, event: MouseEvent) => {
   if (item.disabled || !item.children) {
     activeThirdMenu.value = null
     return

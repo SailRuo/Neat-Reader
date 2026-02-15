@@ -74,7 +74,7 @@
 </template>
 
 <script setup lang="ts">
-const props = defineProps<{
+defineProps<{
   progress: number
   currentPage: number
   totalPages: number

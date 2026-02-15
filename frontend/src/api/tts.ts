@@ -1,4 +1,6 @@
 import axios from 'axios'
+import { isTauri } from './tauri-adapter'
+import { invoke } from '@tauri-apps/api/tauri'
 
 const API_BASE = 'http://localhost:3001/api/tts'
 
@@ -29,6 +31,13 @@ export interface VoicesResponse {
  */
 export async function getVoices(): Promise<VoicesResponse> {
     try {
+        // Tauri 环境：使用 Tauri 命令
+        if (isTauri()) {
+            const result = await invoke<VoicesResponse>('tts_list_voices')
+            return result
+        }
+        
+        // Web/Electron 环境：使用 HTTP API
         const response = await axios.get(`${API_BASE}/voices`)
         return response.data.data
     } catch (error) {
@@ -45,6 +54,22 @@ export async function getVoices(): Promise<VoicesResponse> {
  */
 export async function synthesize(text: string, options: TTSOptions = {}): Promise<Blob> {
     try {
+        // Tauri 环境：使用 Tauri 命令
+        if (isTauri()) {
+            const audioData = await invoke<number[]>('tts_synthesize', {
+                text,
+                voice: options.voice || 'zh-CN-XiaoxiaoNeural',
+                rate: options.rate || 0,
+                pitch: options.pitch || 0,
+                volume: options.volume || 0
+            })
+            
+            // 将 number[] 转换为 Uint8Array 再转为 Blob
+            const uint8Array = new Uint8Array(audioData)
+            return new Blob([uint8Array], { type: 'audio/mpeg' })
+        }
+        
+        // Web/Electron 环境：使用 HTTP API
         const response = await axios.post(
             `${API_BASE}/synthesize`,
             {

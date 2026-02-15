@@ -1,4 +1,4 @@
-import { ref, Ref, shallowRef } from 'vue'
+import { ref, Ref } from 'vue'
 import { Book, Rendition } from 'epubjs'
 
 export interface SearchResult {

@@ -8,13 +8,17 @@
     "dev:frontend": "cd frontend && npm run dev",
     "dev:backend": "cd backend && npm run dev",
     "dev:electron": "cross-env NODE_ENV=development electron .",
-    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\" \"wait-on http://localhost:5173 && npm run dev:electron\"",
+    "dev:tauri": "cargo tauri dev",
+    "dev": "cargo tauri dev",
     "build:frontend": "cd frontend && npm run build",
     "build:backend": "cd backend && npm install --production",
     "build": "npm run build:frontend && npm run build:backend && electron-builder",
     "build:win": "npm run build:frontend && npm run build:backend && electron-builder --win",
     "build:mac": "npm run build:frontend && npm run build:backend && electron-builder --mac",
-    "build:linux": "npm run build:frontend && npm run build:backend && electron-builder --linux"
+    "build:linux": "npm run build:frontend && npm run build:backend && electron-builder --linux",
+    "build:tauri": "cargo tauri build",
+    "build:tauri:win": "cargo tauri build --target x86_64-pc-windows-msvc",
+    "tauri": "cargo tauri"
   },
   "keywords": [
     "ebook",
@@ -34,6 +38,11 @@
   },
   "dependencies": {
     "@ray-d-song/foliate-js": "^0.0.1",
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@tauri-apps/plugin-fs": "^2.4.5",
+    "@tauri-apps/plugin-http": "^2.5.7",
+    "@tauri-apps/plugin-shell": "^2.3.5",
     "foliate-js": "^1.0.1"
   }
 }

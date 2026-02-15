@@ -121,12 +121,14 @@ class QwenTokenManager {
   /**
    * 检查 token 是否即将过期
    */
+  /*
   private isTokenExpiringSoon(): boolean {
     if (!this.tokenData) return false
     
     const timeUntilExpiry = this.tokenData.expiresAt - Date.now()
     return timeUntilExpiry <= this.REFRESH_LEAD_TIME
   }
+  */
   
   /**
    * 检查 token 是否已过期

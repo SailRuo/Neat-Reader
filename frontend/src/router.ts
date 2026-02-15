@@ -27,6 +27,11 @@ const router = createRouter({
       path: '/qwen-callback',
       name: 'QwenCallback',
       component: () => import('./pages/Callback/index.vue')
+    },
+    {
+      path: '/dev-test',
+      name: 'DevTest',
+      component: () => import('./pages/DevTest.vue')
     }
   ]
 })

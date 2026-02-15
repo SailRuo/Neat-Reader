@@ -183,7 +183,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useEbookStore } from '../../stores/ebook'
 import { useDialogStore } from '../../stores/dialog'
-import { api } from '../../api/adapter'
+import { api, detectEnvironment } from '../../api/adapter'
 import * as qwenAPI from '../../api/qwen'
 import { qwenTokenManager } from '../../utils/qwenTokenManager'
 import * as Icons from 'lucide-vue-next'
@@ -262,90 +262,50 @@ onBeforeUnmount(() => {
   qwenTokenManager.destroy()
 })
 
-const getAuthorization = () => {
+const getAuthorization = async () => {
   console.log('=== 开始获取授权 ===')
-  console.log('当前环境检测:')
-  console.log('- window.electron 存在:', !!window.electron)
-  console.log('- window.location.href:', window.location.href)
   
   // 使用固定的百度授权URL（alist提供的）
   const authUrl = 'https://openapi.baidu.com/oauth/2.0/authorize?response_type=code&client_id=hq9yQ9w9kR4YHj1kyYafLygVocobh7Sf&redirect_uri=https://alistgo.com/tool/baidu/callback&scope=basic,netdisk&qrcode=1'
   
-  console.log('授权URL:', authUrl)
+  const env = detectEnvironment()
+  console.log('- 运行环境:', env)
+  console.log('- 授权URL:', authUrl)
   
   try {
-    if (window.electron) {
-      // Electron环境：使用内置窗口处理授权
-      console.log('✓ 检测到Electron环境，使用内置窗口处理授权')
-      console.log('调用 window.electron.openAuthWindow...')
+    if (env === 'tauri' || env === 'electron') {
+      // Tauri/Electron环境：使用内置窗口处理授权
+      console.log(`✓ 检测到${env}环境，使用内置窗口处理授权`)
       
-      window.electron.openAuthWindow(authUrl).then((result) => {
-        console.log('openAuthWindow 返回结果:', result)
-        if (result.success && result.code) {
-          console.log('✓ 获取到授权码:', result.code)
-          // 使用alist API获取token
-          handleAuthCodeViaAlist(result.code)
-        } else {
-          console.error('✗ 授权失败:', result.error)
-          dialogStore.showErrorDialog('授权失败', result.error || '用户取消授权')
-        }
-      }).catch((error) => {
-        console.error('✗ 授权窗口Promise异常:', error)
-        dialogStore.showErrorDialog('授权失败', '无法打开授权窗口: ' + error.message)
-      })
-    } else {
-      // 浏览器环境：使用外部浏览器并监听postMessage
-      console.log('✓ 浏览器环境，使用外部浏览器打开授权页面')
-      
-      // 添加 postMessage 监听器
-      const messageHandler = (event: MessageEvent) => {
-        console.log('收到 postMessage:', event.data)
-        
-        // 验证消息来源
-        if (event.origin !== window.location.origin) {
-          console.warn('忽略来自不同源的消息:', event.origin)
-          return
-        }
-        
-        // 检查消息类型
-        if (event.data && event.data.type === 'baidu-auth-code' && event.data.code) {
-          console.log('✓ 收到授权码:', event.data.code)
-          
-          // 移除监听器
-          window.removeEventListener('message', messageHandler)
-          
-          // 使用alist API获取token
-          handleAuthCodeViaAlist(event.data.code)
-        }
-      }
-      
-      // 添加监听器
-      window.addEventListener('message', messageHandler)
-      console.log('✓ 已添加 postMessage 监听器')
-      
-      // 打开授权窗口
-      const newWindow = window.open(authUrl, '_blank', 'width=800,height=600')
-      if (newWindow) {
-        console.log('✓ 外部浏览器窗口打开成功')
-        dialogStore.showDialog({
-          title: '授权提示',
-          message: '请在打开的页面中完成授权，授权成功后会自动获取授权信息',
-          type: 'info'
-        })
+      const authResult = await api.openAuthWindow(authUrl)
+      console.log('openAuthWindow 返回结果:', authResult)
+      if (authResult.success && authResult.code) {
+        console.log('✓ 获取到授权码:', authResult.code)
+        // 使用alist API获取token
+        handleAuthCodeViaAlist(authResult.code)
       } else {
-        console.error('✗ 外部浏览器窗口被阻止')
-        window.removeEventListener('message', messageHandler)
-        dialogStore.showErrorDialog('窗口被阻止', '请允许弹出窗口')
+        console.error('✗ 授权失败:', authResult.error)
+        dialogStore.showErrorDialog('授权失败', authResult.error || '用户取消授权')
       }
+    } else {
+      // 浏览器环境：直接打开授权页面（新标签页）
+      console.log('✓ 浏览器环境，打开授权页面')
+      
+      // CRITICAL: 必须在用户点击事件中同步打开窗口，否则会被浏览器拦截
+      // 使用 _blank 在新标签页打开，避免弹窗拦截
+      window.open(authUrl, '_blank')
+      
+      // 显示操作指引
+      dialogStore.showDialog({
+        title: '百度网盘授权',
+        message: '📋 请按以下步骤完成授权：\n\n1️⃣ 在打开的页面中扫描二维码或登录百度账号\n\n2️⃣ 授权成功后，页面会显示 Refresh Token\n\n3️⃣ 复制 Refresh Token 并粘贴到下方输入框\n\n4️⃣ 系统将自动连接',
+        type: 'info'
+      })
     }
   } catch (error) {
     console.error('✗ 获取授权过程异常:', error)
-    console.error('异常详情:', {
-      message: error.message,
-      stack: error.stack,
-      name: error.name
-    })
-    dialogStore.showErrorDialog('打开失败', '无法打开授权页面: ' + error.message)
+    const err = error as Error
+    dialogStore.showErrorDialog('打开失败', '无法打开授权页面: ' + err.message)
   }
   
   console.log('=== 获取授权函数执行完成 ===')
@@ -410,12 +370,13 @@ const handleAuthCodeViaAlist = async (code: string) => {
     }
   } catch (error) {
     console.error('✗ 调用alist API异常:', error)
+    const err = error as Error
     console.error('异常详情:', {
-      message: error.message,
-      stack: error.stack,
-      name: error.name
+      message: err.message,
+      stack: err.stack,
+      name: err.name
     })
-    dialogStore.showErrorDialog('获取Token失败', '网络错误，请重试: ' + error.message)
+    dialogStore.showErrorDialog('获取Token失败', '网络错误，请重试: ' + err.message)
   } finally {
     isLoading.value = false
     console.log('=== alist API处理完成 ===')
@@ -525,7 +486,7 @@ const syncFromCloud = async () => {
     
     await ebookStore.loadBaidupanBooks()
     
-    dialogStore.showSuccessDialog('同步成功', '已从云端同步最新数据')
+    dialogStore.showSuccessDialog('同步成功：已从云端同步最新数据')
     console.log('✅ [手动同步] 同步完成')
   } catch (error) {
     console.error('❌ [手动同步] 同步失败:', error)
@@ -605,10 +566,11 @@ const startQwenAuth = async () => {
     console.log('Session ID:', deviceAuth.session_id)
     
     // 2. 打开授权页面
-    if (window.electron) {
-      // Electron 环境：使用系统默认浏览器打开（避免白屏）
-      console.log('✓ Electron 环境，使用系统浏览器打开授权页面')
-      window.electron.openExternal(deviceAuth.auth_url)
+    const env = detectEnvironment()
+    if (env === 'tauri' || env === 'electron') {
+      // Tauri/Electron 环境：使用系统默认浏览器打开（避免白屏）
+      console.log(`✓ ${env} 环境，使用系统浏览器打开授权页面`)
+      await api.openExternal(deviceAuth.auth_url)
     } else {
       // 浏览器环境
       window.open(deviceAuth.auth_url, '_blank', 'width=800,height=600')

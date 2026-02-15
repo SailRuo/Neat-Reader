@@ -644,6 +644,7 @@ const isBaidupanAuthorized = computed(() => {
 })
 
 // 显示百度网盘授权弹窗
+/*
 const showBaidupanAuthDialog = () => {
   if (ebookStore.userConfig.storage.baidupan) {
     baidupanForm.value = {
@@ -654,6 +655,7 @@ const showBaidupanAuthDialog = () => {
   }
   showBaidupanAuth.value = true
 }
+*/
 
 // 关闭百度网盘授权弹窗
 const closeBaidupanAuthDialog = () => {
@@ -709,6 +711,7 @@ const saveBaidupanAuth = async () => {
 }
 
 // 取消百度网盘授权
+/*
 const cancelBaidupanAuth = async () => {
   try {
     await ebookStore.updateUserConfig({
@@ -721,6 +724,7 @@ const cancelBaidupanAuth = async () => {
     console.error('取消百度网盘授权失败:', error)
   }
 }
+*/
 
 // 获取字体名称
 const updateViewMode = async (mode: 'grid' | 'list') => {
@@ -1099,7 +1103,7 @@ const handleRemoveBook = (book: any) => {
             try {
               const result = await ebookStore.removeBook(targetBookId, targetStorage, false)
               if (result) {
-                dialogStore.showSuccessDialog('本地记录已删除', '云端文件保留')
+                dialogStore.showSuccessDialog('本地记录已删除，云端文件保留')
               } else {
                 dialogStore.showErrorDialog('删除失败', '无法删除指定书籍')
               }
@@ -1116,7 +1120,7 @@ const handleRemoveBook = (book: any) => {
             try {
               const result = await ebookStore.removeBook(targetBookId, targetStorage, true)
               if (result) {
-                dialogStore.showSuccessDialog('书籍删除成功', '本地和云端文件已删除')
+                dialogStore.showSuccessDialog('书籍删除成功：本地和云端文件已删除')
               } else {
                 dialogStore.showErrorDialog('删除失败', '无法删除指定书籍')
               }
@@ -1212,9 +1216,11 @@ const closeAddCategoryDialog = () => {
 }
 
 // 显示分类管理对话框
+/*
 const showCategoryManageDialog = () => {
   showCategoryManage.value = true
 }
+*/
 
 // 关闭分类管理对话框
 const closeCategoryManageDialog = () => {
@@ -1517,9 +1523,6 @@ onMounted(async () => {
       await ebookStore.fetchBaidupanUserInfo();
     }
     
-    // 初始化深色模式
-    initDarkMode();
-    
     // 添加全局点击监听，点击外部关闭速度拨号菜单
     document.addEventListener('click', handleClickOutside)
   } catch (error) {
@@ -1535,6 +1538,9 @@ onUnmounted(() => {
   if (searchDebounceTimer) {
     clearTimeout(searchDebounceTimer)
   }
+  
+  // 清理可能残留的主题类（确保不影响其他页面）
+  document.documentElement.classList.remove('theme-dark', 'theme-sepia', 'theme-green')
 })
 
 // 点击外部关闭速度拨号菜单
@@ -1545,28 +1551,6 @@ const handleClickOutside = (event: MouseEvent) => {
     isSpeedDialOpen.value = false
   }
 }
-
-// 初始化深色模式
-const initDarkMode = () => {
-  const theme = ebookStore.userConfig.reader.theme;
-  if (theme === 'dark') {
-    document.documentElement.classList.add('theme-dark');
-  } else {
-    document.documentElement.classList.remove('theme-dark');
-  }
-}
-
-// 监听主题变化
-watch(
-  () => ebookStore.userConfig.reader.theme,
-  (newTheme) => {
-    if (newTheme === 'dark') {
-      document.documentElement.classList.add('theme-dark');
-    } else {
-      document.documentElement.classList.remove('theme-dark');
-    }
-  }
-)
 </script>
 
 <style scoped>
@@ -2018,8 +2002,8 @@ body {
 .search-box {
   display: flex;
   align-items: center;
-  background: var(--color-bg-primary);
-  border: 1px solid var(--color-border);
+  background: #FFFFFF;
+  border: 1px solid #E5E7EB;
   border-radius: var(--radius-lg);
   padding: 0.75rem 1rem;
   transition: all var(--transition-base);
@@ -2080,10 +2064,10 @@ body {
 .view-controls {
   display: flex;
   align-items: center;
-  background: var(--color-bg-secondary);
+  background: #F9FAFB;
   border-radius: var(--radius-md);
   padding: 0.25rem;
-  border: 1px solid var(--color-border);
+  border: 1px solid #E5E7EB;
 }
 
 .view-btn {
@@ -2097,20 +2081,20 @@ body {
   cursor: pointer;
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--color-text-secondary);
+  color: #6B7280;
   transition: all var(--transition-fast);
   min-width: 2.5rem;
 }
 
 .view-btn:hover {
-  color: var(--color-text-primary);
-  background: var(--color-bg-primary);
+  color: #1F2937;
+  background: #FFFFFF;
   box-shadow: var(--shadow-sm);
 }
 
 .view-btn.active {
-  color: var(--color-primary);
-  background: var(--color-bg-primary);
+  color: #4A90E2;
+  background: #FFFFFF;
   box-shadow: var(--shadow-sm);
 }
 
@@ -2504,8 +2488,8 @@ body {
 
 /* 书籍卡片 - 基础样式 */
 .book-card {
-  background: var(--color-bg-primary);
-  border: 1px solid var(--color-border);
+  background: #FFFFFF;
+  border: 1px solid #E5E7EB;
   border-radius: 12px;
   overflow: hidden;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);

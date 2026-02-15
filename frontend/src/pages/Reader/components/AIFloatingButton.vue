@@ -18,7 +18,7 @@
 
 <script setup lang="ts">
 // Props
-const props = defineProps<{
+defineProps<{
   isOpen: boolean
 }>()
 

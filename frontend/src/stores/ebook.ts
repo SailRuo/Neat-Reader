@@ -21,6 +21,7 @@ export interface AIChatMessage {
   content: string;
   timestamp: number;
   selectedText?: string; // 用户选中的文本（如果有）
+  isStreaming?: boolean; // 是否正在流式输出
 }
 
 // AI 对话历史类型（每本书独立）
@@ -80,6 +81,7 @@ export interface UserConfig {
       namingStrategy: string; // 文件命名策略: 0 不重命名, 1 重命名, 2 条件重命名, 3 覆盖
       appKey?: string;
       secretKey?: string;
+      resource_url?: string; // Qwen 资源 URL
     } | null;
   };
   reader: {
@@ -880,7 +882,9 @@ export const useEbookStore = defineStore('ebook', () => {
             }
             
             const filesToDelete: string[] = [];
-            filesToDelete.push(book.baidupanPath);
+            if (book.baidupanPath) {
+              filesToDelete.push(book.baidupanPath);
+            }
             filesToDelete.push(`/apps/Neat Reader/sync/progress/${book.id}.json`);
             
             await api.deleteFile(
@@ -1102,6 +1106,7 @@ export const useEbookStore = defineStore('ebook', () => {
   };
 
   // 🎯 核心修复：确保网盘目录存在
+  /*
   const ensureDirectoryExists = async (relativePath: string): Promise<boolean> => {
     try {
       if (!await ensureBaidupanToken() || !userConfig.value.storage.baidupan) return false;
@@ -1119,6 +1124,7 @@ export const useEbookStore = defineStore('ebook', () => {
       return false;
     }
   };
+  */
 
   // 获取百度网盘用户信息
   const fetchBaidupanUserInfo = async (forceRefresh = false) => {
@@ -1183,7 +1189,7 @@ export const useEbookStore = defineStore('ebook', () => {
     return true;
   };
 
-  const uploadToBaidupanNew = async (file: File, path: string): Promise<boolean> => {
+  const uploadToBaidupanNew = async (file: File, _path: string): Promise<boolean> => {
     try {
       // console.log('开始上传到百度网盘:', file.name, '大小:', file.size, '路径:', path);
       

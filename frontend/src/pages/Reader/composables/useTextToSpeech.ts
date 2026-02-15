@@ -354,7 +354,7 @@ export function useTextToSpeech() {
     }
 
     // 使用 Piper TTS (预留接口)
-    const speakWithPiper = async (text: string, options?: TTSOptions) => {
+    const speakWithPiper = async (_text: string, _options?: TTSOptions) => {
         console.warn('⚠️ Piper TTS 尚未实现')
         // TODO: 实现 Piper TTS
     }

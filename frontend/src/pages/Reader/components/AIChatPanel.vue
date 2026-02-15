@@ -179,7 +179,7 @@ const loadBookContext = async () => {
         const maxChapters = 3 // 只提取前3章
         const maxLength = 5000 // 最多5000字
 
-        for (const item of spine.items) {
+        for (const item of (spine as any).items) {
           if (chapterCount >= maxChapters || extractedText.length >= maxLength) break
           
           try {
@@ -267,6 +267,7 @@ const handleSend = async () => {
       qwenConfig.accessToken,
       fullPrompt,
       qwenConfig.resource_url,
+      undefined,  // images 参数
       (chunk) => {
         assistantMessage += chunk
         
