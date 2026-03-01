@@ -41,7 +41,7 @@ const emit = defineEmits<{
   'chapter-change': [data: { index: number; title: string }]
   click: []
   'text-selected': [data: { text: string; position: { x: number; y: number }; cfi?: string; chapterIndex?: number; chapterTitle?: string }]
-  'annotation-click': [annotation: any]
+  'annotation-click': [payload: { annotation: any; position?: { x: number; y: number } }]
 }>()
 
 // 状态
@@ -73,6 +73,10 @@ const currentChapterTexts = ref<Map<number, string>>(new Map())
 
 let cfiFromRange: ((range: Range) => string) | null = null
 let cfiToRange: ((doc: Document, cfi: string) => Range) | null = null
+let epubCfiModule: {
+  joinIndir?: (...cfis: string[]) => string
+  fake?: { fromIndex: (index: number) => string }
+} | null = null
 
 const annotationOverlayers = ref<Map<number, AnnotationOverlayer>>(new Map())
 
@@ -271,22 +275,13 @@ const bindDocSelectionListener = (doc: Document, index: number) => {
     const selectedText = selection.toString().trim()
     if (!selectedText || selectedText.length === 0) return
 
-    // 获取选中文本的位置
+    // 获取选中文本的位置（iframe 内 rect 相对于 iframe 视口，需加上 iframe 偏移）
     const range = selection.getRangeAt(0)
     const rect = range.getBoundingClientRect()
-    
-    // 获取 iframe 的位置偏移
     const iframe = (doc as any).defaultView?.frameElement
-    let offsetX = 0
-    let offsetY = 0
-    
-    if (iframe) {
-      const iframeRect = iframe.getBoundingClientRect()
-      offsetX = iframeRect.left
-      offsetY = iframeRect.top
-    }
+    const offsetX = iframe ? iframe.getBoundingClientRect().left : 0
+    const offsetY = iframe ? iframe.getBoundingClientRect().top : 0
 
-    // 计算相对于视口的位置
     const position = {
       x: rect.left + offsetX + rect.width / 2,
       y: rect.bottom + offsetY
@@ -467,16 +462,19 @@ const initialize = async () => {
     }
 
     // 动态导入 Foliate-js
-    const [, epubCfiModule] = await Promise.all([
+    const [, cfiModule] = await Promise.all([
       import('@ray-d-song/foliate-js/view.js'),
       import('@ray-d-song/foliate-js/epubcfi.js').catch(() => null as any),
     ])
 
-    if (epubCfiModule?.fromRange) {
-      cfiFromRange = (range: Range) => epubCfiModule.fromRange(range)
+    if (cfiModule?.fromRange) {
+      cfiFromRange = (range: Range) => cfiModule.fromRange(range)
     }
-    if (epubCfiModule?.toRange) {
-      cfiToRange = (doc: Document, cfi: string) => epubCfiModule.toRange(doc, cfi)
+    if (cfiModule?.toRange) {
+      cfiToRange = (doc: Document, cfi: string) => cfiModule.toRange(doc, cfi)
+    }
+    if (cfiModule?.joinIndir || cfiModule?.fake) {
+      epubCfiModule = cfiModule
     }
 
     // 创建视图元素
@@ -973,7 +971,7 @@ const goToCfi = async (cfi: string, chapterIndex?: number) => {
     return
   }
   
-  const buildCfiCandidates = (raw: string) => {
+  const buildCfiCandidates = (raw: string, forChapterIndex?: number) => {
     const wrapped = raw.startsWith('epubcfi(') ? raw : (raw.startsWith('/') ? `epubcfi(${raw})` : raw)
     if (/^\d+$/.test(raw)) return [raw]
 
@@ -983,29 +981,70 @@ const goToCfi = async (cfi: string, chapterIndex?: number) => {
     const inner = m[1]
     const parts = inner.split(',')
 
-    // 如果不是 Range CFI，直接返回
-    if (parts.length < 2) return [wrapped]
+    // 🎯 生成多种 CFI 候选格式（按优先级排序）
+    const candidates: string[] = []
+
+    // 🎯 优先级 0：若有 chapterIndex，先尝试带 spine 前缀的完整 CFI（epub.js 需要）
+    if (forChapterIndex !== undefined && epubCfiModule?.joinIndir && epubCfiModule?.fake?.fromIndex) {
+      const spineBase = epubCfiModule.fake.fromIndex(forChapterIndex)
+      const withSpine = epubCfiModule.joinIndir(spineBase, wrapped)
+      candidates.push(withSpine)
+    }
+
+    // 如果不是 Range CFI，直接返回（已含 spine 候选则用上面的）
+    if (parts.length < 2) {
+      if (candidates.length > 0) {
+        console.log('🔍 [CFI] 生成候选列表:', candidates)
+        return Array.from(new Set(candidates))
+      }
+      return [wrapped]
+    }
 
     const base = parts[0]
     const start = parts[1]
+    const end = parts[2]
 
-    // 🎯 核心修复：彻底规避带逗号的 CFI 格式（Foliate 解析器在单章节模式下容易崩）
-    // 候选 1：标准拼接式 Point CFI
+    // 🎯 优先级 1：base + start 拼接（最可靠的 Point CFI）
     const joinedInner = `${base}${start.startsWith('/') ? '' : '/'}${start}`
-    const joinedPoint = `epubcfi(${joinedInner})`
+    candidates.push(`epubcfi(${joinedInner})`)
 
-    // 候选 2：更深层级的拼接尝试（有些 base 以 / 结尾）
-    const deepJoinedInner = `${base.endsWith('/') ? base.slice(0, -1) : base}${start.startsWith('/') ? '' : '/'}${start}`
-    const deepJoinedPoint = `epubcfi(${deepJoinedInner})`
+    // 🎯 若有 chapterIndex，也生成带 spine 的 Point CFI
+    if (forChapterIndex !== undefined && epubCfiModule?.joinIndir && epubCfiModule?.fake?.fromIndex) {
+      const spineBase = epubCfiModule.fake.fromIndex(forChapterIndex)
+      candidates.push(epubCfiModule.joinIndir(spineBase, `epubcfi(${joinedInner})`))
+    }
 
-    // 候选 3：如果是在 init 时生成的全局路径，可能需要保留（作为最后的尝试）
-    const original = wrapped
+    // 🎯 优先级 2：处理 base 末尾斜杠的情况
+    if (base.endsWith('/')) {
+      const cleanBase = base.slice(0, -1)
+      candidates.push(`epubcfi(${cleanBase}${start.startsWith('/') ? '' : '/'}${start})`)
+    }
 
-    // 🎯 只返回不带逗号的拼接 Point CFI 变体作为高优候选
-    return Array.from(new Set([joinedPoint, deepJoinedPoint, original]))
+    // 🎯 优先级 3：如果 start 包含文本偏移（如 /3:78），尝试去掉偏移
+    const startWithoutOffset = start.replace(/:\d+$/, '')
+    if (startWithoutOffset !== start) {
+      candidates.push(`epubcfi(${base}${startWithoutOffset.startsWith('/') ? '' : '/'}${startWithoutOffset})`)
+    }
+
+    // 🎯 优先级 4：只使用 base（跳转到段落开头）
+    candidates.push(`epubcfi(${base})`)
+
+    // 🎯 优先级 5：尝试使用 end 部分（如果存在）
+    if (end) {
+      const endJoined = `${base}${end.startsWith('/') ? '' : '/'}${end}`
+      candidates.push(`epubcfi(${endJoined})`)
+    }
+
+    // 🎯 最后尝试：原始 Range CFI（通常不工作，但作为兜底）
+    candidates.push(wrapped)
+
+    console.log('🔍 [CFI] 生成候选列表:', candidates)
+
+    // 去重并返回
+    return Array.from(new Set(candidates))
   }
 
-  const candidates = buildCfiCandidates(cfi)
+  const candidates = buildCfiCandidates(cfi, chapterIndex)
   if (candidates.length === 1 && /^\d+$/.test(candidates[0])) {
     return goToChapter(parseInt(candidates[0], 10))
   }
@@ -1041,6 +1080,8 @@ const goToCfi = async (cfi: string, chapterIndex?: number) => {
         }
         checkLoad()
       })
+    } else if (chapterIndex !== undefined) {
+      console.log('📍 [Foliate] 已在目标章节:', chapterIndex, '当前章节:', currentChapterIndex.value)
     }
 
     // 3. 执行精准跳转
@@ -1048,6 +1089,8 @@ const goToCfi = async (cfi: string, chapterIndex?: number) => {
     
     let resolved = false
     let lastError: unknown = null
+    const initialCfi = view.value.lastLocation?.cfi
+    
     for (const c of candidates) {
       try {
         console.log('🧪 [Foliate] 尝试候选 CFI:', c)
@@ -1057,16 +1100,37 @@ const goToCfi = async (cfi: string, chapterIndex?: number) => {
         // 🎯 异步等待微任务，确保 DOM 稳定
         await new Promise(resolve => setTimeout(resolve, 0))
         
+        // 🎯 同一章节内跳转时，也给一点缓冲时间确保 DOM 稳定
+        if (!needsContextSwitch && chapterIndex !== undefined) {
+          await new Promise(resolve => setTimeout(resolve, 30))
+        }
+        
         // 如果是跨章节后的跳转，给解析器一点缓冲时间
         if (needsContextSwitch) {
           await new Promise(resolve => setTimeout(resolve, 50))
         }
 
         await view.value.goTo(c)
-        resolved = true
-        targetCfi = c
-        console.log('✅ [Foliate] 候选跳转成功:', c)
-        break
+        
+        // 🎯 验证跳转是否真的成功（位置是否改变 + 章节一致）
+        await new Promise(resolve => setTimeout(resolve, 50))
+        const newLoc = view.value.lastLocation
+        const newCfi = newLoc?.cfi
+        const positionChanged = newCfi && newCfi !== initialCfi
+        const sectionMatch = chapterIndex === undefined || newLoc?.section === chapterIndex ||
+          (typeof newLoc?.section === 'object' && (newLoc as any).section?.current === chapterIndex)
+        
+        if (positionChanged && sectionMatch) {
+          resolved = true
+          targetCfi = c
+          console.log('✅ [Foliate] 候选跳转成功并验证:', c, '新位置:', newCfi)
+          break
+        } else if (positionChanged && !sectionMatch) {
+          console.warn(`⚠️ [Foliate] 候选 CFI 跳转到了错误章节 (目标:${chapterIndex}, 实际:${newLoc?.section})，继续尝试`)
+        } else {
+          console.warn(`⚠️ [Foliate] 候选 CFI 调用成功但位置未改变 (${c})`)
+          // 继续尝试下一个候选
+        }
       } catch (e) {
         lastError = e
         const msg = e instanceof Error ? e.message : '解析异常'
@@ -1076,39 +1140,65 @@ const goToCfi = async (cfi: string, chapterIndex?: number) => {
     }
 
     if (!resolved) {
-      console.error('❌ [Foliate] 无法解析任何 CFI 候选，尝试进度百分比补救')
-      try {
-        if (props.initialProgress && props.initialProgress > 0) {
-          await view.value.goToFraction(props.initialProgress / 100)
+      // 🎯 兜底：使用 cfiToRange + scrollToAnchor（章节内 CFI 在 epub.js 解析失败时仍可定位）
+      const fallbackChapterIndex = chapterIndex ?? currentChapterIndex.value
+      const doc = loadedDocs.value.get(fallbackChapterIndex)
+      if (cfiToRange && doc && view.value.renderer?.scrollToAnchor) {
+        // 仅尝试章节内相对 CFI（不含 !），cfiToRange 需要针对当前 doc 的路径
+        const docRelativeCandidates = candidates.filter(c => !c.includes('!'))
+        for (const c of docRelativeCandidates) {
+          try {
+            const range = cfiToRange(doc, c)
+            if (range?.startContainer) {
+              await view.value.renderer.scrollToAnchor(range, true)
+              resolved = true
+              targetCfi = c
+              console.log('✅ [Foliate] 通过 cfiToRange + scrollToAnchor 兜底成功:', c)
+              break
+            }
+          } catch {
+            // 继续尝试下一个候选
+          }
         }
-      } catch (fallbackErr) {
-        console.error('❌ [Foliate] 进度补救也失败了:', fallbackErr)
+      }
+      if (!resolved) {
+        console.error('❌ [Foliate] 无法解析任何 CFI 候选，尝试进度百分比补救')
+        try {
+          if (props.initialProgress && props.initialProgress > 0) {
+            await view.value.goToFraction(props.initialProgress / 100)
+          }
+        } catch (fallbackErr) {
+          console.error('❌ [Foliate] 进度补救也失败了:', fallbackErr)
+        }
       }
     }
     
-    // 4. 跳转后校准与恢复
-    setTimeout(async () => {
-      const currentLoc = view.value.lastLocation
-      console.log('🔄 [Foliate] 跳转校验，最终位置:', currentLoc?.cfi)
-      
-      const hasOverlayInterference = currentLoc?.cfi?.includes('neat-reader-annotation-overlay')
-      if (hasOverlayInterference) {
-        console.warn('⚠️ [Foliate] 检测到位置被干扰，执行二次强跳校准')
-        clearOverlays()
-        await view.value.goTo(targetCfi).catch(() => {})
-      }
-      
-      if (view.value.lastLocation) {
-        handleRelocate(view.value.lastLocation)
-        // 恢复注释层（只针对当前章节）
-        const rebuildIndex = chapterIndex ?? currentChapterIndex.value
-        scheduleRebuildAnnotationOverlay(rebuildIndex, 100)
-        
-        if (view.value.renderer?.render) {
-          view.value.renderer.render()
-        }
-      }
-    }, 400)
+    // 4. 跳转后校准与恢复（用 RAF 等待布局完成，替代固定 400ms）
+    const runAfterLayout = () => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(async () => {
+          const currentLoc = view.value?.lastLocation
+          if (!currentLoc) return
+          console.log('🔄 [Foliate] 跳转校验，最终位置:', currentLoc?.cfi)
+
+          const hasOverlayInterference = currentLoc?.cfi?.includes('neat-reader-annotation-overlay')
+          if (hasOverlayInterference) {
+            console.warn('⚠️ [Foliate] 检测到位置被干扰，执行二次强跳校准')
+            clearOverlays()
+            await view.value?.goTo(targetCfi).catch(() => {})
+          }
+
+          const loc = view.value?.lastLocation
+          if (loc) {
+            handleRelocate(loc)
+            const rebuildIndex = chapterIndex ?? currentChapterIndex.value
+            scheduleRebuildAnnotationOverlay(rebuildIndex, 0)
+            view.value?.renderer?.render?.()
+          }
+        })
+      })
+    }
+    runAfterLayout()
   } catch (err) {
     console.error('❌ [Foliate] 精准跳转流程崩溃:', err)
     rebuildAllAnnotationOverlays() 
@@ -1216,9 +1306,31 @@ watch(() => props.lineHeight, (newHeight, oldHeight) => {
   }
 })
 
-// 处理文字点击（例如：点击已有的高亮）
-const handleAnnotationClick = (annotation: Annotation) => {
-  emit('annotation-click', annotation)
+// 处理文字点击（例如：点击已有的高亮/下划线）
+const handleAnnotationClick = (annotation: Annotation, event?: MouseEvent) => {
+  let position: { x: number; y: number } | undefined
+
+  if (event) {
+    let offsetX = 0
+    let offsetY = 0
+
+    const target = event.target as HTMLElement | SVGElement | null
+    const doc = target?.ownerDocument as Document | null
+
+    const iframe = (doc as any)?.defaultView?.frameElement as HTMLElement | null
+    if (iframe) {
+      const iframeRect = iframe.getBoundingClientRect()
+      offsetX = iframeRect.left
+      offsetY = iframeRect.top
+    }
+
+    position = {
+      x: event.clientX + offsetX,
+      y: event.clientY + offsetY,
+    }
+  }
+
+  emit('annotation-click', { annotation, position })
 }
 
 // 修改 watch annotations，确保实时更新

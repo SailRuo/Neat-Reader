@@ -13,7 +13,7 @@ export function createAnnotationOverlayer(
   doc: Document,
   annotations: Annotation[],
   getRangeFromCFI: (annotation: Annotation) => Range | null,
-  onAnnotationClick?: (annotation: Annotation) => void
+  onAnnotationClick?: (annotation: Annotation, event: MouseEvent) => void
 ): AnnotationOverlayer {
   // 创建 SVG 容器
   const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg')
@@ -103,7 +103,7 @@ export function createAnnotationOverlayer(
           highlightRect.setAttribute('width', rect.width.toString())
           highlightRect.setAttribute('height', rect.height.toString())
           highlightRect.setAttribute('fill', annotation.color || '#2196f3')
-          highlightRect.setAttribute('fill-opacity', '0.2')
+          highlightRect.setAttribute('fill-opacity', '0.35')
           highlightRect.setAttribute('data-annotation-id', annotation.id)
           highlightRect.style.pointerEvents = 'auto'
           highlightRect.style.cursor = 'pointer'
@@ -152,7 +152,7 @@ export function createAnnotationOverlayer(
     if (annotationId) {
       const annotation = annotations.find(a => a.id === annotationId)
       if (annotation && onAnnotationClick) {
-        onAnnotationClick(annotation)
+        onAnnotationClick(annotation, event)
       }
       return annotation || null
     }

@@ -3,84 +3,107 @@
     <!-- 加载状态 -->
     <LoadingOverlay v-if="isLoading" />
     
-    <!-- 顶部工具栏 -->
-    <TopBar
-      v-show="showControls"
-      :book="book"
-      :chapter-title="currentChapterTitle"
-      :theme="theme"
-      @back="handleBack"
-      @toggle-sidebar="handleToggleSidebar"
-    />
-    
-    <!-- 阅读内容区 -->
+    <!-- 阅读内容区 + AI 分栏 -->
     <div class="reader-content">
-      <!-- Foliate EPUB 阅读器 -->
-      <FoliateReader
-        v-if="book && book.format === 'epub'"
-        ref="foliateReaderRef"
+      <!-- 左侧：阅读区域 -->
+      <div class="reader-main" :style="readerPaneStyle">
+        <!-- 顶部工具栏（限定在阅读区域内） -->
+        <TopBar
+          v-show="showControls"
+          :book="book"
+          :chapter-title="currentChapterTitle"
+          :theme="theme"
+          @back="handleBack"
+          @toggle-sidebar="handleToggleSidebar"
+        />
+
+        <!-- Foliate EPUB 阅读器 -->
+        <FoliateReader
+          v-if="book && book.format === 'epub'"
+          ref="foliateReaderRef"
+          :book-id="book.id"
+          :book-content="book.content"
+          :theme="theme"
+          :font-size="fontSize"
+          :line-height="lineHeight"
+          :annotations="bookAnnotations"
+          :initial-progress="progress"
+          :initial-cfi="initialCfi"
+          @ready="handleReaderReady"
+          @progress-change="handleProgressChange"
+          @chapter-change="handleChapterChange"
+          @click="handleContentClick"
+          @text-selected="handleTextSelected"
+          @annotation-click="handleAnnotationClick"
+        />
+        
+        <!-- PDF 原生渲染 -->
+        <PdfReader
+          v-else-if="book?.format === 'pdf' && !isPdfTextMode"
+          ref="pdfReaderRef"
+          :book-id="book.id"
+          :theme="theme"
+          :initial-progress="progress"
+          @ready="handleReaderReady"
+          @progress-change="handleProgressChange"
+          @click="handleContentClick"
+        />
+        
+        <!-- PDF 文本重排模式 -->
+        <TextReflowReader
+          v-else-if="book?.format === 'pdf' && isPdfTextMode"
+          :content="pdfReflowContent"
+          :theme="theme"
+          :font-size="fontSize"
+          :line-height="lineHeight"
+          @click="handleContentClick"
+        />
+        
+        <!-- 浮动信息显示（控制栏隐藏时） -->
+        <transition name="fade">
+          <div v-if="!showControls" class="floating-progress">{{ progress }}%</div>
+        </transition>
+
+        <!-- 底部控制栏（限定在阅读区域内） -->
+        <BottomBar
+          v-show="showControls"
+          :progress="progress"
+          :current-page="currentPage"
+          :total-pages="totalPages"
+          :theme="theme"
+          :font-size="fontSize"
+          :line-height="lineHeight"
+          :is-pdf-text-mode="isPdfTextMode"
+          :is-parsing-pdf="isParsingPdf"
+          :format="book?.format"
+          @update:progress="handleUpdateProgress"
+          @update:theme="theme = $event as 'light' | 'sepia' | 'dark' | 'green'"
+          @update:font-size="fontSize = $event"
+          @update:line-height="lineHeight = $event"
+          @toggle-pdf-text-mode="togglePdfTextMode"
+        />
+      </div>
+
+      <!-- 中间分隔条（仅在 AI 打开时显示，可拖动） -->
+      <div
+        v-if="showAIChat"
+        class="reader-splitter"
+        @mousedown="handleSplitterMouseDown"
+      ></div>
+
+      <!-- 右侧：AI 对话区域 -->
+      <BookAIChatPanel
+        v-if="book && showAIChat"
+        class="reader-ai-pane"
+        :style="aiPaneStyle"
+        :is-open="showAIChat"
         :book-id="book.id"
-        :book-content="book.content"
-        :theme="theme"
-        :font-size="fontSize"
-        :line-height="lineHeight"
-        :annotations="bookAnnotations"
-        :initial-progress="progress"
-        :initial-cfi="initialCfi"
-        @ready="handleReaderReady"
-        @progress-change="handleProgressChange"
-        @chapter-change="handleChapterChange"
-        @click="handleContentClick"
-        @text-selected="handleTextSelected"
-        @annotation-click="handleAnnotationClick"
+        :book-title="book.title"
+        :selected-text="selectedTextForAI"
+        :current-page-context="currentPageText"
+        @close="handleCloseAIChat"
       />
-      
-      <!-- PDF 原生渲染 -->
-      <PdfReader
-        v-else-if="book?.format === 'pdf' && !isPdfTextMode"
-        ref="pdfReaderRef"
-        :book-id="book.id"
-        :theme="theme"
-        :initial-progress="progress"
-        @ready="handleReaderReady"
-        @progress-change="handleProgressChange"
-        @click="handleContentClick"
-      />
-      
-      <!-- PDF 文本重排模式 -->
-      <TextReflowReader
-        v-else-if="book?.format === 'pdf' && isPdfTextMode"
-        :content="pdfReflowContent"
-        :theme="theme"
-        :font-size="fontSize"
-        :line-height="lineHeight"
-        @click="handleContentClick"
-      />
-      
-      <!-- 浮动信息显示（控制栏隐藏时） -->
-      <transition name="fade">
-        <div v-if="!showControls" class="floating-progress">{{ progress }}%</div>
-      </transition>
     </div>
-    
-    <!-- 底部控制栏 -->
-    <BottomBar
-      v-show="showControls"
-      :progress="progress"
-      :current-page="currentPage"
-      :total-pages="totalPages"
-      :theme="theme"
-      :font-size="fontSize"
-      :line-height="lineHeight"
-      :is-pdf-text-mode="isPdfTextMode"
-      :is-parsing-pdf="isParsingPdf"
-      :format="book?.format"
-      @update:progress="handleUpdateProgress"
-      @update:theme="theme = $event as 'light' | 'sepia' | 'dark' | 'green'"
-      @update:font-size="fontSize = $event"
-      @update:line-height="lineHeight = $event"
-      @toggle-pdf-text-mode="togglePdfTextMode"
-    />
     
     <!-- 侧边栏 -->
     <Sidebar
@@ -106,8 +129,10 @@
       :visible="showSelectionMenu"
       :selected-text="selectedText"
       :position="selectionPosition"
+      :existing-annotation="currentAnnotation"
       @underline="handleCreateUnderline"
       @note="handleCreateNote"
+      @highlight="handleCreateHighlight"
       :color="selectedAnnotationColor"
       @color-change="selectedAnnotationColor = $event"
       @ask-ai="handleAskAI"
@@ -128,17 +153,6 @@
     <AIFloatingButton
       :is-open="showAIChat"
       @toggle="handleToggleAIChat"
-    />
-    
-    <!-- 书籍专用 AI 对话面板 -->
-    <BookAIChatPanel
-      v-if="book"
-      :is-open="showAIChat"
-      :book-id="book.id"
-      :book-title="book.title"
-      :selected-text="selectedTextForAI"
-      :current-page-context="currentPageText"
-      @close="showAIChat = false"
     />
     
     <!-- 亮度遮罩 -->
@@ -234,13 +248,14 @@ const {
   currentAnnotation,
   bookAnnotations,
   handleTextSelection,
+  createHighlight,
   createUnderline,
   showNoteDialogForSelection,
   saveNote,
   updateNote,
   deleteAnnotation,
   clearSelection: clearAnnotationSelection,
-} = useAnnotations(bookId.value)
+} = useAnnotations(bookId)
 
 // 获取当前页面文本（用于 TTS）- 使用 ref 而不是 computed
 const currentPageText = ref('')
@@ -257,6 +272,51 @@ const selectedAnnotationColor = ref('#FBBF24')
 
 // AI 对话相关
 const showAIChat = ref(false)
+const aiPaneWidth = ref(420)
+const isResizingAI = ref(false)
+let resizeStartX = 0
+let resizeStartWidth = 0
+
+const readerPaneStyle = computed(() => {
+  // 当 AI 打开时，阅读区域占据剩余空间；关闭时占满
+  return {
+    flex: showAIChat.value ? '1 1 auto' : '1 1 100%'
+  }
+})
+
+const aiPaneStyle = computed(() => {
+  if (!showAIChat.value) return {}
+  return {
+    flex: `0 0 ${aiPaneWidth.value}px`,
+    maxWidth: '80vw'
+  }
+})
+const handleSplitterMouseMove = (e: MouseEvent) => {
+  if (!isResizingAI.value) return
+  const deltaX = e.clientX - resizeStartX
+  const viewportWidth = window.innerWidth || 0
+  const minWidth = 320
+  const maxWidth = Math.min(800, viewportWidth - 360)
+  const nextWidth = resizeStartWidth - deltaX
+  aiPaneWidth.value = Math.min(Math.max(nextWidth, minWidth), maxWidth)
+}
+
+const handleSplitterMouseUp = () => {
+  if (!isResizingAI.value) return
+  isResizingAI.value = false
+  window.removeEventListener('mousemove', handleSplitterMouseMove)
+  window.removeEventListener('mouseup', handleSplitterMouseUp)
+}
+
+// 开始拖动分隔条
+const handleSplitterMouseDown = (e: MouseEvent) => {
+  if (!showAIChat.value) return
+  isResizingAI.value = true
+  resizeStartX = e.clientX
+  resizeStartWidth = aiPaneWidth.value
+  window.addEventListener('mousemove', handleSplitterMouseMove)
+  window.addEventListener('mouseup', handleSplitterMouseUp)
+}
 
 // 更新当前页面文本（带重试机制）
 const updateCurrentPageText = (retryCount = 0) => {
@@ -278,13 +338,14 @@ const updateCurrentPageText = (retryCount = 0) => {
   currentPageText.value = text
 }
 
-// 内容点击处理 - 切换控制栏显示/隐藏，同时关闭 AI 对话框
+// 内容点击处理 - 切换控制栏显示/隐藏，关闭 AI 对话框和选择菜单
 const handleContentClick = () => {
   showControls.value = !showControls.value
-  
-  // 如果 AI 对话框打开，点击阅读区域时关闭它
-  if (showAIChat.value) {
-    showAIChat.value = false
+
+  // AI 对话框的显示/隐藏由其自身按钮或关闭按钮控制，避免与“点击空白切换控制栏”冲突
+  // 点击阅读区域时关闭文本选择菜单
+  if (showSelectionMenu.value) {
+    handleCloseSelectionMenu()
   }
 }
 
@@ -498,6 +559,7 @@ const handleTextSelected = (data: { text: string; position: { x: number; y: numb
   selectedCfi.value = data.cfi || ''
   selectedChapterIndex.value = data.chapterIndex ?? 0
   selectedChapterTitle.value = data.chapterTitle || ''
+  currentAnnotation.value = null // 新选区，非点击已有注释
   showSelectionMenu.value = true
   
   // 🎯 传递章节信息给注释系统
@@ -518,8 +580,12 @@ const handleAskAI = (text: string) => {
   console.log(' 选中文本已传递给 AI 面板')
 }
 
-// 处理创建下划线
+// 处理创建下划线（若已有下划线则取消）
 const handleCreateUnderline = async () => {
+  if (currentAnnotation.value?.type === 'underline') {
+    handleRemoveUnderline()
+    return
+  }
   console.log('🎯 [注释] 创建下划线')
   try {
     handleTextSelection({
@@ -532,15 +598,77 @@ const handleCreateUnderline = async () => {
 
     const created = await createUnderline(selectedAnnotationColor.value)
     showSelectionMenu.value = false
+    currentAnnotation.value = null
     if (created) console.log('✅ 下划线创建成功')
   } catch (error) {
     console.error('❌ 创建下划线失败:', error)
   }
 }
 
+// 取消下划线
+const handleRemoveUnderline = async () => {
+  if (!currentAnnotation.value?.id) return
+  try {
+    await deleteAnnotation(currentAnnotation.value.id)
+    showSelectionMenu.value = false
+    currentAnnotation.value = null
+    console.log('✅ 下划线已取消')
+  } catch (e) {
+    console.error('取消下划线失败:', e)
+  }
+}
+
+// 处理创建高亮（若已有同色高亮则取消）
+const handleCreateHighlight = async (color: string) => {
+  if (currentAnnotation.value?.type === 'highlight' && currentAnnotation.value?.color === color) {
+    handleRemoveHighlight()
+    return
+  }
+  console.log('🎯 [注释] 创建高亮，颜色:', color)
+  try {
+    handleTextSelection({
+      text: selectedText.value,
+      cfi: selectedCfi.value,
+      chapterIndex: selectedChapterIndex.value,
+      chapterTitle: selectedChapterTitle.value,
+      position: selectionPosition.value,
+    })
+
+    const created = await createHighlight(color)
+    showSelectionMenu.value = false
+    currentAnnotation.value = null
+    if (created) console.log('✅ 高亮创建成功')
+  } catch (error) {
+    console.error('❌ 创建高亮失败:', error)
+  }
+}
+
+// 取消高亮
+const handleRemoveHighlight = async () => {
+  if (!currentAnnotation.value?.id) return
+  try {
+    await deleteAnnotation(currentAnnotation.value.id)
+    showSelectionMenu.value = false
+    currentAnnotation.value = null
+    console.log('✅ 高亮已取消')
+  } catch (e) {
+    console.error('取消高亮失败:', e)
+  }
+}
+
 // 处理创建笔记
 const handleCreateNote = () => {
   console.log('🎯 [注释] 打开笔记对话框')
+
+  // 如果当前点击的是已有笔记注释，则进入“编辑笔记”模式（预填内容）
+  if (currentAnnotation.value?.type === 'note') {
+    noteDialogContent.value = currentAnnotation.value.note || ''
+    selectedAnnotationColor.value = currentAnnotation.value.color || selectedAnnotationColor.value
+    showNoteDialog.value = true
+    showSelectionMenu.value = false
+    return
+  }
+
   handleTextSelection({
     text: selectedText.value,
     cfi: selectedCfi.value,
@@ -548,7 +676,7 @@ const handleCreateNote = () => {
     chapterTitle: selectedChapterTitle.value,
     position: selectionPosition.value,
   })
-  
+
   showNoteDialogForSelection()
   showSelectionMenu.value = false
 }
@@ -569,23 +697,34 @@ const handleSaveNote = async (note: string) => {
 }
 
 // 点击已存在的注释（高亮/下划线/笔记）
-const handleAnnotationClick = (annotation: any) => {
-  // 笔记：打开对话框查看/编辑
+const handleAnnotationClick = (payload: { annotation: any; position?: { x: number; y: number } }) => {
+  const annotation = payload?.annotation
+  const position = payload?.position
+  console.log('🎯 [注释] 点击注释:', annotation?.type)
+
+  // 笔记：默认也弹出工具栏；编辑通过工具栏的“笔记”按钮进入
   if (annotation?.type === 'note') {
-    currentAnnotation.value = annotation
-    noteDialogContent.value = annotation.note || ''
+    selectedText.value = annotation.text || ''
+    selectedCfi.value = annotation.cfi || ''
+    selectedChapterIndex.value = annotation.chapterIndex ?? currentChapterIndex.value
+    selectedChapterTitle.value = annotation.chapterTitle || ''
+    selectionPosition.value = position || { x: window.innerWidth / 2, y: window.innerHeight / 2 }
     selectedAnnotationColor.value = annotation.color || selectedAnnotationColor.value
-    showNoteDialog.value = true
+    currentAnnotation.value = annotation
+    showSelectionMenu.value = true
     return
   }
 
-  // 下划线：也弹出对话框，允许删除或转为笔记
-  if (annotation?.type === 'underline') {
-    currentAnnotation.value = annotation
-    noteDialogContent.value = ''
+  // 高亮/下划线：弹出工具框，支持切换（再次点击同按钮可取消）
+  if (annotation?.type === 'underline' || annotation?.type === 'highlight') {
+    selectedText.value = annotation.text || ''
+    selectedCfi.value = annotation.cfi || ''
+    selectedChapterIndex.value = annotation.chapterIndex ?? currentChapterIndex.value
+    selectedChapterTitle.value = annotation.chapterTitle || ''
+    selectionPosition.value = position || { x: window.innerWidth / 2, y: window.innerHeight / 2 }
     selectedAnnotationColor.value = annotation.color || selectedAnnotationColor.value
-    showNoteDialog.value = true
-    return
+    currentAnnotation.value = annotation
+    showSelectionMenu.value = true
   }
 }
 
@@ -603,19 +742,26 @@ const handleDeleteCurrentAnnotation = async () => {
 // 关闭选择菜单
 const handleCloseSelectionMenu = () => {
   showSelectionMenu.value = false
+  currentAnnotation.value = null
   clearAnnotationSelection()
+}
+
+// 关闭 AI 对话面板（统一出口，确保清理选中文本）
+const handleCloseAIChat = () => {
+  showAIChat.value = false
+  selectedTextForAI.value = ''
 }
 
 // 切换 AI 对话面板
 const handleToggleAIChat = () => {
   console.log(' [AI 对话] 切换面板:', !showAIChat.value)
   
-  // 如果关闭面板，清空选中文本
   if (showAIChat.value) {
-    selectedTextForAI.value = ''
+    // 由开到关时，走统一关闭逻辑
+    handleCloseAIChat()
+  } else {
+    showAIChat.value = true
   }
-  
-  showAIChat.value = !showAIChat.value
 }
 
 // 保存进度
@@ -791,6 +937,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeyDown)
+  handleSplitterMouseUp()
 })
 
 onBeforeUnmount(async () => {
@@ -825,8 +972,53 @@ onBeforeUnmount(async () => {
   width: 100%;
   height: 100%;
   overflow: hidden;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
   transition: background-color 0.2s ease;
   z-index: 1;
+}
+
+.reader-main {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.reader-ai-pane {
+  height: 100%;
+  max-width: 80vw;
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.theme-dark .reader-ai-pane {
+  background: #020617;
+}
+
+.reader-splitter {
+  width: 4px;
+  cursor: col-resize;
+  background: rgba(148, 163, 184, 0.6);
+  transition: background-color 0.15s ease, width 0.15s ease;
+  position: relative;
+  z-index: 2;
+}
+
+.reader-splitter::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 40px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.45);
+  transform: translate(-50%, -50%);
+}
+
+.reader-splitter:hover {
+  background: rgba(59, 130, 246, 0.8);
+  width: 6px;
 }
 
 .theme-light .reader-content { background: #ffffff; }

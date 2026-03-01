@@ -23,14 +23,14 @@ export interface AnnotationColor {
   light: string  // 浅色版本用于高亮
 }
 
-// 预设颜色
+// 预设颜色（透明度 0.15 = 15%，更柔和的高亮效果）
 export const ANNOTATION_COLORS: AnnotationColor[] = [
-  { name: '黄色', value: '#FBBF24', light: 'rgba(251, 191, 36, 0.3)' },
-  { name: '绿色', value: '#34D399', light: 'rgba(52, 211, 153, 0.3)' },
-  { name: '蓝色', value: '#60A5FA', light: 'rgba(96, 165, 250, 0.3)' },
-  { name: '紫色', value: '#A78BFA', light: 'rgba(167, 139, 250, 0.3)' },
-  { name: '粉色', value: '#F472B6', light: 'rgba(244, 114, 182, 0.3)' },
-  { name: '红色', value: '#F87171', light: 'rgba(248, 113, 113, 0.3)' },
+  { name: '黄色', value: '#FBBF24', light: 'rgba(251, 191, 36, 0.15)' },
+  { name: '绿色', value: '#34D399', light: 'rgba(52, 211, 153, 0.15)' },
+  { name: '蓝色', value: '#60A5FA', light: 'rgba(96, 165, 250, 0.15)' },
+  { name: '紫色', value: '#A78BFA', light: 'rgba(167, 139, 250, 0.15)' },
+  { name: '粉色', value: '#F472B6', light: 'rgba(244, 114, 182, 0.15)' },
+  { name: '红色', value: '#F87171', light: 'rgba(248, 113, 113, 0.15)' },
 ]
 
 // 默认颜色

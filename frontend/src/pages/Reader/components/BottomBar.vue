@@ -111,7 +111,7 @@ const handleSliderChange = (e: Event) => {
 
 <style scoped>
 .bottom-bar-container {
-  position: fixed;
+  position: absolute;
   bottom: 24px;
   left: 50%;
   transform: translateX(-50%);

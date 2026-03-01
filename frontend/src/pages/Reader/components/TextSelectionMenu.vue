@@ -7,11 +7,12 @@
       :style="menuStyle"
       @click.stop
     >
-      <!-- 下划线按钮 -->
+      <!-- 下划线按钮（已有下划线时高亮，再次点击可取消） -->
       <button
         class="menu-button underline-btn"
+        :class="{ active: existingAnnotation?.type === 'underline' }"
         @click="handleUnderline"
-        title="下划线"
+        :title="existingAnnotation?.type === 'underline' ? '再次点击取消下划线' : '下划线'"
       >
         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M6 3v7a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3"/>
@@ -31,13 +32,13 @@
         </svg>
       </button>
 
-      <!-- 颜色预设 -->
-      <div class="colors" title="选择颜色">
+      <!-- 颜色预设（已有高亮时同色高亮，再次点击可取消） -->
+      <div class="colors" :title="existingAnnotation?.type === 'highlight' ? '再次点击同色可取消高亮' : '选择颜色'">
         <button
           v-for="c in presetColors"
           :key="c"
           class="color-swatch"
-          :class="{ active: c === selectedColor }"
+          :class="{ active: c === selectedColor || (existingAnnotation?.type === 'highlight' && c === existingAnnotation?.color) }"
           :style="{ backgroundColor: c }"
           @click="selectColor(c)"
         ></button>
@@ -69,6 +70,8 @@ const props = defineProps<{
   selectedText: string
   position: { x: number; y: number }
   color?: string
+  /** 当前选中的已有注释（用于显示切换状态，再次点击可取消） */
+  existingAnnotation?: { type: string; color?: string } | null
 }>()
 
 // Emits
@@ -76,6 +79,7 @@ const emit = defineEmits<{
   'ask-ai': [text: string]
   underline: []
   note: []
+  highlight: [color: string]
   'color-change': [color: string]
   close: []
 }>()
@@ -98,9 +102,9 @@ const menuStyle = computed(() => {
   const viewportWidth = window.innerWidth
   const viewportHeight = window.innerHeight
   
-  // 计算位置，确保不超出视口
-  let left = x
-  let top = y + 10 // 在选中文本下方10px
+  // 计算位置：默认让菜单水平居中到点击位置，且在选中文本下方留出更大间距，避免遮挡
+  let left = x - menuWidth / 2
+  let top = y + 18 // 在选中文本下方稍微远一点
   
   // 水平方向调整
   if (left + menuWidth > viewportWidth) {
@@ -112,7 +116,7 @@ const menuStyle = computed(() => {
   
   // 垂直方向调整
   if (top + menuHeight > viewportHeight) {
-    top = y - menuHeight - 10 // 在选中文本上方
+    top = y - menuHeight - 18 // 在选中文本上方，同样留出一点间距
   }
   
   return {
@@ -134,7 +138,9 @@ const handleNote = () => {
 }
 
 const selectColor = (c: string) => {
+  console.log('🎨 [文本选择菜单] 选择颜色并创建高亮:', c)
   emit('color-change', c)
+  emit('highlight', c)
 }
 
 // 处理 AI 对话
@@ -156,27 +162,39 @@ watch(() => props.visible, async (newVal) => {
 // 点击外部关闭
 const handleClickOutside = (e: MouseEvent) => {
   if (menuRef.value && !menuRef.value.contains(e.target as Node)) {
+    console.log('🎯 [文本选择菜单] 点击外部，关闭菜单')
     emit('close')
   }
 }
 
-// 监听点击事件
+// 监听点击事件（使用 mousedown 更可靠，因 iframe 内 click 可能不冒泡到主文档）
+let clickOutsideTimer: ReturnType<typeof setTimeout> | null = null
 watch(() => props.visible, (newVal) => {
   if (newVal) {
-    setTimeout(() => {
-      document.addEventListener('click', handleClickOutside)
-    }, 100)
+    if (clickOutsideTimer) clearTimeout(clickOutsideTimer)
+    // 短延迟避免选择手势的点击立即关闭菜单
+    clickOutsideTimer = setTimeout(() => {
+      document.addEventListener('mousedown', handleClickOutside, true)
+      document.addEventListener('touchstart', handleClickOutside, true)
+      clickOutsideTimer = null
+    }, 50)
   } else {
-    document.removeEventListener('click', handleClickOutside)
+    if (clickOutsideTimer) {
+      clearTimeout(clickOutsideTimer)
+      clickOutsideTimer = null
+    }
+    document.removeEventListener('mousedown', handleClickOutside, true)
+    document.removeEventListener('touchstart', handleClickOutside, true)
   }
 })
 
-// 当文本选区被取消时也隐藏菜单（例如用户点击其他地方或清空选区）
+// 当文本选区被取消时也隐藏菜单
 const handleSelectionChange = () => {
   const sel = window.getSelection?.()
   if (!sel) return
   const txt = sel.toString().trim()
-  if (!txt) {
+  if (!txt && props.visible) {
+    console.log('🎯 [文本选择菜单] 选区清空，关闭菜单')
     emit('close')
   }
 }
@@ -250,7 +268,8 @@ watch(() => props.visible, (newVal) => {
   color: #FBBF24;
 }
 
-.menu-button.underline-btn:hover {
+.menu-button.underline-btn:hover,
+.menu-button.underline-btn.active {
   background: rgba(96, 165, 250, 0.2);
   color: #60A5FA;
 }

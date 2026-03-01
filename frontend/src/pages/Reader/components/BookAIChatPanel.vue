@@ -1,8 +1,5 @@
 <template>
-  <Teleport to="body">
-    <Transition name="modal">
-      <div v-if="isOpen" class="book-ai-chat-overlay" @click="handleOverlayClick">
-        <div class="book-ai-chat-panel" :class="{ 'is-open': isOpen }" @click.stop>
+  <div v-if="isOpen" class="book-ai-chat-panel">
           <!-- 头部 -->
           <div class="panel-header">
             <div class="header-title">
@@ -173,10 +170,7 @@
               <!-- 发送按钮已移除，使用 Enter 发送 -->
             </div>
           </div>
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -185,12 +179,33 @@ import { User, Bot } from 'lucide-vue-next'
 import { chatStream } from '@/api/qwen'
 import { useEbookStore, type AIChatMessage } from '@/stores/ebook'
 import { qwenTokenManager } from '@/utils/qwenTokenManager'
-import { marked } from 'marked'
+import MarkdownIt from 'markdown-it'
+import hljs from 'highlight.js'
+import 'highlight.js/styles/atom-one-dark.css' // 代码高亮主题
 
-// 配置 marked
-marked.setOptions({
+// 配置 markdown-it
+const md = new MarkdownIt({
+  html: true, // 允许 HTML 标签
+  linkify: true, // 自动转换 URL 为链接
+  typographer: true, // 启用智能引号和其他排版优化
   breaks: true, // 支持 GitHub 风格的换行
-  gfm: true, // 启用 GitHub Flavored Markdown
+  highlight: (str, lang) => {
+    // 代码高亮
+    if (lang && hljs.getLanguage(lang)) {
+      try {
+        return `<pre class="hljs"><code>${hljs.highlight(str, { language: lang, ignoreIllegals: true }).value}</code></pre>`
+      } catch (e) {
+        console.error('代码高亮失败:', e)
+      }
+    }
+    // 自动检测语言
+    try {
+      return `<pre class="hljs"><code>${hljs.highlightAuto(str).value}</code></pre>`
+    } catch (e) {
+      console.error('代码高亮失败:', e)
+    }
+    return `<pre class="hljs"><code>${md.utils.escapeHtml(str)}</code></pre>`
+  }
 })
 
 // Props
@@ -230,10 +245,10 @@ const formatTime = (timestamp: number) => {
 // 渲染 Markdown（仅用于 AI 回复）
 const renderMarkdown = (content: string) => {
   try {
-    return marked.parse(content)
+    return md.render(content)
   } catch (error) {
     console.error('Markdown 渲染失败:', error)
-    return content
+    return md.utils.escapeHtml(content)
   }
 }
 
@@ -493,11 +508,6 @@ const handleSend = async () => {
   }
 }
 
-// 处理遮罩层点击（关闭对话框）
-const handleOverlayClick = () => {
-  handleClose()
-}
-
 // Shift+Enter 换行处理
 const handleShiftEnter = (e: KeyboardEvent) => {
   // 允许默认行为（换行）
@@ -671,64 +681,18 @@ watch(() => props.selectedText, (newText) => {
 </script>
 
 <style scoped>
-/* 遮罩层 */
-.book-ai-chat-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
-  padding: 20px;
-}
-
-/* 对话框主体 */
+/* 抽屉主体：在阅读器右侧占满可用空间 */
 .book-ai-chat-panel {
-  width: 90%;
-  max-width: 800px;
-  height: 85vh;
-  max-height: 800px;
+  width: 100%;
+  height: 100%;
   background: rgba(255, 255, 255, 0.98);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   box-shadow: 0 25px 80px rgba(0, 0, 0, 0.25), 0 0 1px rgba(0, 0, 0, 0.1);
-  border-radius: 20px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid rgba(226, 232, 240, 0.8);
-}
-
-/* 过渡动画 */
-.modal-enter-active,
-.modal-leave-active {
-  transition: opacity 0.3s ease;
-}
-
-.modal-enter-active .book-ai-chat-panel,
-.modal-leave-active .book-ai-chat-panel {
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
-}
-
-.modal-enter-from,
-.modal-leave-to {
-  opacity: 0;
-}
-
-.modal-enter-from .book-ai-chat-panel {
-  transform: scale(0.9) translateY(20px);
-  opacity: 0;
-}
-
-.modal-leave-to .book-ai-chat-panel {
-  transform: scale(0.9) translateY(20px);
-  opacity: 0;
+  border-left: 1px solid rgba(226, 232, 240, 0.8);
 }
 
 /* 深色主题支持 */
@@ -1327,7 +1291,7 @@ watch(() => props.selectedText, (newText) => {
 }
 
 .markdown-content pre {
-  background: rgba(0, 0, 0, 0.08);
+  background: #282c34;
   padding: 20px;
   border-radius: 12px;
   overflow-x: auto;
@@ -1337,10 +1301,16 @@ watch(() => props.selectedText, (newText) => {
   border: 1px solid rgba(0, 0, 0, 0.05);
   max-width: 100%;
   word-break: break-all;
+  position: relative;
+}
+
+.markdown-content pre.hljs {
+  background: #282c34;
+  padding: 20px;
 }
 
 .theme-dark .markdown-content pre {
-  background: rgba(255, 255, 255, 0.1);
+  background: #1a1d23;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
   border-color: rgba(255, 255, 255, 0.1);
 }
@@ -1350,12 +1320,16 @@ watch(() => props.selectedText, (newText) => {
   padding: 0;
   font-size: 0.85em;
   line-height: 1.7;
-  color: inherit;
+  color: #abb2bf;
   box-shadow: none;
   word-break: break-all;
   white-space: pre-wrap;
   overflow-wrap: break-word;
   display: block;
+}
+
+.markdown-content pre.hljs code {
+  color: #abb2bf;
 }
 
 /* 代码块复制按钮 */
@@ -1922,9 +1896,7 @@ watch(() => props.selectedText, (newText) => {
 /* 响应式调整 */
 @media (max-width: 768px) {
   .book-ai-chat-panel {
-    width: 95%;
-    height: 90vh;
-    max-height: 90vh;
+    border-radius: 0;
   }
 
   .message-content {

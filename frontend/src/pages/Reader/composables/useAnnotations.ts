@@ -1,11 +1,13 @@
 // 注释功能 Composable
-import { ref, computed } from 'vue'
+import { ref, computed, type Ref } from 'vue'
 import { useAnnotationStore } from '../../../stores/annotation'
 import type { Annotation } from '../../../types/annotation'
 import { DEFAULT_ANNOTATION_COLOR, ANNOTATION_COLORS } from '../../../types/annotation'
 
-export function useAnnotations(bookId: string) {
+export function useAnnotations(bookId: Ref<string> | (() => string)) {
   const annotationStore = useAnnotationStore()
+
+  const getBookId = () => (typeof bookId === 'function' ? bookId() : bookId.value)
 
   // 当前选中的文本信息
   const selectedText = ref('')
@@ -25,14 +27,14 @@ export function useAnnotations(bookId: string) {
   const showNoteDialog = ref(false)
   const noteDialogContent = ref('')
 
-  // 获取当前书籍的所有注释
+  // 获取当前书籍的所有注释（使用响应式 bookId）
   const bookAnnotations = computed(() => 
-    annotationStore.getBookAnnotations(bookId)
+    annotationStore.getBookAnnotations(getBookId())
   )
 
   // 获取当前章节的注释
   const chapterAnnotations = computed(() => 
-    annotationStore.getChapterAnnotations(bookId, selectedChapterIndex.value)
+    annotationStore.getChapterAnnotations(getBookId(), selectedChapterIndex.value)
   )
 
   // 处理文本选择
@@ -63,7 +65,7 @@ export function useAnnotations(bookId: string) {
 
     try {
       const annotation = await annotationStore.addAnnotation({
-        bookId,
+        bookId: getBookId(),
         cfi: selectedCfi.value,
         text: selectedText.value,
         color,
@@ -86,7 +88,7 @@ export function useAnnotations(bookId: string) {
 
     try {
       const annotation = await annotationStore.addAnnotation({
-        bookId,
+        bookId: getBookId(),
         cfi: selectedCfi.value,
         text: selectedText.value,
         color,
@@ -109,7 +111,7 @@ export function useAnnotations(bookId: string) {
 
     try {
       const annotation = await annotationStore.addAnnotation({
-        bookId,
+        bookId: getBookId(),
         cfi: selectedCfi.value,
         text: selectedText.value,
         note,
@@ -145,12 +147,12 @@ export function useAnnotations(bookId: string) {
 
   // 更新注释
   const updateAnnotation = async (annotationId: string, updates: Partial<Annotation>) => {
-    return await annotationStore.updateAnnotation(bookId, annotationId, updates)
+    return await annotationStore.updateAnnotation(getBookId(), annotationId, updates)
   }
 
   // 删除注释
   const deleteAnnotation = async (annotationId: string) => {
-    return await annotationStore.deleteAnnotation(bookId, annotationId)
+    return await annotationStore.deleteAnnotation(getBookId(), annotationId)
   }
 
   // 编辑注释笔记
@@ -191,16 +193,16 @@ export function useAnnotations(bookId: string) {
 
   // 导出注释
   const exportAnnotations = () => {
-    return annotationStore.exportAnnotations(bookId)
+    return annotationStore.exportAnnotations(getBookId())
   }
 
   // 导入注释
   const importAnnotations = async (jsonData: string) => {
-    return await annotationStore.importAnnotations(bookId, jsonData)
+    return await annotationStore.importAnnotations(getBookId(), jsonData)
   }
 
   // 获取统计信息
-  const stats = computed(() => annotationStore.getStats(bookId))
+  const stats = computed(() => annotationStore.getStats(getBookId()))
 
   return {
     // 状态
