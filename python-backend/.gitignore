@@ -24,7 +24,7 @@ wheels/
 venv/
 ENV/
 env/
-
+data/
 # IDE
 .vscode/
 .idea/
