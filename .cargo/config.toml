@@ -1,0 +1,22 @@
+# Rust 国内镜像配置（加速依赖下载）
+
+[source.crates-io]
+replace-with = 'ustc'
+
+[source.ustc]
+registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"
+
+# 备用镜像（如果 USTC 不可用）
+# [source.crates-io]
+# replace-with = 'tuna'
+# 
+# [source.tuna]
+# registry = "https://mirrors.tuna.tsinghua.edu.cn/git/crates.io-index.git"
+
+[build]
+# 使用所有 CPU 核心加速编译
+jobs = 8
+
+[net]
+# 网络超时设置
+git-fetch-with-cli = true

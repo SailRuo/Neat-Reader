@@ -8,17 +8,17 @@
     "dev:frontend": "cd frontend && npm run dev",
     "dev:backend": "cd backend && npm run dev",
     "dev:electron": "cross-env NODE_ENV=development electron .",
-    "dev:tauri": "cargo tauri dev",
-    "dev": "cargo tauri dev",
+    "dev:tauri": "tauri dev",
+    "dev": "tauri dev",
     "build:frontend": "cd frontend && npm run build",
     "build:backend": "cd backend && npm install --production",
     "build": "npm run build:frontend && npm run build:backend && electron-builder",
     "build:win": "npm run build:frontend && npm run build:backend && electron-builder --win",
     "build:mac": "npm run build:frontend && npm run build:backend && electron-builder --mac",
     "build:linux": "npm run build:frontend && npm run build:backend && electron-builder --linux",
-    "build:tauri": "cargo tauri build",
-    "build:tauri:win": "cargo tauri build --target x86_64-pc-windows-msvc",
-    "tauri": "cargo tauri"
+    "build:tauri": "tauri build",
+    "build:tauri:win": "tauri build --target x86_64-pc-windows-msvc",
+    "tauri": "tauri"
   },
   "keywords": [
     "ebook",
@@ -30,6 +30,7 @@
   "author": "Neat Reader",
   "license": "MIT",
   "devDependencies": {
+    "@tauri-apps/cli": "^2.10.0",
     "concurrently": "^8.2.2",
     "cross-env": "^7.0.3",
     "electron": "^28.0.0",

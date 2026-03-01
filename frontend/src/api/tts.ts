@@ -1,8 +1,4 @@
-import axios from 'axios'
-import { isTauri } from './tauri-adapter'
 import { invoke } from '@tauri-apps/api/tauri'
-
-const API_BASE = 'http://localhost:3001/api/tts'
 
 export interface TTSVoice {
     Name: string
@@ -31,15 +27,10 @@ export interface VoicesResponse {
  */
 export async function getVoices(): Promise<VoicesResponse> {
     try {
-        // Tauri 环境：使用 Tauri 命令
-        if (isTauri()) {
-            const result = await invoke<VoicesResponse>('tts_list_voices')
-            return result
-        }
-        
-        // Web/Electron 环境：使用 HTTP API
-        const response = await axios.get(`${API_BASE}/voices`)
-        return response.data.data
+        const result = await invoke<VoicesResponse>('tts_list_voices', {
+            apiKey: '' // TTS 不需要 API key
+        })
+        return result
     } catch (error) {
         console.error('获取语音列表失败:', error)
         throw error
@@ -54,36 +45,15 @@ export async function getVoices(): Promise<VoicesResponse> {
  */
 export async function synthesize(text: string, options: TTSOptions = {}): Promise<Blob> {
     try {
-        // Tauri 环境：使用 Tauri 命令
-        if (isTauri()) {
-            const audioData = await invoke<number[]>('tts_synthesize', {
-                text,
-                voice: options.voice || 'zh-CN-XiaoxiaoNeural',
-                rate: options.rate || 0,
-                pitch: options.pitch || 0,
-                volume: options.volume || 0
-            })
-            
-            // 将 number[] 转换为 Uint8Array 再转为 Blob
-            const uint8Array = new Uint8Array(audioData)
-            return new Blob([uint8Array], { type: 'audio/mpeg' })
-        }
+        const audioData = await invoke<number[]>('tts_synthesize', {
+            text,
+            voice: options.voice || 'zh-CN-XiaoxiaoNeural',
+            apiKey: '' // TTS 不需要 API key
+        })
         
-        // Web/Electron 环境：使用 HTTP API
-        const response = await axios.post(
-            `${API_BASE}/synthesize`,
-            {
-                text,
-                voice: options.voice || 'zh-CN-XiaoxiaoNeural',
-                rate: options.rate || 0,
-                pitch: options.pitch || 0,
-                volume: options.volume || 0
-            },
-            {
-                responseType: 'blob'
-            }
-        )
-        return response.data
+        // 将 number[] 转换为 Uint8Array 再转为 Blob
+        const uint8Array = new Uint8Array(audioData)
+        return new Blob([uint8Array], { type: 'audio/mpeg' })
     } catch (error) {
         console.error('合成语音失败:', error)
         throw error
@@ -92,42 +62,18 @@ export async function synthesize(text: string, options: TTSOptions = {}): Promis
 
 /**
  * 流式合成语音（用于长文本）
- * @param text 要转换的文本
- * @param options TTS 选项
- * @returns 音频 Blob
+ * 注意：Tauri 版本暂不支持流式，使用普通合成
  */
 export async function synthesizeStream(text: string, options: TTSOptions = {}): Promise<Blob> {
-    try {
-        const response = await axios.post(
-            `${API_BASE}/synthesize-stream`,
-            {
-                text,
-                voice: options.voice || 'zh-CN-XiaoxiaoNeural',
-                rate: options.rate || 0,
-                pitch: options.pitch || 0,
-                volume: options.volume || 0
-            },
-            {
-                responseType: 'blob'
-            }
-        )
-        return response.data
-    } catch (error) {
-        console.error('流式合成失败:', error)
-        throw error
-    }
+    return synthesize(text, options)
 }
 
 /**
  * 清理缓存
+ * 注意：Tauri 版本暂不支持缓存清理
  */
 export async function clearCache(): Promise<void> {
-    try {
-        await axios.delete(`${API_BASE}/cache`)
-    } catch (error) {
-        console.error('清理缓存失败:', error)
-        throw error
-    }
+    console.warn('Tauri 版本暂不支持缓存清理')
 }
 
 // 推荐的中文语音
