@@ -1,0 +1,9 @@
+{
+  "baidu": {
+    "access_token": "121.51fd797757d6a584585574586fb1b618.Y5Mrc_4TCz__aIMLupeO9pyjSsaMLnVW-H03zc-.Qwqn2w"
+  },
+  "qwen": {
+    "access_token": "fIb40ENIjD5ayGb7PEgJSSaA02ViHntBgfD4u6ER6hX2c6FiIpWER2xaw73GVvc37FzKnjRvr5N0spJ92-EyHw",
+    "resource_url": "portal.qwen.ai"
+  }
+}

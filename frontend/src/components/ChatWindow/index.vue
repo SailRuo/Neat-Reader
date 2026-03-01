@@ -1,20 +1,31 @@
 <template>
   <Teleport to="body">
     <Transition name="chat-window">
-      <div v-if="isVisible" class="chat-window-overlay" @click.self="close">
-        <div class="chat-window">
+      <div v-if="isVisible" class="chat-window-overlay" :class="{ 'is-maximized': isMaximized }" @click.self="close">
+        <div class="chat-window" :class="{ 'is-maximized': isMaximized }">
           <!-- 侧边栏：对话列表 -->
-          <div class="chat-sidebar">
+          <div class="chat-sidebar" :class="{ collapsed: sidebarCollapsed }">
             <div class="sidebar-header">
-              <h3>对话历史</h3>
-              <button class="new-chat-btn" @click="createNewConversation" title="新建对话">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <line x1="12" y1="5" x2="12" y2="19"></line>
-                  <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
-              </button>
+              <h3 v-show="!sidebarCollapsed">对话历史</h3>
+              <div class="sidebar-header-actions">
+                <button
+                  class="new-chat-btn"
+                  @click="createNewConversation"
+                  title="新建对话"
+                >
+                  <Icons.Plus :size="18" />
+                </button>
+                <button
+                  class="sidebar-toggle-btn"
+                  @click="sidebarCollapsed = !sidebarCollapsed"
+                  :title="sidebarCollapsed ? '展开对话历史' : '折叠对话历史'"
+                >
+                  <Icons.PanelLeftClose v-if="!sidebarCollapsed" :size="18" />
+                  <Icons.PanelLeftOpen v-else :size="18" />
+                </button>
+              </div>
             </div>
-            <div class="conversations-list">
+            <div v-show="!sidebarCollapsed" class="conversations-list">
               <div 
                 v-for="conv in conversations" 
                 :key="conv.id"
@@ -31,10 +42,7 @@
                   @click.stop="deleteConversation(conv.id)"
                   title="删除对话"
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="3 6 5 6 21 6"></polyline>
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                  </svg>
+                  <Icons.Trash2 :size="16" />
                 </button>
               </div>
             </div>
@@ -45,7 +53,9 @@
             <!-- 头部 -->
             <div class="chat-header">
               <div class="chat-header-left">
-                <div class="chat-icon">🤖</div>
+                <div class="chat-icon">
+                  <Icons.Bot :size="20" />
+                </div>
                 <div class="chat-title">
                   <h3>{{ currentConversation?.title || 'Qwen AI 助手' }}</h3>
                   <span class="chat-status" :class="{ online: isOnline }">
@@ -53,18 +63,27 @@
                   </span>
                 </div>
               </div>
-              <button class="close-btn" @click="close" title="关闭">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-              </button>
+              <div class="chat-header-actions">
+                <button
+                  class="header-btn"
+                  @click="isMaximized = !isMaximized"
+                  :title="isMaximized ? '还原' : '最大化'"
+                >
+                  <Icons.Maximize2 v-if="!isMaximized" :size="18" />
+                  <Icons.Minimize2 v-else :size="18" />
+                </button>
+                <button class="header-btn close-btn" @click="close" title="关闭">
+                  <Icons.X :size="18" />
+                </button>
+              </div>
             </div>
 
             <!-- 消息列表 -->
             <div class="chat-messages" ref="messagesContainer">
               <div v-if="currentMessages.length === 0" class="chat-empty">
-                <div class="empty-icon">💬</div>
+                <div class="empty-icon">
+                  <Icons.MessageCircle :size="48" />
+                </div>
                 <p>开始与 Qwen AI 对话吧！</p>
                 <div class="quick-actions">
                   <button @click="sendQuickMessage('介绍一下你自己')">介绍自己</button>
@@ -75,23 +94,29 @@
 
               <div v-for="(msg, index) in currentMessages" :key="index" class="message" :class="msg.role">
                 <div class="message-avatar">
-                  {{ msg.role === 'user' ? '👤' : '🤖' }}
+                  <Icons.User v-if="msg.role === 'user'" :size="20" />
+                  <Icons.Bot v-else :size="20" />
                 </div>
                 <div class="message-content">
-                  <!-- 文本消息 -->
-                  <div class="message-text">{{ msg.content }}</div>
+                  <!-- 用户消息：纯文本 -->
+                  <div v-if="msg.role === 'user'" class="message-text">{{ msg.content }}</div>
+                  <!-- AI 消息：加载中显示打字动画，否则 Markdown 渲染 -->
+                  <template v-else>
+                    <div
+                      v-if="isLoading && index === currentMessages.length - 1 && !msg.content"
+                      class="message-text typing"
+                    >
+                      <span></span>
+                      <span></span>
+                      <span></span>
+                    </div>
+                    <div
+                      v-else
+                      class="message-text message-text-ai markdown-content"
+                      v-html="renderMarkdown(msg.content)"
+                    />
+                  </template>
                   <div class="message-time">{{ formatTime(msg.timestamp) }}</div>
-                </div>
-              </div>
-
-              <div v-if="isLoading" class="message assistant">
-                <div class="message-avatar">🤖</div>
-                <div class="message-content">
-                  <div class="message-text typing">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                  </div>
                 </div>
               </div>
             </div>
@@ -113,24 +138,18 @@
                 :disabled="!inputMessage.trim() || isLoading || !isOnline"
                 title="发送 (Enter)"
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <line x1="22" y1="2" x2="11" y2="13"></line>
-                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                </svg>
+                <Icons.Send :size="20" />
               </button>
             </div>
 
             <!-- 底部提示 -->
             <div v-if="!isOnline" class="chat-footer">
               <div class="footer-content">
-                <span class="warning-icon">⚠️</span>
+                <Icons.AlertTriangle :size="20" class="warning-icon" />
                 <span class="footer-text">请先在设置中完成 Qwen AI 授权</span>
                 <button class="link-btn" @click="goToSettings">
                   前往设置
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                    <polyline points="12 5 19 12 12 19"></polyline>
-                  </svg>
+                  <Icons.ArrowRight :size="14" />
                 </button>
               </div>
             </div>
@@ -147,7 +166,44 @@
 import { ref, computed, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import * as qwenAPI from '../../api/qwen'
-import { qwenTokenManager } from '../../utils/qwenTokenManager'
+import { useAICredentials } from '../../composables/useAICredentials'
+import { useEbookStore } from '../../stores/ebook'
+import MarkdownIt from 'markdown-it'
+import hljs from 'highlight.js'
+import 'highlight.js/styles/atom-one-dark.css'
+import * as Icons from 'lucide-vue-next'
+
+const md = new MarkdownIt({
+  html: true,
+  linkify: true,
+  typographer: true,
+  breaks: true,
+  highlight: (str, lang) => {
+    if (lang && hljs.getLanguage(lang)) {
+      try {
+        return `<pre class="hljs"><code>${hljs.highlight(str, { language: lang, ignoreIllegals: true }).value}</code></pre>`
+      } catch (e) {
+        console.error('代码高亮失败:', e)
+      }
+    }
+    try {
+      return `<pre class="hljs"><code>${hljs.highlightAuto(str).value}</code></pre>`
+    } catch (e) {
+      console.error('代码高亮失败:', e)
+    }
+    return `<pre class="hljs"><code>${md.utils.escapeHtml(str)}</code></pre>`
+  }
+})
+
+const renderMarkdown = (content: string) => {
+  if (!content) return ''
+  try {
+    return md.render(content)
+  } catch (error) {
+    console.error('Markdown 渲染失败:', error)
+    return md.utils.escapeHtml(content)
+  }
+}
 
 interface Message {
   role: 'user' | 'assistant'
@@ -177,10 +233,14 @@ const emit = defineEmits<{
 }>()
 
 const router = useRouter()
+const ebookStore = useEbookStore()
+const aiCreds = useAICredentials()
 const messagesContainer = ref<HTMLElement>()
 const inputRef = ref<HTMLTextAreaElement>()
 const inputMessage = ref('')
 const isLoading = ref(false)
+const sidebarCollapsed = ref(false)
+const isMaximized = ref(false)
 
 // 对话管理
 const conversations = ref<Conversation[]>([])
@@ -201,11 +261,10 @@ const currentMessages = computed(() =>
   currentConversation.value?.messages || []
 )
 
-// 检查是否已授权
-const isOnline = computed(() => {
-  const token = qwenTokenManager.getAccessToken()
-  return !!token && !qwenTokenManager.isTokenExpired()
-})
+// 检查是否已授权或配置自定义 API
+const isOnline = computed(() => 
+  !!aiCreds.hasCredentials.value && !aiCreds.isExpired.value
+)
 
 // 初始化对话
 const initConversations = () => {
@@ -382,8 +441,13 @@ const sendMessage = async () => {
   })
 
   try {
-    const accessToken = qwenTokenManager.getAccessToken() || ''
-    const resourceUrl = qwenTokenManager.getResourceUrl() || ''
+    const creds = aiCreds.credentials.value
+    if (!creds) {
+      conv.messages[aiMessageIndex].content = '请先在设置中完成 AI 授权或配置自定义 API'
+      return
+    }
+    const tokenOrConfig = creds.type === 'oauth' ? creds.accessToken : creds.config
+    const resourceUrl = creds.type === 'oauth' ? creds.resourceUrl : undefined
 
     // 构建完整的提示词（如果有书籍上下文）
     let fullPrompt = userMessage
@@ -393,12 +457,14 @@ const sendMessage = async () => {
     }
 
     // 使用流式 API
-    console.log('📤 发送消息到 Qwen API', {
-      messageLength: fullPrompt.length
+    console.log('📤 发送消息到 AI API', {
+      messageLength: fullPrompt.length,
+      conversationId: currentConversationId.value,
+      historyLength: currentMessages.value.length
     });
     
     await qwenAPI.chatStream(
-      accessToken,
+      tokenOrConfig,
       fullPrompt,
       resourceUrl,
       undefined,  // 不传递图片
@@ -406,7 +472,10 @@ const sendMessage = async () => {
         // 实时更新 AI 消息内容
         conv.messages[aiMessageIndex].content += chunk
         scrollToBottom()
-      }
+      },
+      currentMessages.value.slice(0, -1).map(msg => ({ role: msg.role, content: msg.content })),  // 传递历史记录（不包括刚添加的空消息）
+      currentConversationId.value,  // 传递会话 ID
+      true  // 启用后端存储（混合模式）
     )
 
     updateConversation()
@@ -429,6 +498,9 @@ const sendMessage = async () => {
 watch(isVisible, (visible) => {
   if (visible) {
     initConversations()
+    if (ebookStore.userConfig.ai?.mode === 'custom') {
+      aiCreds.loadFromBackend()
+    }
     nextTick(() => {
       inputRef.value?.focus()
       scrollToBottom()
@@ -453,35 +525,100 @@ watch(isVisible, (visible) => {
   padding: 20px;
 }
 
+.chat-window-overlay.is-maximized {
+  padding: 0;
+  align-items: stretch;
+}
+
+.chat-window-overlay.is-maximized .chat-window {
+  flex: 1;
+  width: 100%;
+}
+
 .chat-window {
   width: 100%;
-  max-width: 1100px;
+  max-width: 1000px;
   height: 85vh;
-  max-height: 800px;
-  background: white;
-  border-radius: 20px;
-  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.25);
+  max-height: 720px;
+  background: var(--color-bg-primary);
+  border-radius: 16px;
+  box-shadow: var(--shadow-xl);
+  border: 1px solid var(--color-border);
   display: flex;
   overflow: hidden;
+  transition: max-width var(--transition-base), height var(--transition-base), max-height var(--transition-base), border-radius var(--transition-base);
+}
+
+.chat-window.is-maximized {
+  max-width: none;
+  width: 100%;
+  height: 100vh;
+  max-height: none;
+  border-radius: 0;
 }
 
 /* 侧边栏 */
 .chat-sidebar {
-  width: 280px;
-  background: linear-gradient(180deg, #F8FAFC 0%, #F1F5F9 100%);
-  border-right: 1px solid #E2E8F0;
+  width: 260px;
+  background: var(--color-bg-secondary);
+  border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  transition: width var(--transition-base);
+}
+
+.chat-sidebar.collapsed {
+  width: 48px;
+}
+
+.chat-sidebar.collapsed .sidebar-header {
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: center;
+  padding: 10px 8px;
+  gap: 8px;
+}
+
+.chat-sidebar.collapsed .sidebar-header-actions {
+  flex-direction: column;
+  width: 100%;
 }
 
 .sidebar-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px 16px;
-  border-bottom: 1px solid #E2E8F0;
-  background: white;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-primary);
+}
+
+.sidebar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.new-chat-btn,
+.sidebar-toggle-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.new-chat-btn:hover,
+.sidebar-toggle-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
 }
 
 .sidebar-header h3 {
@@ -492,35 +629,11 @@ watch(isVisible, (visible) => {
   letter-spacing: -0.01em;
 }
 
-.new-chat-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #3B82F6, #2563EB);
-  border: none;
-  color: white;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 1px 3px rgba(59, 130, 246, 0.3);
-}
-
-.new-chat-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
-  background: linear-gradient(135deg, #2563EB, #1D4ED8);
-}
-
-.new-chat-btn:active {
-  transform: translateY(0);
-}
 
 .conversations-list {
   flex: 1;
   overflow-y: auto;
-  padding: 12px 8px;
+  padding: 12px 16px;
 }
 
 .conversation-item {
@@ -544,19 +657,17 @@ watch(isVisible, (visible) => {
   transform: translateY(-50%);
   width: 3px;
   height: 0;
-  background: linear-gradient(180deg, #3B82F6, #2563EB);
+  background: var(--color-accent);
   border-radius: 0 2px 2px 0;
-  transition: height 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: height var(--transition-fast);
 }
 
 .conversation-item:hover {
-  background: rgba(59, 130, 246, 0.06);
-  border-color: rgba(59, 130, 246, 0.15);
+  background: var(--color-accent-light);
 }
 
 .conversation-item.active {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(59, 130, 246, 0.06));
-  border-color: rgba(59, 130, 246, 0.3);
+  background: var(--color-accent-light);
 }
 
 .conversation-item.active::before {
@@ -571,7 +682,7 @@ watch(isVisible, (visible) => {
 .conversation-title {
   font-size: 13px;
   font-weight: 600;
-  color: #0F172A;
+  color: var(--color-text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -581,7 +692,7 @@ watch(isVisible, (visible) => {
 
 .conversation-preview {
   font-size: 12px;
-  color: #64748B;
+  color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -609,8 +720,7 @@ watch(isVisible, (visible) => {
 
 .delete-conversation-btn:hover {
   background: rgba(239, 68, 68, 0.1);
-  color: #EF4444;
-  transform: scale(1.05);
+  color: var(--color-error);
 }
 
 /* 主聊天区域 */
@@ -626,45 +736,88 @@ watch(isVisible, (visible) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px 24px;
-  background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
-  color: white;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 10px 16px;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .chat-header-left {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
 }
 
 .chat-icon {
-  font-size: 36px;
-  line-height: 1;
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--color-accent-light);
+  color: var(--color-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.chat-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 
 .chat-title h3 {
   margin: 0;
-  font-size: 17px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.02em;
+  line-height: 1.3;
 }
 
 .chat-status {
-  font-size: 12px;
-  opacity: 0.9;
+  font-size: 11px;
+  color: var(--color-text-secondary);
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 2px;
+  gap: 4px;
+  margin-top: 1px;
+}
+
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.header-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.header-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.close-btn:hover {
+  background: rgba(239, 68, 68, 0.15) !important;
+  color: var(--color-error) !important;
 }
 
 .chat-status.online::before {
   content: '';
   width: 6px;
   height: 6px;
-  background: #10B981;
+  background: var(--color-success);
   border-radius: 50%;
   display: inline-block;
   box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.3);
@@ -680,34 +833,15 @@ watch(isVisible, (visible) => {
   }
 }
 
-.close-btn {
-  background: rgba(255, 255, 255, 0.1);
-  border: none;
-  color: white;
-  cursor: pointer;
-  padding: 8px;
-  border-radius: 10px;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.close-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
-  transform: scale(1.05);
-}
-
-.close-btn:active {
-  transform: scale(0.95);
-}
-
-/* 消息列表 */
+/* 消息列表 - ChatGPT 风格：居中、最大宽度 */
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 24px;
-  background: linear-gradient(180deg, #F8FAFC 0%, #F1F5F9 100%);
+  padding: 24px 32px 32px;
+  background: #FFFFFF;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .chat-messages::-webkit-scrollbar {
@@ -732,20 +866,28 @@ watch(isVisible, (visible) => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100%;
-  color: #64748B;
+  width: 100%;
+  flex: 1;
+  min-height: 200px;
+  color: var(--color-text-secondary);
   text-align: center;
 }
 
 .empty-icon {
-  font-size: 72px;
+  width: 80px;
+  height: 80px;
+  border-radius: 20px;
+  background: var(--color-accent-light);
+  color: var(--color-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   margin-bottom: 20px;
-  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.05));
 }
 
 .chat-empty p {
   font-size: 15px;
-  color: #475569;
+  color: var(--color-text-secondary);
   margin: 0;
 }
 
@@ -759,34 +901,29 @@ watch(isVisible, (visible) => {
 
 .quick-actions button {
   padding: 10px 18px;
-  background: white;
-  border: 1px solid #E2E8F0;
-  border-radius: 12px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
   cursor: pointer;
   font-size: 13px;
-  color: #475569;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   font-weight: 500;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  color: var(--color-text-secondary);
+  transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
 }
 
 .quick-actions button:hover {
-  background: linear-gradient(135deg, #3B82F6, #2563EB);
-  color: white;
-  border-color: transparent;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
-}
-
-.quick-actions button:active {
-  transform: translateY(0);
+  background: var(--color-accent-light);
+  color: var(--color-accent);
+  border-color: rgba(37, 99, 235, 0.3);
 }
 
 .message {
   display: flex;
   gap: 12px;
-  margin-bottom: 20px;
+  margin-bottom: 24px;
   animation: messageSlideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  width: 100%;
+  max-width: 768px;
 }
 
 @keyframes messageSlideIn {
@@ -805,27 +942,33 @@ watch(isVisible, (visible) => {
 }
 
 .message-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: white;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 22px;
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  border: 2px solid #F1F5F9;
+  border: 1px solid var(--color-border);
 }
 
 .message.user .message-avatar {
-  background: linear-gradient(135deg, #3B82F6, #2563EB);
-  border-color: rgba(59, 130, 246, 0.2);
+  background: var(--color-accent);
+  color: white;
+  border-color: transparent;
+}
+
+.message.assistant .message-avatar {
+  background: var(--color-accent-light);
+  color: var(--color-accent);
+  border-color: transparent;
 }
 
 .message-content {
   flex: 1;
-  max-width: 75%;
+  min-width: 0;
 }
 
 .message.user .message-content {
@@ -838,21 +981,105 @@ watch(isVisible, (visible) => {
   background: white;
   padding: 14px 18px;
   border-radius: 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   word-wrap: break-word;
   white-space: pre-wrap;
   line-height: 1.65;
   font-size: 14px;
   color: #1E293B;
-  border: 1px solid #F1F5F9;
+  border: 1px solid #E2E8F0;
 }
 
 .message.user .message-text {
-  background: linear-gradient(135deg, #3B82F6, #2563EB);
+  background: #10A37F;
   color: white;
   border-color: transparent;
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.25);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
+
+/* AI 消息 Markdown 样式 */
+.message-text-ai {
+  white-space: normal;
+  line-height: 1.75;
+}
+
+.message-text-ai :deep(p) {
+  margin: 0 0 0.75em 0;
+}
+
+.message-text-ai :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.message-text-ai :deep(pre) {
+  margin: 0.75em 0;
+  padding: 1rem;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.message-text-ai :deep(code) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.message-text-ai :deep(pre code) {
+  background: transparent;
+  padding: 0;
+}
+
+.message-text-ai :deep(ul),
+.message-text-ai :deep(ol) {
+  padding-left: 1.5em;
+  margin: 0.5em 0;
+}
+
+.message-text-ai :deep(blockquote) {
+  margin: 0.5em 0;
+  padding-left: 1em;
+  border-left: 4px solid #E2E8F0;
+  color: #64748B;
+}
+
+.message-text-ai :deep(table) {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+  margin: 0.5em 0;
+}
+
+.message-text-ai :deep(th),
+.message-text-ai :deep(td) {
+  border: 1px solid #E2E8F0;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+
+.message-text-ai :deep(th) {
+  background: #F8FAFC;
+  font-weight: 600;
+}
+
+.message-text-ai :deep(a) {
+  color: #2563EB;
+  text-decoration: underline;
+}
+
+.message-text-ai :deep(h1),
+.message-text-ai :deep(h2),
+.message-text-ai :deep(h3) {
+  margin: 1em 0 0.5em 0;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.message-text-ai :deep(h1) { font-size: 1.25em; }
+.message-text-ai :deep(h2) { font-size: 1.15em; }
+.message-text-ai :deep(h3) { font-size: 1.05em; }
 
 .message-time {
   font-size: 11px;
@@ -870,12 +1097,11 @@ watch(isVisible, (visible) => {
 }
 
 .typing span {
-  width: 9px;
-  height: 9px;
-  background: linear-gradient(135deg, #3B82F6, #2563EB);
+  width: 8px;
+  height: 8px;
+  background: var(--color-accent);
   border-radius: 50%;
   animation: typing 1.4s ease-in-out infinite;
-  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
 }
 
 .typing span:nth-child(2) {
@@ -927,17 +1153,17 @@ watch(isVisible, (visible) => {
 
 .chat-input:focus {
   outline: none;
-  border-color: #3B82F6;
-  background: white;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  border-color: var(--color-accent);
+  background: var(--color-bg-primary);
+  box-shadow: 0 0 0 3px var(--color-accent-light);
 }
 
 .send-btn {
   width: 48px;
   height: 48px;
-  background: linear-gradient(135deg, #3B82F6, #2563EB);
+  background: #10A37F;
   border: none;
-  border-radius: 14px;
+  border-radius: 12px;
   color: white;
   cursor: pointer;
   display: flex;
@@ -945,13 +1171,10 @@ watch(isVisible, (visible) => {
   justify-content: center;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
 }
 
 .send-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.4);
-  background: linear-gradient(135deg, #2563EB, #1D4ED8);
+  background: #0d8a6a;
 }
 
 .send-btn:active:not(:disabled) {
@@ -967,9 +1190,9 @@ watch(isVisible, (visible) => {
 
 /* 底部提示 */
 .chat-footer {
-  padding: 16px 24px;
-  background: linear-gradient(135deg, #FEF3C7, #FDE68A);
-  border-top: 1px solid #FCD34D;
+  padding: 14px 24px;
+  background: rgba(245, 158, 11, 0.08);
+  border-top: 1px solid rgba(245, 158, 11, 0.2);
 }
 
 .footer-content {
@@ -977,12 +1200,12 @@ watch(isVisible, (visible) => {
   align-items: center;
   gap: 10px;
   font-size: 13px;
-  color: #92400E;
+  color: var(--color-warning);
 }
 
 .warning-icon {
-  font-size: 18px;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
+  flex-shrink: 0;
+  color: var(--color-warning);
 }
 
 .footer-text {
@@ -991,62 +1214,23 @@ watch(isVisible, (visible) => {
 }
 
 .link-btn {
-  background: white;
-  border: 1px solid #FCD34D;
-  color: #3B82F6;
+  background: none;
+  border: none;
+  color: var(--color-accent);
   cursor: pointer;
   font-size: 13px;
-  padding: 8px 16px;
-  border-radius: 10px;
-  font-weight: 600;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   gap: 6px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .link-btn:hover {
-  background: #3B82F6;
-  color: white;
-  border-color: #3B82F6;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
-}
-
-.link-btn:active {
-  transform: translateY(0);
-}
-
-/* 底部提示 */
-.chat-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 20px;
-  background: #FFF3E0;
-  border-top: 1px solid #FFE0B2;
-  font-size: 14px;
-  color: #E65100;
-}
-
-.warning-icon {
-  font-size: 16px;
-}
-
-.link-btn {
-  background: none;
-  border: none;
-  color: #4A90E2;
-  cursor: pointer;
-  text-decoration: underline;
-  font-size: 14px;
-  padding: 0;
-  margin-left: auto;
-}
-
-.link-btn:hover {
-  color: #357ABD;
+  background: var(--color-accent-light);
+  color: var(--color-accent-hover);
 }
 
 /* 过渡动画 */
@@ -1097,6 +1281,10 @@ watch(isVisible, (visible) => {
   }
 
   .chat-sidebar {
+    display: none;
+  }
+
+  .chat-sidebar.collapsed {
     display: none;
   }
 

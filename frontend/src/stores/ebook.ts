@@ -97,6 +97,15 @@ export interface UserConfig {
     viewMode: 'grid' | 'list';
     language: string;
   };
+  /** AI 服务配置：OAuth 授权 或 自定义 API（OpenAI 兼容） */
+  ai: {
+    mode: 'oauth' | 'custom';
+    custom: {
+      baseUrl: string;
+      apiKey: string;
+      modelId: string;
+    };
+  };
 }
 
 // 定义设备信息类型
@@ -149,6 +158,14 @@ export const useEbookStore = defineStore('ebook', () => {
     ui: {
       viewMode: 'grid',
       language: 'zh-CN'
+    },
+    ai: {
+      mode: 'oauth',
+      custom: {
+        baseUrl: '',
+        apiKey: '',
+        modelId: 'gpt-3.5-turbo'
+      }
     }
   });
   const deviceInfo = ref<DeviceInfo>({
@@ -958,6 +975,15 @@ export const useEbookStore = defineStore('ebook', () => {
         // 如果rootPath是'/NeatReader'，则将其重置为空字符串，符合百度网盘API要求
         if (config.storage.baidupan && config.storage.baidupan.rootPath === '/NeatReader') {
           config.storage.baidupan.rootPath = '';
+        }
+        // 迁移：旧配置可能缺少 ai 字段
+        if (!config.ai) {
+          config.ai = {
+            mode: 'oauth',
+            custom: { baseUrl: '', apiKey: '', modelId: 'gpt-3.5-turbo' }
+          };
+        } else if (!config.ai.custom) {
+          config.ai.custom = { baseUrl: '', apiKey: '', modelId: 'gpt-3.5-turbo' };
         }
         userConfig.value = config;
       }

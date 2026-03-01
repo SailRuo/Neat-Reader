@@ -16,9 +16,13 @@
 <script setup lang="ts">
 import { useDialogStore } from './stores/dialog'
 import Dialog from './components/Dialog/index.vue'
+import { useConversationSync } from './composables/useConversationSync'
 
 // 初始化对话框状态管理
 const dialogStore = useDialogStore()
+
+// 启用会话自动同步（混合模式：前端 IndexedDB + 后端百度网盘）
+useConversationSync()
 </script>
 
 <style scoped>
@@ -28,6 +32,6 @@ const dialogStore = useDialogStore()
   margin: 0;
   padding: 0;
   overflow: hidden;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 </style>

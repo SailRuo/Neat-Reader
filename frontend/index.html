@@ -4,13 +4,16 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- Content Security Policy for Electron -->
     <meta http-equiv="Content-Security-Policy" content="
       default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:;
       script-src 'self' 'unsafe-inline' 'unsafe-eval';
-      style-src 'self' 'unsafe-inline';
+      style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
       img-src 'self' data: blob: https:;
-      font-src 'self' data:;
+      font-src 'self' data: https://fonts.gstatic.com;
       connect-src 'self' blob: http://localhost:* https://chat.qwen.ai https://portal.qwen.ai https://*.qwen.ai https://pan.baidu.com https://d.pcs.baidu.com https://alistgo.com;
       media-src 'self' blob: data:;
       worker-src 'self' blob:;

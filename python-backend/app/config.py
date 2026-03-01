@@ -9,9 +9,12 @@ class Settings(BaseSettings):
     """应用配置"""
     
     # 服务器配置
-    HOST: str = "127.0.0.1"
+    HOST: str = "0.0.0.0"  # 改为 0.0.0.0 以避免 Windows 权限问题
     PORT: int = 3002
     DEBUG: bool = True
+    
+    # 百度网盘配置（可选，用于后端自动同步）
+    BAIDU_ACCESS_TOKEN: str = ""  # 从环境变量或 .env 文件读取
     
     # CORS 配置
     CORS_ORIGINS: List[str] = [

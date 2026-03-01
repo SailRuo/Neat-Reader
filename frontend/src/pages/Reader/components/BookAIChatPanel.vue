@@ -178,7 +178,7 @@ import { ref, watch, nextTick, computed } from 'vue'
 import { User, Bot } from 'lucide-vue-next'
 import { chatStream } from '@/api/qwen'
 import { useEbookStore, type AIChatMessage } from '@/stores/ebook'
-import { qwenTokenManager } from '@/utils/qwenTokenManager'
+import { useAICredentials } from '@/composables/useAICredentials'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/atom-one-dark.css' // 代码高亮主题
@@ -224,6 +224,7 @@ const emit = defineEmits<{
 
 // 状态
 const ebookStore = useEbookStore()
+const aiCreds = useAICredentials()
 const inputText = ref('')
 const isLoading = ref(false)
 const messagesRef = ref<HTMLElement | null>(null)
@@ -337,24 +338,13 @@ const handleSend = async () => {
 
   console.log('🚀 [AI] 发送消息:', text.substring(0, 50))
 
-  // 检查 token
-  const accessToken = qwenTokenManager.getAccessToken()
-  const resourceUrl = qwenTokenManager.getResourceUrl()
-  
-  console.log('🔍 [AI] Token 检查:', {
-    hasAccessToken: !!accessToken,
-    tokenPrefix: accessToken ? accessToken.substring(0, 20) + '...' : 'null',
-    hasResourceUrl: !!resourceUrl,
-    resourceUrl: resourceUrl || 'null',
-    isExpired: qwenTokenManager.isTokenExpired()
-  })
-  
-  if (!accessToken || qwenTokenManager.isTokenExpired()) {
-    console.error('❌ [AI] Token 无效或已过期')
+  const aiCreds = useAICredentials()
+  if (!aiCreds.hasCredentials.value || aiCreds.isExpired.value) {
+    console.error('❌ [AI] 未配置或凭证无效')
     
     const errorMsg: AIChatMessage = {
       role: 'assistant',
-      content: '请先在设置中完成 Qwen AI 授权。Token 可能已过期或未配置。',
+      content: '请先在设置中完成 Qwen AI 授权或配置自定义 API。',
       timestamp: Date.now()
     }
     await ebookStore.addAIMessage(props.bookId, errorMsg)
@@ -427,11 +417,15 @@ const handleSend = async () => {
     await ebookStore.addAIMessage(props.bookId, assistantMsg)
     if (isUserNearBottom()) scrollToBottom()
 
-    // 流式调用 AI
+    const creds = aiCreds.credentials.value!
+    const tokenOrConfig = creds.type === 'oauth' ? creds.accessToken : creds.config
+    const resourceUrl = creds.type === 'oauth' ? creds.resourceUrl : undefined
+
+    // 流式调用 AI（传递历史记录和会话 ID）
     await chatStream(
-      accessToken,
+      tokenOrConfig,
       fullPrompt,
-      resourceUrl || '',
+      resourceUrl,
       undefined, // images 参数
       (chunk) => {
         assistantMessage += chunk
@@ -449,7 +443,10 @@ const handleSend = async () => {
         if (isUserNearBottom()) {
           scrollToBottom()
         }
-      }
+      },
+      recentMessages.map(msg => ({ role: msg.role, content: msg.content })),  // 传递历史记录
+      props.bookId,  // 使用 bookId 作为会话 ID
+      true  // 启用后端存储（混合模式）
     )
 
     // 流式响应完成后，保存完整的消息
@@ -528,12 +525,8 @@ const generatePromptSuggestions = async (selectedText: string) => {
   suggestedPrompts.value = []
   
   try {
-    const accessToken = qwenTokenManager.getAccessToken()
-    const resourceUrl = qwenTokenManager.getResourceUrl()
-    
-    if (!accessToken || qwenTokenManager.isTokenExpired()) {
-      console.warn('⚠️ [AI] Token 无效，跳过生成提示词')
-      // 使用默认提示词
+    if (!aiCreds.hasCredentials.value || aiCreds.isExpired.value) {
+      console.warn('⚠️ [AI] 凭证无效，跳过生成提示词')
       suggestedPrompts.value = [
         '请解释这段话的含义',
         '这段内容的背景是什么？',
@@ -557,15 +550,22 @@ const generatePromptSuggestions = async (selectedText: string) => {
 分析作者的写作手法
 这段话的历史背景`
     
+    const creds = aiCreds.credentials.value!
+    const tokenOrConfig = creds.type === 'oauth' ? creds.accessToken : creds.config
+    const resourceUrl = creds.type === 'oauth' ? creds.resourceUrl : undefined
+    
     let response = ''
     await chatStream(
-      accessToken,
+      tokenOrConfig,
       prompt,
-      resourceUrl || '',
+      resourceUrl,
       undefined,
       (chunk) => {
         response += chunk
-      }
+      },
+      [],  // 提示词生成不需要历史记录
+      undefined,  // 不需要会话 ID
+      false  // 提示词生成不需要保存到后端
     )
     
     // 解析响应，提取提示词
@@ -644,7 +644,9 @@ const handleClose = () => {
 watch(() => props.isOpen, async (newVal) => {
   if (newVal) {
     await nextTick()
-    
+    if (ebookStore.userConfig.ai?.mode === 'custom') {
+      aiCreds.loadFromBackend()
+    }
     // 如果有选中文本，显示在输入框上方并生成提示词建议
     if (props.selectedText) {
       currentSelectedText.value = props.selectedText

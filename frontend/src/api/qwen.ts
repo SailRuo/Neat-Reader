@@ -51,6 +51,13 @@ export interface QwenModelsResponse {
   data: QwenModel[]
 }
 
+/** 自定义 API 配置（OpenAI 兼容） */
+export interface CustomAPIConfig {
+  base_url: string
+  api_key: string
+  model_id: string
+}
+
 /**
  * 启动 Device Code Flow
  */
@@ -76,6 +83,19 @@ export async function refreshToken(refreshToken: string): Promise<QwenTokenRespo
 }
 
 /**
+ * 保存 Qwen Token 到后端。
+ * 用户授权/刷新后调用，后端会存到 data/qwen_token.json，调用 Qwen 时若前端未传 token 则使用已存 token。
+ */
+export async function saveQwenToken(params: {
+  access_token: string
+  refresh_token?: string
+  expires_at?: number
+  resource_url?: string
+}): Promise<void> {
+  await axios.post(`${API_BASE}/token`, params)
+}
+
+/**
  * 获取可用的模型列表
  */
 export async function listModels(accessToken: string, resourceUrl?: string): Promise<QwenModelsResponse> {
@@ -87,26 +107,53 @@ export async function listModels(accessToken: string, resourceUrl?: string): Pro
 }
 
 /**
- * 测试 Qwen API（流式）
+ * 测试 Qwen API（流式）- 支持会话历史（默认混合模式）
+ * 支持 OAuth 模式(accessToken+resourceUrl) 或 自定义 API 模式(custom_api 对象)
  */
 export async function chatStream(
-  accessToken: string, 
-  message: string, 
+  accessTokenOrConfig: string | CustomAPIConfig,
+  message: string,
   resourceUrl?: string,
-  images?: string[],  // 新增：图片 Base64 数组
-  onChunk?: (content: string) => void
+  images?: string[],  // 图片 Base64 数组
+  onChunk?: (content: string) => void,
+  chatHistory?: Array<{role: string, content: string}>,  // 对话历史
+  conversationId?: string,  // 会话 ID
+  saveToBackend: boolean = true  // 默认启用后端存储（混合模式）
 ): Promise<void> {
+  // 构建消息数组
+  const messages: Array<{role: string, content: string}> = []
+  
+  // 添加历史记录
+  if (chatHistory && chatHistory.length > 0) {
+    messages.push(...chatHistory)
+  }
+  
+  // 添加当前消息
+  messages.push({
+    role: 'user',
+    content: message
+  })
+  
+  const isCustom = typeof accessTokenOrConfig === 'object'
+  const body: Record<string, unknown> = {
+    messages,
+    images,
+    conversation_id: conversationId,
+    save_to_backend: saveToBackend
+  }
+  if (isCustom) {
+    body.custom_api = accessTokenOrConfig
+  } else {
+    body.access_token = accessTokenOrConfig
+    body.resource_url = resourceUrl
+  }
+  
   const response = await fetch(`${API_BASE}/chat-stream`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      access_token: accessToken,
-      message,
-      images,  // 传递图片数据
-      resource_url: resourceUrl
-    })
+    body: JSON.stringify(body)
   })
 
   if (!response.ok) {
@@ -161,7 +208,7 @@ export async function chatStream(
 }
 
 /**
- * 测试 Qwen API
+ * 测试 Qwen API（OAuth 模式）
  */
 export async function testQwenAPI(accessToken: string, message?: string, resourceUrl?: string): Promise<QwenTestResponse> {
   const response = await axios.post(`${API_BASE}/test`, {
@@ -170,4 +217,58 @@ export async function testQwenAPI(accessToken: string, message?: string, resourc
     resource_url: resourceUrl
   })
   return response.data
+}
+
+/**
+ * 测试自定义 API（OpenAI 兼容格式）
+ */
+export async function testCustomAPI(config: CustomAPIConfig): Promise<QwenTestResponse> {
+  const response = await axios.post(`${API_BASE}/test-custom`, config)
+  return response.data
+}
+
+/**
+ * 从后端获取已保存的自定义 API 配置（用于同步/恢复）
+ */
+export async function getCustomAPIConfigFromBackend(): Promise<CustomAPIConfig | null> {
+  const response = await axios.get(`${API_BASE}/custom-api`)
+  if (response.data?.has_config && response.data?.base_url && response.data?.api_key && response.data?.model_id) {
+    return {
+      base_url: response.data.base_url,
+      api_key: response.data.api_key,
+      model_id: response.data.model_id
+    }
+  }
+  return null
+}
+
+/**
+ * 保存自定义 API 配置到后端。
+ * 后端会写入 data/auth_tokens.json，重启后仍可使用。
+ */
+export async function saveCustomAPIConfigToBackend(config: CustomAPIConfig): Promise<void> {
+  await axios.post(`${API_BASE}/custom-api`, config)
+}
+
+export interface CustomModelsResponse {
+  success: boolean
+  cached: boolean
+  base_url: string
+  fetched_at?: number
+  models: unknown
+}
+
+export async function listCustomModelsFromBackend(params?: {
+  base_url?: string
+  api_key?: string
+}): Promise<CustomModelsResponse> {
+  const response = await axios.post(`${API_BASE}/custom-models`, params || {})
+  return response.data
+}
+
+/**
+ * 清除后端保存的自定义 API 配置
+ */
+export async function clearCustomAPIConfigFromBackend(): Promise<void> {
+  await axios.delete(`${API_BASE}/custom-api`)
 }

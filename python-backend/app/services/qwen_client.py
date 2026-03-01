@@ -84,36 +84,73 @@ class QwenClient:
         messages: List[Dict[str, str]],
         model: str = "qwen3-coder-plus",
         temperature: float = 0.7,
-        max_tokens: Optional[int] = None
-    ) -> str:
+        max_tokens: Optional[int] = None,
+        tools: Optional[List[Dict]] = None,
+        tool_choice: Optional[str] = "auto"
+    ) -> Dict:
         """
-        异步调用 Qwen API
+        异步调用 Qwen API（支持工具调用）
         
         Args:
             messages: 消息列表
             model: 模型名称
             temperature: 温度参数
             max_tokens: 最大 token 数
+            tools: 工具定义列表（Function Calling）
+            tool_choice: 工具选择策略
             
         Returns:
-            生成的文本内容
+            完整的响应对象（包含 content 或 tool_calls）
         """
         try:
             logger.info(f"异步调用 Qwen API: model={model}, messages={len(messages)}")
+            if tools:
+                logger.info(f"启用工具调用: {len(tools)} 个工具")
             
-            response = await self.async_client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stream=False
-            )
+            # 构建请求参数
+            params = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "stream": False
+            }
             
-            content = response.choices[0].message.content
+            if max_tokens:
+                params["max_tokens"] = max_tokens
             
-            logger.info(f"Qwen API 异步响应成功: {len(content)} 字符")
+            # 添加工具调用参数
+            if tools:
+                params["tools"] = tools
+                params["tool_choice"] = tool_choice
             
-            return content
+            response = await self.async_client.chat.completions.create(**params)
+            
+            message = response.choices[0].message
+            
+            # 构建返回对象
+            result = {
+                "role": message.role,
+                "content": message.content
+            }
+            
+            # 如果有工具调用
+            if hasattr(message, 'tool_calls') and message.tool_calls:
+                logger.info(f"检测到工具调用: {len(message.tool_calls)} 个")
+                result["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "type": tc.type,
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }
+                    }
+                    for tc in message.tool_calls
+                ]
+            
+            logger.info(f"Qwen API 异步响应成功")
+            
+            return result
             
         except Exception as e:
             logger.error(f"Qwen API 异步调用失败: {e}")

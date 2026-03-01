@@ -36,6 +36,10 @@ env/
 .env
 .env.local
 
+# Token 敏感信息（统一存储：百度 + Qwen）
+.qwen_token.json
+data/auth_tokens.json
+
 # Cache
 cache/
 *.cache

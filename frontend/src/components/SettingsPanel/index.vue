@@ -69,6 +69,30 @@
       <section class="setting-section">
         <h3 class="section-title">Qwen AI</h3>
         <div class="setting-card">
+          <!-- 模式切换：OAuth / 自定义 API -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">接入方式</span>
+              <span class="setting-desc">选择 OAuth 授权或自定义 API（OpenAI 兼容格式）</span>
+            </div>
+            <div class="setting-control">
+              <div class="toggle-group">
+                <button 
+                  class="toggle-btn" 
+                  :class="{ active: aiMode === 'oauth' }"
+                  @click="setAIMode('oauth')"
+                >OAuth 授权</button>
+                <button 
+                  class="toggle-btn" 
+                  :class="{ active: aiMode === 'custom' }"
+                  @click="setAIMode('custom')"
+                >自定义 API</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- OAuth 模式 -->
+          <template v-if="aiMode === 'oauth'">
           <div class="setting-row">
             <div class="setting-info">
               <span class="setting-label">授权状态</span>
@@ -121,7 +145,7 @@
           </div>
           
           <!-- 测试结果显示 -->
-          <div class="setting-row" v-if="qwenTestResult">
+          <div class="setting-row" v-if="qwenTestResult && aiMode === 'oauth'">
             <div class="setting-info" style="width: 100%;">
               <div class="test-result">
                 <div class="test-result-header">
@@ -134,6 +158,79 @@
               </div>
             </div>
           </div>
+          </template>
+
+          <!-- 自定义 API 模式 -->
+          <template v-if="aiMode === 'custom'">
+          <div class="setting-row">
+            <div class="setting-info" style="width: 100%;">
+              <label class="custom-api-label">API 基础地址 (base_url)</label>
+              <input 
+                type="text" 
+                class="form-control form-input" 
+                v-model="customBaseUrl" 
+                placeholder="https://api.openai.com/v1 或自建服务地址"
+              >
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info" style="width: 100%;">
+              <label class="custom-api-label">API 密钥 (api_key)</label>
+              <div class="input-with-icon">
+                <input 
+                  :type="showCustomApiKey ? 'text' : 'password'" 
+                  class="form-control form-input input-with-icon__input" 
+                  v-model="customApiKey" 
+                  placeholder="sk-xxx 或 Bearer token"
+                >
+                <button
+                  type="button"
+                  class="input-with-icon__btn"
+                  @click="showCustomApiKey = !showCustomApiKey"
+                  :aria-label="showCustomApiKey ? '隐藏 API Key' : '显示 API Key'"
+                >
+                  <component :is="showCustomApiKey ? Icons.EyeOff : Icons.Eye" :size="16" />
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info" style="width: 100%;">
+              <label class="custom-api-label">模型 ID (model)</label>
+              <div class="custom-model-row">
+                <select
+                  v-if="customModelOptions.length"
+                  class="form-control form-input"
+                  v-model="customModelId"
+                  :disabled="isCustomModelsLoading"
+                >
+                  <option v-for="m in customModelOptions" :key="m" :value="m">{{ m }}</option>
+                </select>
+              </div>
+              <input
+                v-if="!customModelOptions.length"
+                type="text"
+                class="form-control form-input"
+                v-model="customModelId"
+                placeholder="gpt-3.5-turbo / qwen-plus / 自建模型名"
+              >
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info" style="width: 100%;">
+              <button 
+                class="btn btn-primary" 
+                style="width: 100%; margin-bottom: 8px;"
+                @click="saveCustomAPIConfig"
+              >
+                保存配置
+              </button>
+              <p style="font-size: 12px; color: #999; margin: 8px 0 0 0;">
+                兼容 OpenAI API 格式，可用于通义千问 API、自建模型等
+              </p>
+            </div>
+          </div>
+          </template>
         </div>
       </section>
 
@@ -180,7 +277,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useEbookStore } from '../../stores/ebook'
 import { useDialogStore } from '../../stores/dialog'
 import { api } from '../../api/adapter'
@@ -209,8 +306,119 @@ const isLoading = ref(false)
 const isAutoConnecting = ref(false)
 const isSyncing = ref(false)
 
+// AI 配置：OAuth / 自定义 API
+const aiMode = computed(() => ebookStore.userConfig.ai?.mode ?? 'oauth')
+const customBaseUrl = ref('')
+const customApiKey = ref('')
+const customModelId = ref('')
+const showCustomApiKey = ref(false)
+const isCustomModelsLoading = ref(false)
+const customModelOptions = ref<string[]>([])
+
+const setAIMode = async (mode: 'oauth' | 'custom') => {
+  await ebookStore.updateUserConfig({
+    ai: { ...ebookStore.userConfig.ai, mode }
+  })
+  // 切换到 OAuth 时清除后端保存的自定义配置
+  if (mode === 'oauth') {
+    qwenAPI.clearCustomAPIConfigFromBackend().catch((e) =>
+      console.warn('清除后端自定义 API 配置失败:', e)
+    )
+  }
+
+  if (ebookStore.userConfig.ai?.mode === 'custom' && customBaseUrl.value.trim() && customApiKey.value.trim()) {
+    refreshCustomModels().catch(() => {})
+  }
+}
+
+const saveCustomAPIConfig = async () => {
+  const baseUrl = customBaseUrl.value.trim()
+  const apiKey = customApiKey.value.trim()
+  const modelId = customModelId.value.trim()
+
+  if (!baseUrl || !apiKey) {
+    dialogStore.showErrorDialog('配置不完整', '请填写 API 基础地址和密钥')
+    return
+  }
+
+  if (!modelId) {
+    dialogStore.showErrorDialog('配置不完整', '请先选择或输入模型 ID')
+    return
+  }
+
+  const config = {
+    baseUrl,
+    apiKey,
+    modelId
+  }
+  await ebookStore.updateUserConfig({
+    ai: {
+      ...ebookStore.userConfig.ai,
+      mode: 'custom',
+      custom: config
+    }
+  })
+  // 同步保存到后端，便于重启后继续使用
+  await qwenAPI.saveCustomAPIConfigToBackend({
+    base_url: config.baseUrl,
+    api_key: config.apiKey,
+    model_id: config.modelId
+  })
+  dialogStore.showSuccessDialog('自定义 API 配置已保存')
+  // 异步测试自定义 API 连接（不阻塞保存）
+  ;(async () => {
+    try {
+      const result = await qwenAPI.testCustomAPI({
+        base_url: config.baseUrl,
+        api_key: config.apiKey,
+        model_id: config.modelId
+      })
+      // 测试成功只在控制台输出
+      console.log('[Custom API] 连接测试成功:', {
+        modelId: config.modelId,
+        response: result.response,
+        usage: result.usage
+      })
+    } catch (error: any) {
+      const message =
+        error?.response?.data?.detail ||
+        error?.message ||
+        '测试连接失败，请检查配置'
+      dialogStore.showErrorDialog('自定义 API 测试失败', message)
+    }
+  })()
+}
+
+const refreshCustomModels = async () => {
+  if (!customBaseUrl.value.trim() || !customApiKey.value.trim()) {
+    customModelOptions.value = []
+    return
+  }
+  isCustomModelsLoading.value = true
+  try {
+    const resp = await qwenAPI.listCustomModelsFromBackend({
+      base_url: customBaseUrl.value.trim(),
+      api_key: customApiKey.value.trim()
+    })
+    const raw: any = resp?.models
+    const ids: string[] = Array.isArray(raw?.data)
+      ? raw.data.map((x: any) => String(x?.id || '')).filter(Boolean)
+      : []
+    customModelOptions.value = ids
+    if (ids.length && !ids.includes(customModelId.value.trim())) {
+      customModelId.value = ids[0]
+    }
+  } catch (e: any) {
+    customModelOptions.value = []
+    console.warn('获取自定义 API 模型列表失败:', e)
+  } finally {
+    isCustomModelsLoading.value = false
+  }
+}
+
 // 防抖定时器
 let autoConnectTimer: number | null = null
+let customModelsTimer: number | null = null
 
 // Qwen OAuth 相关状态
 const qwenAccessToken = ref('')
@@ -223,8 +431,56 @@ const qwenSessionId = ref('')
 const qwenUserCode = ref('')
 const qwenPollInterval = ref<number | null>(null)
 
-// 从 localStorage 加载 Qwen token
-onMounted(() => {
+// 同步自定义 API 配置到本地 ref
+const syncCustomConfig = () => {
+  const aiCustom = ebookStore.userConfig.ai?.custom
+  if (aiCustom) {
+    customBaseUrl.value = aiCustom.baseUrl || ''
+    customApiKey.value = aiCustom.apiKey || ''
+    customModelId.value = aiCustom.modelId || ''
+  }
+}
+
+watch(() => ebookStore.userConfig.ai, () => syncCustomConfig(), { deep: true })
+
+watch(
+  () => [customBaseUrl.value, customApiKey.value],
+  () => {
+    if (aiMode.value !== 'custom') return
+    if (customModelsTimer) window.clearTimeout(customModelsTimer)
+    customModelsTimer = window.setTimeout(() => {
+      refreshCustomModels().catch(() => {})
+    }, 600)
+  }
+)
+
+// 从 localStorage、userConfig 及后端加载
+onMounted(async () => {
+  syncCustomConfig()
+  // 若本地无自定义配置，尝试从后端恢复（如重启后、新设备）
+  const ai = ebookStore.userConfig.ai
+  if (ai?.mode === 'custom' && (!ai.custom?.baseUrl || !ai.custom?.apiKey)) {
+    try {
+      const saved = await qwenAPI.getCustomAPIConfigFromBackend()
+      if (saved) {
+        await ebookStore.updateUserConfig({
+          ai: {
+            ...ai,
+            mode: 'custom',
+            custom: {
+              baseUrl: saved.base_url,
+              apiKey: saved.api_key,
+              modelId: saved.model_id
+            }
+          }
+        })
+        syncCustomConfig()
+      }
+    } catch (e) {
+      console.warn('从后端加载自定义 API 配置失败:', e)
+    }
+  }
+
   const savedAccessToken = localStorage.getItem('qwen_access_token')
   const savedRefreshToken = localStorage.getItem('qwen_refresh_token')
   const savedResourceUrl = localStorage.getItem('qwen_resource_url')
@@ -246,6 +502,13 @@ onMounted(() => {
     if (tokens.resourceUrl) {
       qwenResourceUrl.value = tokens.resourceUrl
     }
+    // 刷新后同步到后端
+    qwenAPI.saveQwenToken({
+      access_token: tokens.accessToken,
+      refresh_token: tokens.refreshToken,
+      expires_at: Math.floor(tokens.expiresAt / 1000),
+      resource_url: tokens.resourceUrl
+    }).catch(e => console.warn('保存 Qwen Token 到后端失败:', e))
   })
   
   qwenTokenManager.onError((error) => {
@@ -697,7 +960,14 @@ const startPolling = async (sessionId: string, interval: number) => {
           )
           console.log('✅ [Settings] Token 管理器已启动自动刷新')
         }
-        
+        // 授权后同步到后端，后续调用 Qwen 时前端可不传 token
+        qwenAPI.saveQwenToken({
+          access_token: result.access_token!,
+          refresh_token: result.refresh_token,
+          expires_at: result.expires_in ? Math.floor(Date.now() / 1000) + result.expires_in : undefined,
+          resource_url: result.resource_url
+        }).catch(e => console.warn('保存 Qwen Token 到后端失败:', e))
+
         isQwenLoading.value = false
         
         if (result.is_mock) {
@@ -842,14 +1112,15 @@ const disconnectQwen = () => {
 
 .settings-header {
   padding: 24px 0;
-  border-bottom: 1px solid #e8e8e8;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .settings-title {
-  font-size: 24px;
-  font-weight: bold;
-  color: #4A90E2;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
   margin: 0;
+  letter-spacing: -0.02em;
 }
 
 .settings-content {
@@ -863,18 +1134,19 @@ const disconnectQwen = () => {
 }
 
 .section-title {
-  font-size: 18px;
-  font-weight: bold;
-  color: #333;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
   margin: 0 0 12px 0;
   padding-bottom: 8px;
-  border-bottom: 2px solid #4A90E2;
+  border-bottom: 2px solid var(--color-accent);
 }
 
 .setting-card {
-  background-color: white;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  background-color: var(--color-bg-primary);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
   padding: 8px 0;
 }
 
@@ -883,7 +1155,7 @@ const disconnectQwen = () => {
   justify-content: space-between;
   align-items: center;
   padding: 16px 24px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .setting-row:last-child {
@@ -899,12 +1171,12 @@ const disconnectQwen = () => {
 .setting-label {
   font-size: 15px;
   font-weight: 500;
-  color: #333;
+  color: var(--color-text-primary);
 }
 
 .setting-desc {
   font-size: 13px;
-  color: #999;
+  color: var(--color-text-secondary);
 }
 
 .setting-control {
@@ -913,60 +1185,58 @@ const disconnectQwen = () => {
 
 .form-control {
   padding: 8px 12px;
-  border: 1px solid #DCDFE6;
-  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   font-size: 14px;
   min-width: 150px;
-  background: linear-gradient(135deg, #FFFFFF, #F8FAFC);
-  color: #475569;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2364748B' d='M6 9L1 4l1-1 4 4 4-1-1zm0 0L1 4l5 5 5-5 1 1-5-5z'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23737373' d='M6 9L1 4l1-1 4 4 4-1-1zm0 0L1 4l5 5 5-5 1 1-5-5z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 12px center;
   padding-right: 32px;
 }
 
 .form-control:hover {
-  border-color: #4A90E2;
-  background: linear-gradient(135deg, rgba(74, 144, 226, 0.05), rgba(74, 144, 226, 0.02));
+  border-color: var(--color-border-hover);
 }
 
 .form-control:focus {
   outline: none;
-  border-color: #4A90E2;
-  box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
-  background: linear-gradient(135deg, #FFFFFF, #F8FAFC);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-light);
 }
 
 .form-control option {
-  background: white;
-  color: #475569;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
   padding: 8px 12px;
 }
 
 .status {
   padding: 4px 12px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-size: 12px;
   font-weight: 500;
 }
 
 .status.connected {
-  background-color: #F0F9EB;
-  color: #67C23A;
+  background-color: rgba(16, 185, 129, 0.1);
+  color: var(--color-success);
 }
 
 .status.disconnected {
-  background-color: #FEF0F0;
-  color: #F56C6C;
+  background-color: rgba(239, 68, 68, 0.1);
+  color: var(--color-error);
 }
 
 .toggle-group {
   display: flex;
-  background-color: #f5f7fa;
-  border-radius: 6px;
+  background-color: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 
@@ -976,21 +1246,23 @@ const disconnectQwen = () => {
   background: none;
   cursor: pointer;
   font-size: 14px;
-  color: #666;
-  transition: all 0.2s;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .toggle-btn.active {
-  background-color: #4A90E2;
+  background-color: var(--color-accent);
   color: white;
 }
 
 .btn {
   padding: 8px 16px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background var(--transition-fast);
   border: none;
   display: inline-flex;
   align-items: center;
@@ -1004,30 +1276,30 @@ const disconnectQwen = () => {
 }
 
 .btn-primary {
-  background-color: #4A90E2;
+  background-color: var(--color-accent);
   color: white;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background-color: #357ABD;
+  background-color: var(--color-accent-hover);
 }
 
 .btn-danger {
-  background-color: #F56C6C;
+  background-color: var(--color-error);
   color: white;
 }
 
 .btn-danger:hover:not(:disabled) {
-  background-color: #f23c3c;
+  background-color: #dc2626;
 }
 
 .btn-secondary {
-  background-color: #909399;
+  background-color: var(--color-text-secondary);
   color: white;
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background-color: #73767a;
+  background-color: var(--color-text-primary);
 }
 
 /* 旋转动画 */
@@ -1045,9 +1317,9 @@ const disconnectQwen = () => {
 }
 
 .test-result {
-  background: linear-gradient(135deg, #F0F9FF, #E0F2FE);
-  border: 1px solid #BAE6FD;
-  border-radius: 8px;
+  background: var(--color-accent-light);
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  border-radius: var(--radius-md);
   padding: 16px;
   margin-top: 8px;
 }
@@ -1062,7 +1334,7 @@ const disconnectQwen = () => {
 .test-result-label {
   font-size: 14px;
   font-weight: 600;
-  color: #0369A1;
+  color: var(--color-accent);
 }
 
 .test-result-badge {
@@ -1075,6 +1347,77 @@ const disconnectQwen = () => {
 .test-result-badge.success {
   background-color: #D1FAE5;
   color: #065F46;
+}
+
+.test-result-badge.error {
+  background-color: #FEE2E2;
+  color: #991B1B;
+}
+
+.test-result-error {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.custom-api-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+}
+
+.form-input {
+  width: 100%;
+  min-width: 0;
+  margin-bottom: 4px;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--color-accent);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.btn-link:hover {
+  text-decoration: underline;
+}
+
+.input-with-icon {
+  position: relative;
+  width: 100%;
+}
+
+.input-with-icon__input {
+  padding-right: 36px;
+}
+
+.input-with-icon__btn {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  padding: 0;
+  color: #64748B;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.input-with-icon__btn:hover {
+  color: #334155;
+}
+
+.custom-model-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .test-result-content {
