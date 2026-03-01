@@ -10,6 +10,9 @@ from langgraph.prebuilt import create_react_agent
 from loguru import logger
 import json
 
+from app.config import settings
+from app.services.pageindex_service import PageIndexService
+
 class LangChainQwenService:
     """LangChain Qwen 服务（支持 Agent 和工具调用）
     
@@ -71,37 +74,148 @@ class LangChainQwenService:
     
     def _register_tools(self) -> List:
         """注册阅读器相关的工具"""
+
+        _pageindex_service = PageIndexService(settings.PAGEINDEX_CACHE_DIR)
         
         @tool
-        def search_book_content(query: str) -> str:
+        def search_book_content(book_id: str, query: str) -> str:
             """
             在当前书籍中搜索内容
             
             Args:
+                book_id: 书籍 ID
                 query: 搜索关键词
                 
             Returns:
                 搜索结果摘要
             """
-            # TODO: 实际实现需要访问书籍内容
-            logger.info(f"工具调用: search_book_content(query='{query}')")
-            return f"搜索关键词 '{query}' 的功能正在开发中。这将搜索当前书籍的全文内容。"
+            logger.info(f"工具调用: search_book_content(book_id='{book_id}', query='{query}')")
+            if not book_id or not book_id.strip():
+                return "book_id 不能为空"
+            if not query or not query.strip():
+                return "query 不能为空"
+            if not _pageindex_service.exists(book_id.strip()):
+                return "索引不存在，请先构建 PageIndex"
+
+            hits = _pageindex_service.search(book_id=book_id.strip(), query=query.strip(), top_k=5)
+            if not hits:
+                return "未命中相关片段"
+
+            lines = []
+            for h in hits:
+                lines.append(
+                    f"- #{h.get('chunk_id')} [{h.get('chapter_name')}] (score={h.get('score')}): {str(h.get('snippet') or '')[:200]}"
+                )
+            return "\n".join(lines)
+
+        @tool
+        def list_indexed_bookshelf() -> str:
+            """列出已构建 PageIndex 的书籍（返回 book_id 列表）。"""
+            logger.info("工具调用: list_indexed_bookshelf()")
+            book_ids = _pageindex_service.list_book_ids()
+            if not book_ids:
+                return "书架索引为空（尚未构建任何 PageIndex）"
+            return "\n".join([f"- {bid}" for bid in book_ids])
+
+        @tool
+        def get_book_toc(book_id: str) -> str:
+            """获取书籍目录（TOC）。用于回答“目录/章节结构”。"""
+            logger.info(f"工具调用: get_book_toc(book_id='{book_id}')")
+            if not book_id or not book_id.strip():
+                return "book_id 不能为空"
+            bid = book_id.strip()
+            if not _pageindex_service.exists(bid):
+                return "索引不存在，请先构建 PageIndex"
+            index_doc = _pageindex_service.load(bid)
+            toc = index_doc.get("toc") or []
+            if not toc:
+                return "未找到目录（索引中 toc 为空；可能需要重新 build 以提取 EPUB toc）"
+            return json.dumps(toc, ensure_ascii=False)
+
+        @tool
+        def search_bookshelf(query: str, top_k_total: int = 10) -> str:
+            """跨全书架搜索内容（基于已构建 PageIndex 的书籍）。
+
+            Args:
+                query: 搜索关键词
+                top_k_total: 最多返回多少条全局结果
+
+            Returns:
+                聚合搜索结果摘要
+            """
+            logger.info(f"工具调用: search_bookshelf(query='{query}', top_k_total={top_k_total})")
+            if not query or not query.strip():
+                return "query 不能为空"
+
+            try:
+                k_total = int(top_k_total or 10)
+            except Exception:
+                k_total = 10
+            if k_total <= 0:
+                k_total = 1
+
+            book_ids = _pageindex_service.list_book_ids()
+            if not book_ids:
+                return "书架索引为空（尚未构建任何 PageIndex）"
+
+            aggregated = []
+            for book_id in book_ids:
+                hits = _pageindex_service.search(book_id=book_id, query=query.strip(), top_k=3)
+                for h in hits:
+                    aggregated.append({"book_id": book_id, **h})
+
+            aggregated.sort(key=lambda x: int(x.get("score") or 0), reverse=True)
+            aggregated = aggregated[:k_total]
+            if not aggregated:
+                return "未命中相关片段"
+
+            lines = []
+            for h in aggregated:
+                lines.append(
+                    f"- book_id={h.get('book_id')} #{h.get('chunk_id')} [{h.get('chapter_name')}] (score={h.get('score')}): {str(h.get('snippet') or '')[:200]}"
+                )
+            return "\n".join(lines)
         
         @tool
-        def get_book_summary(chapter: Optional[str] = None) -> str:
+        def get_book_summary(book_id: str, chapter: Optional[str] = None) -> str:
             """
             获取书籍或章节的摘要
             
             Args:
+                book_id: 书籍 ID
                 chapter: 章节名称（可选，不提供则返回全书摘要）
                 
             Returns:
                 摘要内容
             """
-            logger.info(f"工具调用: get_book_summary(chapter='{chapter}')")
+            logger.info(f"工具调用: get_book_summary(book_id='{book_id}', chapter='{chapter}')")
+            if not book_id or not book_id.strip():
+                return "book_id 不能为空"
+            if not _pageindex_service.exists(book_id.strip()):
+                return "索引不存在，请先构建 PageIndex"
+
+            index_doc = _pageindex_service.load(book_id.strip())
+            chunks = index_doc.get("chunks", [])
+            if not chunks:
+                return "索引为空"
+
             if chapter:
-                return f"章节 '{chapter}' 的摘要功能正在开发中。"
-            return "全书摘要功能正在开发中。这将基于书籍内容生成智能摘要。"
+                chapter_lower = chapter.strip().lower()
+                texts = [c.get("text") or "" for c in chunks if chapter_lower in (c.get("chapter_name") or "").lower()]
+            else:
+                texts = [c.get("text") or "" for c in chunks]
+
+            merged = "\n".join([t for t in texts if t.strip()])
+            merged = merged[:6000]
+            if not merged:
+                return "未找到可摘要的内容"
+
+            prompt = (
+                "请根据以下书籍内容生成一个中文摘要（200-400字）。\n\n"
+                f"内容：\n{merged}\n"
+            )
+            msg = self.llm.invoke(prompt)
+            return getattr(msg, "content", str(msg))
         
         @tool
         def explain_concept(concept: str, context: Optional[str] = None) -> str:
@@ -169,6 +283,9 @@ class LangChainQwenService:
         
         return [
             search_book_content,
+            search_bookshelf,
+            list_indexed_bookshelf,
+            get_book_toc,
             get_book_summary,
             explain_concept,
             translate_text,
@@ -208,12 +325,15 @@ class LangChainQwenService:
                 default_prompt = """你是 Neat Reader 的智能阅读助手。你可以：
 
 1. 搜索书籍内容
+1.1 跨全书架搜索内容（已构建索引的书籍）
+1.2 列出已索引的书籍列表（book_id）
+1.3 获取书籍目录（TOC）
 2. 生成章节摘要
 3. 解释概念和术语
 4. 翻译文本
 5. 分析阅读进度
 
-请根据用户的问题，智能地选择和使用这些工具。始终用中文回答。"""
+注意：与单本书籍索引相关的工具需要 book_id（书籍 ID）。若用户问题涉及某本书但未提供 book_id，请先向用户询问或引导其选择书籍；如果用户问的是“全书架/所有书”，可以使用跨书架搜索工具。请根据用户的问题，智能地选择和使用这些工具。始终用中文回答。"""
                 messages.append(SystemMessage(content=default_prompt))
             
             # 添加对话历史（支持字典格式和 LangChain 消息对象）

@@ -897,7 +897,11 @@ export const useEbookStore = defineStore('ebook', () => {
             }
             
             const filesToDelete: string[] = [];
-            filesToDelete.push(book.baidupanPath);
+            const baidupanPath = book.baidupanPath;
+            if (!baidupanPath) {
+              return;
+            }
+            filesToDelete.push(baidupanPath);
             filesToDelete.push(`/apps/Neat Reader/sync/progress/${book.id}.json`);
             
             await api.deleteFile(
@@ -1209,15 +1213,18 @@ export const useEbookStore = defineStore('ebook', () => {
     return true;
   };
 
-  const uploadToBaidupanNew = async (file: File, path: string): Promise<boolean> => {
+  const uploadToBaidupanNew = async (file: File, _path: string): Promise<boolean> => {
     try {
-      // console.log('开始上传到百度网盘:', file.name, '大小:', file.size, '路径:', path);
+      // console.log('开始上传到百度网盘:', file.name, '大小:', file.size, '路径:', _path);
       
       // 确保令牌有效
       if (!await ensureBaidupanToken() || !userConfig.value.storage.baidupan) {
         console.error('百度网盘令牌无效或刷新失败');
         return false;
       }
+
+      await ensureDirectoryExists('/sync');
+      await ensureDirectoryExists('/sync/progress');
       
       // 检查文件大小限制
       if (!checkFileSizeLimit(file.size)) {
@@ -2098,6 +2105,15 @@ export const useEbookStore = defineStore('ebook', () => {
       
       // 保存到本地存储
       await addBook(ebookMetadata);
+
+      try {
+        const { buildPageIndex } = await import('@/api/pageindex')
+        buildPageIndex(id, file).catch((e: any) => {
+          console.warn('触发 PageIndex 构建失败:', e)
+        })
+      } catch (e) {
+        console.warn('触发 PageIndex 构建失败:', e)
+      }
       
       console.log('EPUB 文件导入成功');
       return ebookMetadata;
