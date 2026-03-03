@@ -28,7 +28,7 @@ echo "[2/4] 清理 npm 缓存..."
 npm cache clean --force
 echo ""
 
-echo "[3/4] 安装根项目依赖（包括 Electron）..."
+echo "[3/4] 安装根项目依赖..."
 echo "这可能需要几分钟，请耐心等待..."
 echo ""
 npm install

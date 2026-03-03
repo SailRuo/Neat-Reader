@@ -92,17 +92,16 @@
       ></div>
 
       <!-- 右侧：AI 对话区域 -->
-      <BookAIChatPanel
-        v-if="book && showAIChat"
-        class="reader-ai-pane"
-        :style="aiPaneStyle"
-        :is-open="showAIChat"
-        :book-id="book.id"
-        :book-title="book.title"
-        :selected-text="selectedTextForAI"
-        :current-page-context="currentPageText"
-        @close="handleCloseAIChat"
-      />
+      <div v-if="book && showAIChat" class="reader-ai-pane" :style="aiPaneStyle">
+        <BookAIChatPanel
+          :is-open="showAIChat"
+          :book-id="book.id"
+          :book-title="book.title"
+          :selected-text="selectedTextForAI"
+          :current-page-context="currentPageText"
+          @close="handleCloseAIChat"
+        />
+      </div>
     </div>
     
     <!-- 侧边栏 -->

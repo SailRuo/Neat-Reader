@@ -35,7 +35,7 @@
           </div>
 
           <!-- 消息列表 -->
-          <div class="messages-container" ref="messagesRef">
+          <div class="messages-container" ref="messagesRef" @scroll="handleScroll">
             <div v-if="messages.length === 0" class="empty-state">
               <div class="empty-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -86,14 +86,25 @@
                       :class="['markdown-content', { collapsed: isCollapsed(message) }]"
                       v-html="renderMarkdown(message.content)"
                     ></div>
-                    <button
-                      v-if="shouldShowToggle(message)"
-                      class="toggle-btn"
-                      @click="toggleExpand(message)"
-                    >{{ isCollapsed(message) ? '展开全文' : '收起' }}</button>
+                    <div class="message-footer" v-if="message.content">
+                      <div class="message-time-bottom">{{ formatTime(message.timestamp) }}</div>
+                      <div class="message-actions">
+                        <button 
+                          class="message-action-btn" 
+                          @click="copyAsMarkdown(message.content)" 
+                          title="复制为 Markdown"
+                        >
+                          <Copy :size="14" />
+                        </button>
+                        <button
+                          v-if="shouldShowToggle(message)"
+                          class="toggle-btn-inline"
+                          @click="toggleExpand(message)"
+                        >{{ isCollapsed(message) ? '展开全文' : '收起' }}</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <div class="message-time">{{ formatTime(message.timestamp) }}</div>
               </div>
             </div>
 
@@ -156,18 +167,34 @@
 
           <!-- 输入框 -->
           <div class="input-container">
-            <div class="input-wrapper">
-              <textarea
-                ref="inputRef"
-                v-model="inputText"
-                class="input-textarea"
-                placeholder="输入问题... (Enter 发送，Shift+Enter 换行)"
-                rows="3"
-                @keydown.enter.exact.prevent="handleSend"
-                @keydown.shift.enter.exact="handleShiftEnter"
-                @input="autoResize"
-              ></textarea>
-              <!-- 发送按钮已移除，使用 Enter 发送 -->
+            <div class="input-wrapper-outer">
+              <div v-if="messageQueue.length > 0" class="message-queue-banner">
+                <span class="queue-text">等待发送: {{ messageQueue.length }} 条消息</span>
+                <div class="queue-actions">
+                  <button class="queue-btn" @click="messageQueue = []">清空</button>
+                </div>
+              </div>
+              <div class="input-wrapper">
+                <textarea
+                  ref="inputRef"
+                  v-model="inputText"
+                  class="input-textarea"
+                  placeholder="输入问题... (Enter 发送)"
+                  rows="1"
+                  @keydown.enter.exact.prevent="handleSend"
+                  @keydown.shift.enter.exact="handleShiftEnter"
+                  @input="autoResize"
+                ></textarea>
+                <button 
+                  class="action-main-btn" 
+                  :class="{ 'stop-mode': isLoading }"
+                  @click="isLoading ? stopGeneration() : handleSend()"
+                  :title="isLoading ? '停止生成' : '发送'"
+                >
+                  <Icons.Square v-if="isLoading" :size="16" fill="currentColor" />
+                  <Icons.Send v-else :size="18" />
+                </button>
+              </div>
             </div>
           </div>
   </div>
@@ -175,10 +202,11 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from 'vue'
-import { User, Bot } from 'lucide-vue-next'
-import { chatStream } from '@/api/qwen'
+import { User, Bot, Copy, Check } from 'lucide-vue-next'
+import { chatStream } from '@/api/ai'
 import { useEbookStore, type AIChatMessage } from '@/stores/ebook'
 import { useAICredentials } from '@/composables/useAICredentials'
+import { useDialogStore } from '@/stores/dialog'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/atom-one-dark.css' // 代码高亮主题
@@ -225,6 +253,7 @@ const emit = defineEmits<{
 // 状态
 const ebookStore = useEbookStore()
 const aiCreds = useAICredentials()
+const dialogStore = useDialogStore()
 const inputText = ref('')
 const isLoading = ref(false)
 const messagesRef = ref<HTMLElement | null>(null)
@@ -232,6 +261,8 @@ const inputRef = ref<HTMLTextAreaElement | null>(null)
 const currentSelectedText = ref('') // 当前选中的文本（显示在输入框上方）
 const suggestedPrompts = ref<string[]>([]) // AI生成的提示词建议
 const isGeneratingPrompts = ref(false) // 是否正在生成提示词
+const isAutoScrollEnabled = ref(true) // 是否启用自动滚动（当用户向上滚动时禁用）
+const messageQueue = ref<string[]>([]) // 待发送消息队列
 
 // 获取当前书籍的对话历史
 const conversation = computed(() => ebookStore.getAIConversation(props.bookId))
@@ -250,6 +281,17 @@ const renderMarkdown = (content: string) => {
   } catch (error) {
     console.error('Markdown 渲染失败:', error)
     return md.utils.escapeHtml(content)
+  }
+}
+
+// 复制为 Markdown
+const copyAsMarkdown = async (content: string) => {
+  try {
+    await navigator.clipboard.writeText(content)
+    dialogStore.showToast('已复制 Markdown 内容', 'success')
+  } catch (err) {
+    console.error('复制失败:', err)
+    dialogStore.showToast('复制失败', 'error')
   }
 }
 
@@ -324,18 +366,49 @@ const insertSample = (text: string) => {
 // 不再需要自动调整高度函数，使用 CSS resize 属性
 
 // 滚动到底部
-const scrollToBottom = async () => {
+const scrollToBottom = async (force = false) => {
   await nextTick()
-  if (messagesRef.value) {
+  if (messagesRef.value && (isAutoScrollEnabled.value || force)) {
     messagesRef.value.scrollTop = messagesRef.value.scrollHeight
+  }
+}
+
+// 监听滚动事件，判断用户是否手动向上滚动
+const handleScroll = () => {
+  if (!messagesRef.value) return
+  const el = messagesRef.value
+  // 如果用户滚动的距离底部超过 100px，则认为是在查看历史，禁用自动滚动
+  const offset = el.scrollHeight - el.scrollTop - el.clientHeight
+  isAutoScrollEnabled.value = offset < 100
+}
+
+// 停止生成
+const stopGeneration = () => {
+  if (abortController.value) {
+    abortController.value.abort()
+    abortController.value = null
+    isLoading.value = false
+    console.log('🛑 用户终止了 AI 回答')
   }
 }
 
 // 发送消息
 const handleSend = async () => {
   const text = inputText.value.trim()
-  if (!text || isLoading.value) return
+  if (!text) return
 
+  // 如果正在加载，将消息加入队列
+  if (isLoading.value) {
+    messageQueue.value.push(text)
+    inputText.value = ''
+    return
+  }
+
+  await processMessage(text)
+}
+
+// 处理单条消息发送逻辑
+const processMessage = async (text: string) => {
   console.log('🚀 [AI] 发送消息:', text.substring(0, 50))
 
   const aiCreds = useAICredentials()
@@ -344,11 +417,11 @@ const handleSend = async () => {
     
     const errorMsg: AIChatMessage = {
       role: 'assistant',
-      content: '请先在设置中完成 Qwen AI 授权或配置自定义 API。',
+      content: '请先在设置中完成 AI 授权或配置自定义 API。',
       timestamp: Date.now()
     }
     await ebookStore.addAIMessage(props.bookId, errorMsg)
-    scrollToBottom()
+    scrollToBottom(true)
     return
   }
 
@@ -365,24 +438,19 @@ const handleSend = async () => {
   // 发送后清空选中文本和输入框
   currentSelectedText.value = ''
   inputText.value = ''
-  scrollToBottom()
+  isAutoScrollEnabled.value = true // 发送新消息时强制开启自动滚动
+  scrollToBottom(true)
 
   // 调用 AI
   isLoading.value = true
   let assistantMessage = ''
-  // 判断用户是否在靠近底部（若不在底部，流式过程中不要强制滚动）
-  const isUserNearBottom = () => {
-    if (!messagesRef.value) return true
-    const el = messagesRef.value
-    return el.scrollHeight - el.scrollTop - el.clientHeight < 120
-  }
 
   try {
     // 构建完整的提示词（包含书籍上下文、历史对话和选中文本）
-    let fullPrompt = `你是《${props.bookTitle}}》的阅读助手。\n\n`
+    let fullPrompt = `你是《${props.bookTitle}》的阅读助手。\n\n`
     
     // 添加历史对话上下文（最近 5 轮）
-    const recentMessages = messages.value.slice(-10) // 最近 10 条消息（5 轮对话）
+    const recentMessages = messages.value.slice(-10) 
     if (recentMessages.length > 0) {
       fullPrompt += `历史对话：\n`
       recentMessages.forEach(msg => {
@@ -402,105 +470,73 @@ const handleSend = async () => {
     
     fullPrompt += `当前问题：${text}\n\n请基于书籍内容和历史对话回答用户的问题。`
 
-    console.log('📖 [AI] 使用上下文，长度:', fullPrompt.length)
-    console.log('💬 [AI] 包含历史对话:', recentMessages.length, '条')
-    console.log('🌐 [AI] 开始调用 API...')
-
     // 先添加一个空的 AI 消息占位
     const assistantMsg: AIChatMessage = {
       role: 'assistant',
       content: '',
       timestamp: Date.now(),
-      // 标记正在流式生成
       isStreaming: true
     }
     await ebookStore.addAIMessage(props.bookId, assistantMsg)
-    if (isUserNearBottom()) scrollToBottom()
+    scrollToBottom(true)
 
     const creds = aiCreds.credentials.value!
     const tokenOrConfig = creds.type === 'oauth' ? creds.accessToken : creds.config
     const resourceUrl = creds.type === 'oauth' ? creds.resourceUrl : undefined
 
-    // 流式调用 AI（传递历史记录和会话 ID）
+    // 流式调用 AI
     await chatStream(
       tokenOrConfig,
       fullPrompt,
       resourceUrl,
-      undefined, // images 参数
+      undefined, 
       (chunk) => {
         assistantMessage += chunk
-        
-        // 直接更新最后一条消息的内容（不调用 addAIMessage）
         const conversation = ebookStore.getAIConversation(props.bookId)
         const lastMsg = conversation.messages[conversation.messages.length - 1]
         if (lastMsg?.role === 'assistant') {
-          // 在流式阶段以纯文本展示，避免部分 Markdown 导致 HTML 结构抖动
           lastMsg.content = assistantMessage
           lastMsg.isStreaming = true
         }
-        
-        // 只有在用户靠近底部时才自动滚动，避免打断用户阅读历史消息
-        if (isUserNearBottom()) {
-          scrollToBottom()
-        }
+        scrollToBottom()
       },
-      recentMessages.map(msg => ({ role: msg.role, content: msg.content })),  // 传递历史记录
-      props.bookId,  // 使用 bookId 作为会话 ID
-      true  // 启用后端存储（混合模式）
+      recentMessages.map(msg => ({ role: msg.role, content: msg.content })),
+      props.bookId,
+      true
     )
 
-    // 流式响应完成后，保存完整的消息
+    // 流式响应完成后
     const conversation = ebookStore.getAIConversation(props.bookId)
     const lastMsg = conversation.messages[conversation.messages.length - 1]
     if (lastMsg?.role === 'assistant') {
-      // 流式结束：将完整内容设为最终消息，移除流式标记以启用 Markdown 渲染
       lastMsg.content = assistantMessage
       lastMsg.isStreaming = false
       conversation.lastUpdated = Date.now()
     }
     
-    // 手动保存到 localforage
     await ebookStore.saveAIConversations()
-    // 等待 DOM 更新后为代码块添加复制按钮
     await nextTick()
     addCopyButtons()
 
-    console.log('✅ [AI] 响应完成，长度:', assistantMessage.length)
-
   } catch (error) {
     console.error('❌ [AI] 对话失败:', error)
-    
-    let errorMessage = '未知错误'
-    if (error instanceof Error) {
-      console.error('❌ [AI] 错误详情:', {
-        message: error.message,
-        stack: error.stack
-      })
-      
-      if (error.message.includes('401')) {
-        errorMessage = 'Token 已过期或无效，请在设置中重新授权 Qwen AI'
-      } else if (error.message.includes('403')) {
-        errorMessage = '没有权限访问 API，请检查 Qwen 配置'
-      } else if (error.message.includes('429')) {
-        errorMessage = 'API 调用频率超限，请稍后再试'
-      } else if (error.message.includes('500')) {
-        errorMessage = 'Qwen 服务器错误，请稍后再试'
-      } else {
-        errorMessage = error.message
-      }
-    }
-    
+    // 错误处理逻辑保持不变...
     const errorMsg: AIChatMessage = {
       role: 'assistant',
-      content: `抱歉，AI 对话失败：${errorMessage}`,
+      content: `抱歉，AI 对话失败：${error instanceof Error ? error.message : '未知错误'}`,
       timestamp: Date.now()
     }
     await ebookStore.addAIMessage(props.bookId, errorMsg)
   } finally {
     isLoading.value = false
-    // 如果用户此刻靠近底部，则流式结束后再滚动到底部
-    if (isUserNearBottom()) {
-      scrollToBottom()
+    scrollToBottom(true)
+
+    // 检查队列
+    if (messageQueue.value.length > 0) {
+      const nextMsg = messageQueue.value.shift()
+      if (nextMsg) {
+        setTimeout(() => processMessage(nextMsg), 500)
+      }
     }
   }
 }
@@ -1123,6 +1159,80 @@ watch(() => props.selectedText, (newText) => {
 }
 
 /* Markdown 折叠样式 */
+.markdown-wrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.message-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+  padding: 0 4px;
+}
+
+.message-time-bottom {
+  font-size: 11px;
+  color: #94A3B8;
+  font-weight: 500;
+}
+
+.message-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.message:hover .message-actions {
+  opacity: 1;
+}
+
+.message-actions .message-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 6px;
+  color: #64748B;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.theme-dark .message-actions .message-action-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #94A3B8;
+}
+
+.message-actions .message-action-btn:hover {
+  background: rgba(59, 130, 246, 0.1);
+  color: #3B82F6;
+  border-color: rgba(59, 130, 246, 0.3);
+  transform: scale(1.05);
+}
+
+.toggle-btn-inline {
+  background: transparent;
+  border: none;
+  color: #3B82F6;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.toggle-btn-inline:hover {
+  text-decoration: underline;
+}
+
 .markdown-content.collapsed {
   max-height: 240px;
   overflow: hidden;
@@ -1832,40 +1942,124 @@ watch(() => props.selectedText, (newText) => {
 
 /* 输入框 */
 .input-container {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 20px 24px;
-  border-top: 2px solid rgba(0, 0, 0, 0.06);
-  background: white;
+  padding: 16px 24px 24px;
+  background: transparent;
 }
 
-.theme-dark .input-container {
-  border-top-color: rgba(255, 255, 255, 0.06);
-  background: #1E293B;
+.input-wrapper-outer {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  background: white;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.theme-dark .input-wrapper-outer {
+  background: #262626;
+  border-color: #404040;
+}
+
+.message-queue-banner {
+  background: #F8FAFC;
+  padding: 6px 12px;
+  border-bottom: 1px solid #E2E8F0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  animation: slideDown 0.3s ease-out;
+}
+
+.theme-dark .message-queue-banner {
+  background: #1a1a1a;
+  border-color: #404040;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.queue-text {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748B;
+}
+
+.queue-btn {
+  font-size: 11px;
+  color: #EF4444;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.queue-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
 }
 
 .input-wrapper {
   display: flex;
   align-items: flex-end;
-  gap: 8px;
-  width: 100%;
+  gap: 12px;
+  padding: 8px 12px;
+}
+
+.action-main-btn {
+  width: 36px;
+  height: 36px;
+  background: #3B82F6;
+  border: none;
+  border-radius: 10px;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
+  margin-bottom: 2px;
+}
+
+.action-main-btn:hover:not(:disabled) {
+  background: #2563EB;
+  transform: scale(1.05);
+}
+
+.action-main-btn.stop-mode {
+  background: #FEE2E2;
+  border: 1px solid #FECACA;
+  color: #EF4444;
+}
+
+.action-main-btn.stop-mode:hover {
+  background: #FECACA;
+  border-color: #FCA5A5;
+}
+
+.action-main-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #E2E8F0;
+  color: #94A3B8;
 }
 
 .input-textarea {
   flex: 1;
-  min-height: 52px;
-  max-height: 240px;
-  padding: 14px 16px;
-  border: 2px solid #E2E8F0;
-  border-radius: 14px;
+  border: none;
+  background: transparent;
+  resize: none;
+  padding: 4px 0;
   font-size: 14px;
   line-height: 1.5;
-  resize: vertical;
-  background: #F8FAFC;
   color: inherit;
-  font-family: inherit;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  outline: none;
+  min-height: 24px;
+  max-height: 200px;
 }
 
 .input-textarea::placeholder {

@@ -7,7 +7,8 @@
  * 3. 刷新失败时触发回调
  */
 
-import { refreshToken as apiRefreshToken } from '../api/qwen'
+import { refreshToken as apiRefreshToken } from '../api/ai'
+import { useEbookStore } from '../stores/ebook'
 
 interface TokenData {
   accessToken: string
@@ -30,6 +31,14 @@ class QwenTokenManager {
    */
   constructor() {
     this.loadFromStorage()
+    // 💡 核心修复：移除了 constructor 中的 scheduleRefresh()
+    // 因为此时 Pinia 尚未激活，不能在构造函数中触发需要 store 的逻辑
+  }
+
+  /**
+   * 提供给外部的手动启动方法，在应用挂载后调用
+   */
+  public init(): void {
     this.scheduleRefresh()
   }
   
@@ -121,7 +130,7 @@ class QwenTokenManager {
   /**
    * 检查 token 是否即将过期
    */
-  private isTokenExpiringSoon(): boolean {
+  isTokenExpiringSoon(): boolean {
     if (!this.tokenData) return false
     
     const timeUntilExpiry = this.tokenData.expiresAt - Date.now()
@@ -148,6 +157,15 @@ class QwenTokenManager {
     
     if (!this.tokenData) return
     
+    // 💡 核心修复：延迟获取 ebookStore，避免在 Pinia 初始化前调用 useEbookStore()
+    const ebookStore = useEbookStore()
+    
+    // 💡 核心修复：如果是自定义 API 模式，绝对不要触发 Qwen OAuth 刷新
+    if (ebookStore.userConfig.ai?.mode === 'custom') {
+      console.log('ℹ️ [Token Manager] 当前为自定义 API 模式，跳过自动刷新计时。')
+      return
+    }
+
     const timeUntilExpiry = this.tokenData.expiresAt - Date.now()
     const timeUntilRefresh = timeUntilExpiry - this.REFRESH_LEAD_TIME
     
@@ -174,6 +192,15 @@ class QwenTokenManager {
   async refreshTokenNow(): Promise<void> {
     if (!this.tokenData) {
       console.warn('⚠️ [Token Manager] 没有 token 数据，无法刷新')
+      return
+    }
+
+    // 💡 核心修复：延迟获取 ebookStore
+    const ebookStore = useEbookStore()
+
+    // 💡 核心修复：如果是自定义 API 模式，拦截立即刷新请求
+    if (ebookStore.userConfig.ai?.mode === 'custom') {
+      console.log('ℹ️ [Token Manager] 当前为自定义 API 模式，拦截并取消 Qwen OAuth 刷新请求。')
       return
     }
     

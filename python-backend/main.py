@@ -10,7 +10,7 @@ import sys
 from contextlib import asynccontextmanager
 
 from app.config import settings
-from app.routes import qwen, pageindex, health, baidu, tts, conversation
+from app.routes import ai, pageindex, health, baidu, tts, conversation
 
 # 配置日志
 logger.remove()
@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Neat Reader Python Backend 启动中...")
     logger.info(f"📍 监听地址: {settings.HOST}:{settings.PORT}")
     logger.info(f"🔧 环境: {'开发' if settings.DEBUG else '生产'}")
-    logger.info(f"📦 已注册路由: Health, Baidu, TTS, Qwen, Conversation, PageIndex")
+    logger.info(f"📦 已注册路由: Health, Baidu, TTS, AI, Conversation, PageIndex")
     logger.info(f"📁 PageIndex 缓存目录: {settings.PAGEINDEX_CACHE_DIR}")
     
     # 启动时从统一 token 文件加载到内存缓存（无缓存时从 data/auth_tokens.json 读取）
@@ -111,7 +111,7 @@ async def shutdown_sync():
     return {"success": True, "result": result, "message": "同步已执行"}
 app.include_router(baidu.router, prefix="/api/baidu", tags=["Baidu"])
 app.include_router(tts.router, prefix="/api/tts", tags=["TTS"])
-app.include_router(qwen.router, prefix="/api/qwen", tags=["Qwen"])
+app.include_router(ai.router, prefix="/api/ai", tags=["AI"])
 app.include_router(conversation.router, prefix="/api/conversation", tags=["Conversation"])
 app.include_router(pageindex.router, prefix="/api/pageindex", tags=["PageIndex"])
 

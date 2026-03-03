@@ -164,9 +164,8 @@ npm run build:linux  # Linux
 
 #### 架构设计
 
-采用三层架构，确保安全性和可维护性：
+采用前后端分离架构，确保安全性和可维护性：
 
-- **Electron 主进程**：窗口管理、系统集成、进程通信
 - **Vue 3 前端**：用户界面、交互逻辑、状态管理
 - **Express 后端**：API 服务、第三方集成、业务逻辑
 
@@ -189,10 +188,6 @@ npm run build:linux  # Linux
 - Axios：HTTP 客户端
 - node-edge-tts：语音合成
 
-**桌面应用**
-- Electron 28+：跨平台桌面框架
-- electron-builder：应用打包
-
 #### 项目结构
 
 ```text
@@ -207,9 +202,6 @@ Neat-Reader/
 │   └── src/
 │       ├── routes/    # API 路由（baidu、qwen、tts）
 │       └── services/  # 业务逻辑层
-├── electron/          # Electron 主进程
-│   ├── main.js        # 窗口创建与管理
-│   └── preload.js     # 安全 API 桥接
 └── build/             # 打包资源
 ```
 
@@ -225,7 +217,6 @@ Neat-Reader/
 npm run dev              # 启动完整开发环境
 npm run dev:frontend     # 仅启动前端（端口 5173）
 npm run dev:backend      # 仅启动后端（端口 3001）
-npm run dev:electron     # 仅启动 Electron
 ```
 
 
@@ -240,7 +231,6 @@ npm run dev:electron     # 仅启动 Electron
 - 阅读器核心：`frontend/src/pages/Reader/` 及其 `components/`、`composables/`
 - AI/TTS 集成：`frontend/src/api/`、`backend/src/routes/`、`backend/src/services/`
 - 状态管理：`frontend/src/stores/`
-- Electron 交互：`electron/main.js`、`electron/preload.js`、`frontend/src/electron.ts`
 
 ---
 

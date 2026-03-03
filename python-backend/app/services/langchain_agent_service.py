@@ -1,6 +1,7 @@
 """
-LangChain Qwen 服务
-使用 LangChain Agent 系统调用 Qwen API，支持工具调用和会话管理
+LangChain Agent 服务
+使用 LangChain Agent 系统调用 LLM API，支持工具调用和会话管理
+支持任何 OpenAI 兼容的 API（Qwen、OpenAI、Claude、自建模型等）
 """
 from typing import List, Dict, Optional, AsyncIterator
 from langchain_openai import ChatOpenAI
@@ -13,12 +14,12 @@ import json
 from app.config import settings
 from app.services.pageindex_service import PageIndexService
 
-class LangChainQwenService:
-    """LangChain Qwen 服务（支持 Agent 和工具调用）
+class LangChainAgentService:
+    """LangChain Agent 服务（支持 Agent 和工具调用）
     
     支持两种模式：
     1. OAuth 模式：access_token + resource_url（Qwen 官方授权）
-    2. 自定义 API 模式：base_url + api_key + model（OpenAI 兼容格式，如自建、通义千问 API 等）
+    2. 自定义 API 模式：base_url + api_key + model（OpenAI 兼容格式，支持任何兼容 API）
     """
     
     def __init__(
@@ -31,7 +32,7 @@ class LangChainQwenService:
         model: Optional[str] = None,
     ):
         """
-        初始化 LangChain 服务
+        初始化 LangChain Agent 服务
         
         OAuth 模式：传入 access_token，可选 resource_url
         自定义 API 模式：传入 base_url, api_key, model（三个都提供时优先使用）
@@ -44,16 +45,16 @@ class LangChainQwenService:
                 self.base_url = f"{self.base_url}/v1"
             self.api_key = api_key
             self.model = model
-            logger.info(f"初始化 LangChain 服务（自定义 API）: base={self.base_url}, model={model}")
+            logger.info(f"初始化 LangChain Agent 服务（自定义 API）: base={self.base_url}, model={model}")
         else:
-            # OAuth 模式
+            # OAuth 模式（默认 Qwen）
             self.api_key = access_token
             if resource_url:
                 self.base_url = f"https://{resource_url}/v1"
             else:
                 self.base_url = "https://portal.qwen.ai/v1"
             self.model = "qwen3-coder-plus"
-            logger.info(f"初始化 LangChain Qwen 服务（OAuth）: {self.base_url}")
+            logger.info(f"初始化 LangChain Agent 服务（OAuth/Qwen）: {self.base_url}")
         
         # 创建 LangChain ChatOpenAI 客户端（兼容 OpenAI 格式）
         self.llm = ChatOpenAI(
@@ -97,40 +98,172 @@ class LangChainQwenService:
             if not _pageindex_service.exists(book_id.strip()):
                 return "索引不存在，请先构建 PageIndex"
 
-            hits = _pageindex_service.search(book_id=book_id.strip(), query=query.strip(), top_k=5)
+            # 增加检索深度 top_k=15，并支持 chapter_title 检索
+            hits = _pageindex_service.search(book_id=book_id.strip(), query=query.strip(), top_k=15)
             if not hits:
                 return "未命中相关片段"
 
             lines = []
             for h in hits:
+                title = h.get('chapter_title') or h.get('chapter_name')
                 lines.append(
-                    f"- #{h.get('chunk_id')} [{h.get('chapter_name')}] (score={h.get('score')}): {str(h.get('snippet') or '')[:200]}"
+                    f"- #{h.get('chunk_id')} [{title}] (score={h.get('score')}): {str(h.get('snippet') or '')[:300]}"
                 )
             return "\n".join(lines)
 
         @tool
         def list_indexed_bookshelf() -> str:
-            """列出已构建 PageIndex 的书籍（返回 book_id 列表）。"""
+            """列出已构建 PageIndex 的书籍（返回书籍 ID 和标题列表）。"""
             logger.info("工具调用: list_indexed_bookshelf()")
             book_ids = _pageindex_service.list_book_ids()
             if not book_ids:
                 return "书架索引为空（尚未构建任何 PageIndex）"
-            return "\n".join([f"- {bid}" for bid in book_ids])
+            
+            results = []
+            for bid in book_ids:
+                try:
+                    index_doc = _pageindex_service.load(bid)
+                    title = index_doc.get("book_title", "未知书名")
+                    results.append(f"- {title} (ID: {bid})")
+                except Exception:
+                    results.append(f"- 未知书名 (ID: {bid})")
+            
+            return "\n".join(results)
 
         @tool
+        def get_book_id_by_title(book_title: str) -> str:
+            """
+            通过书名查找书籍 ID。用户通常只知道书名,不知道后端生成的 book_id。
+            
+            Args:
+                book_title: 书籍标题 (支持模糊匹配或关键词)
+                
+            Returns:
+                匹配的书籍 ID,如果找到多个则返回列表,如果未找到则返回错误提示
+                
+            使用场景:
+                - 当用户提及某本书而你没有其 book_id 时，先调用此工具获取 ID
+                - 获取 ID 后再调用其他需要 book_id 的工具 (如获取摘要、查询内容等)
+            """
+            logger.info(f"工具调用: get_book_id_by_title(book_title='{book_title}')")
+            
+            if not book_title or not book_title.strip():
+                return "错误: book_title 不能为空"
+            
+            search_term = book_title.strip().lower()
+            book_ids = _pageindex_service.list_book_ids()
+            
+            if not book_ids:
+                return "书架索引为空（尚未构建任何 PageIndex）"
+            
+            # 查找匹配的书籍
+            exact_matches = []  # 精确匹配
+            partial_matches = []  # 部分匹配
+            
+            for bid in book_ids:
+                try:
+                    index_doc = _pageindex_service.load(bid)
+                    title = index_doc.get("book_title", "")
+                    title_lower = title.lower()
+                    
+                    # 精确匹配 (完全相同)
+                    if title_lower == search_term:
+                        exact_matches.append((bid, title))
+                    # 部分匹配 (包含关系)
+                    elif search_term in title_lower or title_lower in search_term:
+                        partial_matches.append((bid, title))
+                except Exception as e:
+                    logger.warning(f"加载书籍 {bid} 失败: {e}")
+                    continue
+            
+            # 返回结果
+            if exact_matches:
+                if len(exact_matches) == 1:
+                    bid, title = exact_matches[0]
+                    logger.info(f"精确匹配到书籍: {title} (ID: {bid})")
+                    return bid
+                else:
+                    # 多个精确匹配 (罕见情况)
+                    results = [f"找到 {len(exact_matches)} 本完全匹配的书籍:"]
+                    for bid, title in exact_matches:
+                        results.append(f"- {title} (ID: {bid})")
+                    results.append("\n请使用具体的 book_id 调用其他工具。")
+                    return "\n".join(results)
+            
+            if partial_matches:
+                if len(partial_matches) == 1:
+                    bid, title = partial_matches[0]
+                    logger.info(f"模糊匹配到书籍: {title} (ID: {bid})")
+                    return bid
+                else:
+                    # 多个部分匹配
+                    results = [f"找到 {len(partial_matches)} 本相关书籍:"]
+                    for bid, title in partial_matches:
+                        results.append(f"- {title} (ID: {bid})")
+                    results.append("\n如果只有一本是目标书籍,请直接使用该 book_id。")
+                    return "\n".join(results)
+            
+            # 未找到匹配
+            return f"未找到书名包含 '{book_title}' 的书籍。请使用 list_indexed_bookshelf 查看所有可用书籍。"
+
         def get_book_toc(book_id: str) -> str:
-            """获取书籍目录（TOC）。用于回答“目录/章节结构”。"""
-            logger.info(f"工具调用: get_book_toc(book_id='{book_id}')")
+                    """
+                    获取书籍目录（TOC）。用于回答"目录/章节结构"。
+
+                    Args:
+                        book_id: 书籍 ID
+                            ⚠️ 如果用户只提供书名,请先调用 get_book_id_by_title(书名) 获取 book_id
+                    """
+                    logger.info(f"工具调用: get_book_toc(book_id='{book_id}')")
+                    if not book_id or not book_id.strip():
+                        return "book_id 不能为空"
+                    bid = book_id.strip()
+                    if not _pageindex_service.exists(bid):
+                        return "索引不存在，请先构建 PageIndex"
+                    index_doc = _pageindex_service.load(bid)
+                    toc = index_doc.get("toc") or []
+                    if not toc:
+                        return "未找到目录（索引中 toc 为空；可能需要重新 build 以提取 EPUB toc）"
+                    return json.dumps(toc, ensure_ascii=False)
+
+
+        @tool
+        def search_book_section(book_id: str, href: str, query: str) -> str:
+            """在书籍的特定章节内搜索内容。
+            
+            Args:
+                book_id: 书籍 ID
+                href: 章节的链接（从 get_book_toc 获取）
+                query: 搜索关键词
+            """
+            logger.info(f"工具调用: search_book_section(book_id='{book_id}', href='{href}', query='{query}')")
             if not book_id or not book_id.strip():
                 return "book_id 不能为空"
             bid = book_id.strip()
             if not _pageindex_service.exists(bid):
-                return "索引不存在，请先构建 PageIndex"
+                return "索引不存在"
+            
             index_doc = _pageindex_service.load(bid)
-            toc = index_doc.get("toc") or []
-            if not toc:
-                return "未找到目录（索引中 toc 为空；可能需要重新 build 以提取 EPUB toc）"
-            return json.dumps(toc, ensure_ascii=False)
+            href_map = index_doc.get("href_map") or {}
+            
+            # 某些 href 可能带有锚点 #，先尝试精确匹配，再尝试去掉锚点匹配
+            chapter_index = href_map.get(href)
+            if chapter_index is None and "#" in href:
+                chapter_index = href_map.get(href.split("#")[0])
+            
+            if chapter_index is None:
+                return f"未能在索引中定位到章节: {href}。请确保 href 是从 get_book_toc 获取的原始值。"
+
+            hits = _pageindex_service.search(book_id=bid, query=query.strip(), top_k=5, chapter_index=chapter_index)
+            if not hits:
+                return "该章节内未命中相关片段"
+
+            lines = []
+            for h in hits:
+                lines.append(
+                    f"- #{h.get('chunk_id')} (score={h.get('score')}): {str(h.get('snippet') or '')[:300]}"
+                )
+            return "\n".join(lines)
 
         @tool
         def search_bookshelf(query: str, top_k_total: int = 10) -> str:
@@ -179,43 +312,152 @@ class LangChainQwenService:
         @tool
         def get_book_summary(book_id: str, chapter: Optional[str] = None) -> str:
             """
-            获取书籍或章节的摘要
+            获取书籍或章节的摘要。如果书籍非常长,建议先获取 TOC 以确定具体章节。
             
             Args:
-                book_id: 书籍 ID
-                chapter: 章节名称（可选，不提供则返回全书摘要）
+                book_id: 书籍 ID (如 'epub_1df25471381a97f9db3ecb724bf01c96')
+                    ⚠️ 重要: 用户通常只提供书名,不知道 book_id
+                    请先调用 get_book_id_by_title(书名) 获取 book_id
+                chapter: 章节标识 (可选,支持以下格式):
+                    - 章节标题: "第一章 引言" 或 "冥想的心和无解的问题" (支持模糊匹配)
+                    - 文件路径: "Text/chapter043.html" (精确匹配)
+                    - 不提供则返回全书摘要
                 
             Returns:
                 摘要内容
+                
+            使用流程:
+                1. 用户说 "获取《智慧的觉醒》中'冥想的心'章节的摘要"
+                2. 先调用 get_book_id_by_title("智慧的觉醒") 获取 book_id
+                3. 再调用 get_book_summary(book_id, "冥想的心") 获取摘要
+                
+            章节匹配建议:
+                - 首次使用建议先调用 get_book_toc 查看目录结构
+                - 章节标题支持模糊匹配,可以只输入部分名称
+                - 如果标题匹配失败,可以使用 TOC 中的 href 字段 (文件路径)
             """
             logger.info(f"工具调用: get_book_summary(book_id='{book_id}', chapter='{chapter}')")
             if not book_id or not book_id.strip():
-                return "book_id 不能为空"
-            if not _pageindex_service.exists(book_id.strip()):
-                return "索引不存在，请先构建 PageIndex"
+                return "错误: book_id 不能为空"
+            
+            bid = book_id.strip()
+            if not _pageindex_service.exists(bid):
+                return f"错误: 索引 ID '{bid}' 不存在。请确认 ID 是否正确，或先构建 PageIndex。"
 
-            index_doc = _pageindex_service.load(book_id.strip())
+            try:
+                index_doc = _pageindex_service.load(bid)
+            except Exception as e:
+                logger.error(f"加载索引失败: {e}")
+                return f"错误: 无法加载书籍索引 ({str(e)})"
+
             chunks = index_doc.get("chunks", [])
             if not chunks:
-                return "索引为空"
+                return "错误: 该书籍索引中没有内容文本（chunks 为空）"
 
+            # 提取文本逻辑
+            texts = []
             if chapter:
-                chapter_lower = chapter.strip().lower()
-                texts = [c.get("text") or "" for c in chunks if chapter_lower in (c.get("chapter_name") or "").lower()]
+                chapter_input = chapter.strip()
+                chapter_lower = chapter_input.lower()
+                
+                # 策略1: 如果输入看起来像文件路径 (包含 / 或 .html),直接按路径匹配
+                if "/" in chapter_input or ".html" in chapter_lower or ".xhtml" in chapter_lower:
+                    texts = [c.get("text") or "" for c in chunks if chapter_input in (c.get("chapter_name") or "")]
+                    if texts:
+                        logger.info(f"通过文件路径匹配到 {len(texts)} 个文本块")
+                
+                # 策略2: 尝试通过 TOC 标题匹配 (支持模糊匹配)
+                if not texts and index_doc.get("toc"):
+                    def find_in_toc(items, depth=0):
+                        """递归查找 TOC,返回所有匹配的 href"""
+                        matches = []
+                        for item in items:
+                            title = (item.get("title") or "").lower()
+                            # 多种匹配策略:
+                            # 1. 完全匹配
+                            if title == chapter_lower:
+                                href = item.get("href")
+                                if href:
+                                    matches.append((href, title, depth, 0))  # 优先级0最高
+                            # 2. 双向包含匹配
+                            elif chapter_lower in title or title in chapter_lower:
+                                href = item.get("href")
+                                if href:
+                                    matches.append((href, title, depth, 1))
+                            # 3. 分词匹配 (处理 "冥想的心和无解的问题" 这种复合标题)
+                            else:
+                                # 去除常见连接词后分词
+                                chapter_words = [w for w in chapter_lower.replace("和", " ").replace("与", " ").replace("的", " ").replace("及", " ").replace("或", " ").split() if len(w) >= 1]
+                                if chapter_words:
+                                    # 计算匹配的词数
+                                    matched_words = sum(1 for word in chapter_words if word in title)
+                                    # 额外尝试：如果 title 包含 chapter_words 中的任意一个较长词，也视为可能匹配
+                                    if matched_words >= len(chapter_words) * 0.4 or any(len(w) >= 2 and w in title for w in chapter_words):
+                                        href = item.get("href")
+                                        if href:
+                                            matches.append((href, title, depth, 2))  # 优先级2
+                            
+                            # 递归查找子章节
+                            if item.get("sections"):
+                                matches.extend(find_in_toc(item["sections"], depth + 1))
+                        return matches
+                    
+                    toc_matches = find_in_toc(index_doc["toc"])
+                    if toc_matches:
+                        # 优先使用: 1.优先级最高 2.标题最短 3.层级最深(子章节优先)
+                        toc_matches.sort(key=lambda x: (x[3], len(x[1]), -x[2]))
+                        target_href = toc_matches[0][0]
+                        matched_title = toc_matches[0][1]
+                        pure_href = target_href.split("#")[0]
+                        texts = [c.get("text") or "" for c in chunks if pure_href in (c.get("chapter_name") or "")]
+                        if texts:
+                            logger.info(f"通过 TOC 标题匹配: '{chapter}' -> '{matched_title}' (href='{pure_href}'),共 {len(texts)} 个文本块")
+                
+                # 策略3: 直接在 chapter_name 或 chapter_title 中模糊搜索 (增强逻辑)
+                if not texts:
+                    texts = [
+                        c.get("text") or "" 
+                        for c in chunks 
+                        if chapter_lower in (c.get("chapter_name") or "").lower() or 
+                           chapter_lower in (c.get("chapter_title") or "").lower()
+                    ]
+                    if texts:
+                        logger.info(f"通过 chapter_name/title 模糊匹配到 {len(texts)} 个文本块")
             else:
-                texts = [c.get("text") or "" for c in chunks]
+                # 全书摘要：取前中后部分以节省 Token 并保证覆盖面
+                if len(chunks) > 50:
+                    texts = [c.get("text") or "" for c in (chunks[:15] + chunks[len(chunks)//2-10:len(chunks)//2+10] + chunks[-15:])]
+                else:
+                    texts = [c.get("text") or "" for c in chunks]
 
             merged = "\n".join([t for t in texts if t.strip()])
-            merged = merged[:6000]
             if not merged:
-                return "未找到可摘要的内容"
+                hint = f"提示: 未找到关于 '{chapter}' 的内容。\n"
+                hint += "建议:\n"
+                hint += "1. 使用 get_book_toc 查看完整目录结构\n"
+                hint += "2. 使用目录中的章节标题 (如 '第一章 引言') 或文件路径 (如 'Text/chapter001.html')\n"
+                hint += "3. 支持模糊匹配,可以只输入部分章节名称"
+                return hint
 
-            prompt = (
-                "请根据以下书籍内容生成一个中文摘要（200-400字）。\n\n"
-                f"内容：\n{merged}\n"
-            )
-            msg = self.llm.invoke(prompt)
-            return getattr(msg, "content", str(msg))
+            # 限制发送给 LLM 的长度
+            max_chars = 6000
+            if len(merged) > max_chars:
+                merged = merged[:max_chars//2] + "\n\n...(中间内容已省略)...\n\n" + merged[-max_chars//2:]
+
+            try:
+                prompt = (
+                    "你是一个资深书籍编辑。请根据以下提供的书籍片段内容，生成一个深刻且详细的中文摘要（300-500字）。\n"
+                    "要求：\n"
+                    "1. 概括核心论点或故事情节。\n"
+                    "2. 提取关键术语或背景信息。\n"
+                    "3. 保持条理清晰，使用 Markdown 格式。\n\n"
+                    f"书籍内容片段：\n{merged}\n"
+                )
+                msg = self.llm.invoke(prompt)
+                return getattr(msg, "content", str(msg))
+            except Exception as e:
+                logger.error(f"调用 LLM 生成摘要失败: {e}")
+                return f"错误: AI 摘要生成失败 ({str(e)})"
         
         @tool
         def explain_concept(concept: str, context: Optional[str] = None) -> str:
@@ -285,6 +527,7 @@ class LangChainQwenService:
             search_book_content,
             search_bookshelf,
             list_indexed_bookshelf,
+            get_book_id_by_title,
             get_book_toc,
             get_book_summary,
             explain_concept,
@@ -328,12 +571,18 @@ class LangChainQwenService:
 1.1 跨全书架搜索内容（已构建索引的书籍）
 1.2 列出已索引的书籍列表（book_id）
 1.3 获取书籍目录（TOC）
+1.4 在特定章节内搜索内容
 2. 生成章节摘要
 3. 解释概念和术语
 4. 翻译文本
 5. 分析阅读进度
 
-注意：与单本书籍索引相关的工具需要 book_id（书籍 ID）。若用户问题涉及某本书但未提供 book_id，请先向用户询问或引导其选择书籍；如果用户问的是“全书架/所有书”，可以使用跨书架搜索工具。请根据用户的问题，智能地选择和使用这些工具。始终用中文回答。"""
+核心指令：
+- 当用户的问题需要使用工具时，请务必调用相关工具。
+- 在工具调用完成后，你必须根据工具返回的结果，继续为用户提供完整、详细的回答。
+- 绝不要在调用工具后就停止回复。
+- 如果工具返回“未找到”或“错误”，请如实告知用户，并根据你的知识或书籍上下文尝试给出建议。
+- 始终使用中文回答。"""
                 messages.append(SystemMessage(content=default_prompt))
             
             # 添加对话历史（支持字典格式和 LangChain 消息对象）
@@ -411,7 +660,12 @@ class LangChainQwenService:
 4. 翻译文本
 5. 分析阅读进度
 
-请根据用户的问题，智能地选择和使用这些工具。始终用中文回答。"""
+核心指令：
+- 当用户的问题需要使用工具时，请务必调用相关工具。
+- 在工具调用完成后，你必须根据工具返回的结果，继续为用户提供完整、详细的回答。
+- 绝不要在调用工具后就停止回复。
+- 如果工具返回“未找到”或“错误”，请如实告知用户，并根据你的知识或书籍上下文尝试给出建议。
+- 始终使用中文回答。"""
                 messages.append(SystemMessage(content=default_prompt))
             
             # 添加对话历史（支持字典格式和 LangChain 消息对象）
@@ -451,13 +705,23 @@ class LangChainQwenService:
                 elif kind == "on_tool_start":
                     # 工具开始执行
                     tool_name = event["name"]
-                    logger.info(f"工具开始: {tool_name}")
-                    yield f"\n\n🔧 正在使用工具: {tool_name}\n\n"
+                    tool_input = event["data"].get("input", {})
+                    logger.info(f"工具开始: {tool_name}, 输入: {tool_input}")
+                    yield f"\n\n🔧 正在使用工具: `{tool_name}`"
+                    if tool_input:
+                        yield f"\n参数: `{json.dumps(tool_input, ensure_ascii=False)}`"
+                    yield "\n\n"
                 
                 elif kind == "on_tool_end":
                     # 工具执行完成
                     tool_name = event["name"]
+                    output = event["data"].get("output")
                     logger.info(f"工具完成: {tool_name}")
+                    # 如果工具返回了错误或空结果，给用户一个提示，避免看起来像卡住了
+                    if output and isinstance(output, str) and ("错误" in output or "不存在" in output or "未找到" in output):
+                        yield f"\n\n📢 工具提示: {output}\n\n"
+                    elif not output:
+                        yield f"\n\n📢 工具未返回任何结果。\n\n"
             
             logger.info(f"Agent 流式对话完成 [会话:{conversation_id}]")
             

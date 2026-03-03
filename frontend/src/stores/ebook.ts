@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import localforage from 'localforage'
 import ePub from 'epubjs'
 import { v4 as uuidv4 } from 'uuid'
+import SparkMD5 from 'spark-md5'
 import { api } from '../api/adapter'
 
 // 定义分类类型
@@ -2009,13 +2010,56 @@ export const useEbookStore = defineStore('ebook', () => {
     }
   };
 
+  // 计算文件 MD5
+  const calculateMD5 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const blobSlice = File.prototype.slice || (File as any).prototype.mozSlice || (File as any).prototype.webkitSlice;
+      const chunkSize = 2097152; // 2MB
+      const chunks = Math.ceil(file.size / chunkSize);
+      let currentChunk = 0;
+      const spark = new SparkMD5.ArrayBuffer();
+      const fileReader = new FileReader();
+
+      fileReader.onload = (e) => {
+        spark.append(e.target?.result as ArrayBuffer);
+        currentChunk++;
+
+        if (currentChunk < chunks) {
+          loadNext();
+        } else {
+          resolve(spark.end());
+        }
+      };
+
+      fileReader.onerror = () => {
+        reject(new Error('MD5 calculation failed'));
+      };
+
+      function loadNext() {
+        const start = currentChunk * chunkSize;
+        const end = ((start + chunkSize) >= file.size) ? file.size : start + chunkSize;
+        fileReader.readAsArrayBuffer(blobSlice.call(file, start, end));
+      }
+
+      loadNext();
+    });
+  };
+
   // 导入 EPUB 文件
   const importEpubFile = async (file: File): Promise<EbookMetadata | null> => {
     try {
       console.log('开始导入 EPUB 文件:', file.name);
       
-      // 生成唯一 ID
-      const id = `epub_${uuidv4()}`;
+      // 1. 计算 MD5 作为唯一 ID
+      const fileHash = await calculateMD5(file);
+      const id = `epub_${fileHash}`;
+      
+      // 检查是否已存在
+      const existing = books.value.find(b => b.id === id);
+      if (existing) {
+        console.log('书籍已存在:', existing.title);
+        return existing;
+      }
       
       // 将文件转换为 ArrayBuffer
       const arrayBuffer = await file.arrayBuffer();
@@ -2125,13 +2169,21 @@ export const useEbookStore = defineStore('ebook', () => {
       }
       return null;
     }
-  }
+  };
 
   // 导入 PDF 文件
   const importPdfFile = async (file: File): Promise<EbookMetadata | null> => {
     try {
-      // 生成唯一 ID
-      const id = `pdf_${uuidv4()}`;
+      // 1. 计算 MD5 作为唯一 ID
+      const fileHash = await calculateMD5(file);
+      const id = `pdf_${fileHash}`;
+      
+      // 检查是否已存在
+      const existing = books.value.find(b => b.id === id);
+      if (existing) {
+        console.log('PDF 书籍已存在:', existing.title);
+        return existing;
+      }
       
       // 将文件转换为 ArrayBuffer
       const arrayBuffer = await file.arrayBuffer();
@@ -2163,13 +2215,21 @@ export const useEbookStore = defineStore('ebook', () => {
       console.error('导入 PDF 文件失败:', error);
       return null;
     }
-  }
+  };
 
   // 导入 TXT 文件
   const importTxtFile = async (file: File): Promise<EbookMetadata | null> => {
     try {
-      // 生成唯一 ID
-      const id = `txt_${uuidv4()}`;
+      // 1. 计算 MD5 作为唯一 ID
+      const fileHash = await calculateMD5(file);
+      const id = `txt_${fileHash}`;
+      
+      // 检查是否已存在
+      const existing = books.value.find(b => b.id === id);
+      if (existing) {
+        console.log('TXT 书籍已存在:', existing.title);
+        return existing;
+      }
       
       // 将文件转换为 ArrayBuffer
       const arrayBuffer = await file.arrayBuffer();
@@ -2374,5 +2434,5 @@ export const useEbookStore = defineStore('ebook', () => {
     clearAIConversation,
     saveAIConversations,
     initialize
-  };
-});
+  }
+})

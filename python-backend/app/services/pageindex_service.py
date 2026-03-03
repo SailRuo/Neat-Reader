@@ -27,6 +27,7 @@ class PageChunk:
     chapter_index: int
     chapter_name: str
     text: str
+    chapter_title: Optional[str] = None
 
 
 class PageIndexService:
@@ -55,7 +56,7 @@ class PageIndexService:
     def list_book_ids(self) -> List[str]:
         return sorted([p.stem for p in self.cache_dir.glob("*.json") if p.is_file()])
 
-    def search(self, *, book_id: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    def search(self, *, book_id: str, query: str, top_k: int = 5, chapter_index: Optional[int] = None) -> List[Dict[str, Any]]:
         """Very small retrieval: token overlap scoring over cached chunk tokens."""
         if not self.exists(book_id):
             return []
@@ -70,6 +71,10 @@ class PageIndexService:
         index_doc = self.load(book_id)
         scored = []
         for c in index_doc.get("chunks", []):
+            # If chapter_index is provided, filter chunks by it
+            if chapter_index is not None and c.get("chapter_index") != chapter_index:
+                continue
+
             tokens = c.get("tokens") or []
             if not tokens:
                 tokens = self._tokens(c.get("text") or "")
@@ -98,7 +103,26 @@ class PageIndexService:
 
         book = epub.read_epub(BytesIO(epub_bytes))
 
+        # Extract book title from metadata
+        titles = book.get_metadata("DC", "title")
+        book_title = titles[0][0] if titles else (filename or "Unknown Book")
+
         toc = self._extract_toc(book)
+
+        # 1. 提取所有 href -> title 的映射
+        href_to_title = {}
+        def _walk_toc(items):
+            for it in items:
+                h = it.get("href")
+                if h:
+                    # 去掉锚点，只保留文件名
+                    pure_h = h.split("#")[0]
+                    if pure_h not in href_to_title:
+                        href_to_title[pure_h] = it.get("title")
+                if it.get("nodes"):
+                    _walk_toc(it["nodes"])
+        
+        _walk_toc(toc)
 
         chunks: List[PageChunk] = []
         chapter_index = 0
@@ -112,14 +136,18 @@ class PageIndexService:
                 if not text:
                     continue
 
-                chapter_name = item.get_name() or f"chapter_{chapter_index}"
+                href = item.get_name()
+                # 尝试从 TOC 映射中获取更友好的章节标题
+                chapter_title = href_to_title.get(href) or href
+                
                 chapter_chunks = self._chunk_text(text)
                 for i, c in enumerate(chapter_chunks):
                     chunks.append(
                         PageChunk(
                             chunk_id=f"{chapter_index}_{i}",
                             chapter_index=chapter_index,
-                            chapter_name=chapter_name,
+                            chapter_name=href,
+                            chapter_title=chapter_title,
                             text=c,
                         )
                     )
@@ -129,6 +157,7 @@ class PageIndexService:
 
         index_doc: Dict[str, Any] = {
             "book_id": book_id,
+            "book_title": book_title,
             "source": {
                 "filename": filename,
                 "byte_size": len(epub_bytes),
@@ -141,6 +170,7 @@ class PageIndexService:
                     "chunk_id": c.chunk_id,
                     "chapter_index": c.chapter_index,
                     "chapter_name": c.chapter_name,
+                    "chapter_title": c.chapter_title,
                     "text": c.text,
                     "tokens": self._tokens(c.text),
                 }

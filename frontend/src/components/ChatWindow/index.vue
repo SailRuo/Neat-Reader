@@ -79,12 +79,12 @@
             </div>
 
             <!-- 消息列表 -->
-            <div class="chat-messages" ref="messagesContainer">
+            <div class="chat-messages" ref="messagesContainer" @scroll="handleScroll">
               <div v-if="currentMessages.length === 0" class="chat-empty">
                 <div class="empty-icon">
                   <Icons.MessageCircle :size="48" />
                 </div>
-                <p>开始与 Qwen AI 对话吧！</p>
+                <p>开始与 AI 对话吧！</p>
                 <div class="quick-actions">
                   <button @click="sendQuickMessage('介绍一下你自己')">介绍自己</button>
                   <button @click="sendQuickMessage('推荐几本好书')">推荐好书</button>
@@ -110,36 +110,66 @@
                       <span></span>
                       <span></span>
                     </div>
-                    <div
-                      v-else
-                      class="message-text message-text-ai markdown-content"
-                      v-html="renderMarkdown(msg.content)"
-                    />
+                    <div v-else class="message-text-wrapper">
+                      <div
+                        class="message-text message-text-ai markdown-content"
+                        v-html="renderMarkdown(msg.content)"
+                      />
+                      <div class="message-footer" v-if="msg.content">
+                        <div class="message-time">{{ formatTime(msg.timestamp) }}</div>
+                        <div class="message-actions">
+                          <button 
+                            class="message-action-btn" 
+                            @click="copyAsMarkdown(msg.content)" 
+                            title="复制为 Markdown"
+                          >
+                            <Icons.Copy :size="14" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   </template>
-                  <div class="message-time">{{ formatTime(msg.timestamp) }}</div>
                 </div>
               </div>
             </div>
 
             <!-- 输入框 -->
-            <div class="chat-input-container">
-              <textarea
-                v-model="inputMessage"
-                class="chat-input"
-                placeholder="输入消息..."
-                rows="1"
-                @keydown.enter.exact.prevent="sendMessage"
-                @keydown.enter.shift.exact="inputMessage += '\n'"
-                ref="inputRef"
-              ></textarea>
-              <button 
-                class="send-btn" 
-                @click="sendMessage"
-                :disabled="!inputMessage.trim() || isLoading || !isOnline"
-                title="发送 (Enter)"
-              >
-                <Icons.Send :size="20" />
-              </button>
+            <div class="chat-input-wrapper">
+              <div v-if="messageQueue.length > 0" class="message-queue-container">
+                <div class="queue-header">
+                  <span class="queue-count">等待发送 ({{ messageQueue.length }})</span>
+                  <button class="clear-queue-btn" @click="messageQueue = []">清除队列</button>
+                </div>
+                <div class="queue-list">
+                  <div v-for="(msg, idx) in messageQueue" :key="idx" class="queue-item">
+                    <span class="queue-item-text">{{ msg }}</span>
+                    <button class="remove-queue-item" @click="messageQueue.splice(idx, 1)">
+                      <Icons.X :size="12" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="chat-input-container">
+                <textarea
+                  v-model="inputMessage"
+                  class="chat-input"
+                  placeholder="输入消息..."
+                  rows="1"
+                  @keydown.enter.exact.prevent="sendMessage"
+                  @keydown.enter.shift.exact="inputMessage += '\n'"
+                  ref="inputRef"
+                ></textarea>
+                <button 
+                  class="action-main-btn" 
+                  :class="{ 'stop-mode': isLoading }"
+                  @click="isLoading ? stopGeneration() : sendMessage()"
+                  :disabled="!isLoading && (!inputMessage.trim() || !isOnline)"
+                  :title="isLoading ? '停止生成' : '发送 (Enter)'"
+                >
+                  <Icons.Square v-if="isLoading" :size="18" fill="currentColor" />
+                  <Icons.Send v-else :size="20" />
+                </button>
+              </div>
             </div>
 
             <!-- 底部提示 -->
@@ -165,9 +195,10 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import * as qwenAPI from '../../api/qwen'
+import * as aiAPI from '../../api/ai'
 import { useAICredentials } from '../../composables/useAICredentials'
 import { useEbookStore } from '../../stores/ebook'
+import { useDialogStore } from '../../stores/dialog'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/atom-one-dark.css'
@@ -235,10 +266,14 @@ const emit = defineEmits<{
 const router = useRouter()
 const ebookStore = useEbookStore()
 const aiCreds = useAICredentials()
+const dialogStore = useDialogStore()
 const messagesContainer = ref<HTMLElement>()
 const inputRef = ref<HTMLTextAreaElement>()
 const inputMessage = ref('')
 const isLoading = ref(false)
+const messageQueue = ref<string[]>([])
+const isAutoScrollEnabled = ref(true)
+const abortController = ref<AbortController | null>(null)
 const sidebarCollapsed = ref(false)
 const isMaximized = ref(false)
 
@@ -367,6 +402,17 @@ const goToSettings = () => {
   emit('navigate-to-settings')
 }
 
+// 复制为 Markdown
+const copyAsMarkdown = async (content: string) => {
+  try {
+    await navigator.clipboard.writeText(content)
+    dialogStore.showToast('已复制 Markdown 内容', 'success')
+  } catch (err) {
+    console.error('复制失败:', err)
+    dialogStore.showToast('复制失败', 'error')
+  }
+}
+
 // 格式化时间
 const formatTime = (timestamp: number) => {
   const date = new Date(timestamp)
@@ -386,6 +432,7 @@ const formatTime = (timestamp: number) => {
 
 // 滚动到底部
 const scrollToBottom = () => {
+  if (!isAutoScrollEnabled.value) return
   nextTick(() => {
     if (messagesContainer.value) {
       messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
@@ -393,10 +440,33 @@ const scrollToBottom = () => {
   })
 }
 
+// 处理滚动事件
+const handleScroll = () => {
+  if (!messagesContainer.value) return
+  const { scrollTop, scrollHeight, clientHeight } = messagesContainer.value
+  // 如果距离底部超过 50px，认为用户在向上滚动，禁用自动滚动
+  const isAtBottom = scrollHeight - scrollTop - clientHeight < 50
+  isAutoScrollEnabled.value = isAtBottom
+}
+
 // 发送快捷消息
 const sendQuickMessage = (text: string) => {
   inputMessage.value = text
   sendMessage()
+}
+
+// 停止生成
+const stopGeneration = () => {
+  if (abortController.value) {
+    abortController.value.abort()
+    abortController.value = null
+    isLoading.value = false
+    const conv = currentConversation.value
+    if (conv) {
+      conv.isLoading = false
+    }
+    console.log('🛑 用户终止了 AI 回答')
+  }
 }
 
 // 发送消息
@@ -408,31 +478,42 @@ const sendMessage = async () => {
   const conv = currentConversation.value
   if (!conv) return
   
-  // 🔧 检查当前对话是否正在加载（而不是全局 isLoading）
+  // 如果正在加载，将消息加入队列
   if (conv.isLoading === true) {
-    console.log('🚫 当前对话正在处理中，请稍候...')
+    messageQueue.value.push(inputMessage.value.trim())
+    inputMessage.value = ''
     return
   }
 
   const userMessage = inputMessage.value.trim()
   inputMessage.value = ''
+  
+  await processMessage(userMessage)
+}
+
+// 处理单条消息发送逻辑
+const processMessage = async (messageText: string) => {
+  const conv = currentConversation.value
+  if (!conv) return
 
   // 添加用户消息
   conv.messages.push({
     role: 'user',
-    content: userMessage,
+    content: messageText,
     timestamp: Date.now()
   })
 
   updateConversation()
+  isAutoScrollEnabled.value = true // 发送新消息时强制开启滚动
   scrollToBottom()
   
-  // 🔧 设置当前对话的加载状态（而不是全局）
+  // 🔧 设置当前对话的加载状态
   conv.isLoading = true
-  // 全局 isLoading 仅用于 UI 显示
   isLoading.value = true
+  
+  abortController.value = new AbortController()
 
-  // 添加一个空的 AI 消息，用于流式更新
+  // 添加一个空的 AI 消息
   const aiMessageIndex = conv.messages.length
   conv.messages.push({
     role: 'assistant',
@@ -449,48 +530,46 @@ const sendMessage = async () => {
     const tokenOrConfig = creds.type === 'oauth' ? creds.accessToken : creds.config
     const resourceUrl = creds.type === 'oauth' ? creds.resourceUrl : undefined
 
-    // 构建完整的提示词（如果有书籍上下文）
-    let fullPrompt = userMessage
+    let fullPrompt = messageText
     if (props.bookContext && props.bookTitle) {
       fullPrompt = `你是一个阅读助手，正在帮助用户理解《${props.bookTitle}》这本书。\n\n书籍信息：\n${props.bookContext}\n\n用户问题：${fullPrompt}\n\n请基于书籍内容回答用户的问题。`
-      console.log('📖 [ChatWindow] 使用书籍上下文，书名:', props.bookTitle)
     }
-
-    // 使用流式 API
-    console.log('📤 发送消息到 AI API', {
-      messageLength: fullPrompt.length,
-      conversationId: currentConversationId.value,
-      historyLength: currentMessages.value.length
-    });
     
-    await qwenAPI.chatStream(
+    await aiAPI.chatStream(
       tokenOrConfig,
       fullPrompt,
       resourceUrl,
-      undefined,  // 不传递图片
+      undefined,
       (chunk) => {
-        // 实时更新 AI 消息内容
         conv.messages[aiMessageIndex].content += chunk
         scrollToBottom()
       },
-      currentMessages.value.slice(0, -1).map(msg => ({ role: msg.role, content: msg.content })),  // 传递历史记录（不包括刚添加的空消息）
-      currentConversationId.value,  // 传递会话 ID
-      true  // 启用后端存储（混合模式）
+      currentMessages.value.slice(0, -1).map(msg => ({ role: msg.role, content: msg.content })),
+      currentConversationId.value,
+      true,
+      abortController.value || undefined
     )
 
     updateConversation()
     scrollToBottom()
   } catch (error: any) {
     console.error('发送消息失败:', error)
-    
-    // 更新错误消息
     conv.messages[aiMessageIndex].content = `抱歉，发生了错误：${error.message || '未知错误'}`
     updateConversation()
     scrollToBottom()
   } finally {
-    // 🔧 清除当前对话的加载状态
     conv.isLoading = false
     isLoading.value = false
+    abortController.value = null
+    
+    // AI 回复完成后，检查队列中是否有待发送消息
+    if (messageQueue.value.length > 0) {
+      const nextMessage = messageQueue.value.shift()
+      if (nextMessage) {
+        // 延迟一小会儿发送，体验更自然
+        setTimeout(() => processMessage(nextMessage), 500)
+      }
+    }
   }
 }
 
@@ -1003,6 +1082,53 @@ watch(isVisible, (visible) => {
   line-height: 1.75;
 }
 
+.message-text-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.message-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+  margin-top: 4px;
+}
+
+.message-actions {
+  display: flex;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.message:hover .message-actions {
+  opacity: 1;
+}
+
+.message-actions .message-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.message-actions .message-action-btn:hover {
+  background: var(--color-accent-light);
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  transform: scale(1.05);
+}
+
 .message-text-ai :deep(p) {
   margin: 0 0 0.75em 0;
 }
@@ -1084,8 +1210,6 @@ watch(isVisible, (visible) => {
 .message-time {
   font-size: 11px;
   color: #94A3B8;
-  margin-top: 6px;
-  padding: 0 6px;
   font-weight: 500;
 }
 
@@ -1123,42 +1247,127 @@ watch(isVisible, (visible) => {
   }
 }
 
-/* 输入框 */
+.chat-input-wrapper {
+  padding: 16px 32px 24px;
+  background: white;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.message-queue-container {
+  background: var(--color-bg-secondary);
+  border-radius: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.queue-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.queue-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.clear-queue-btn {
+  font-size: 11px;
+  color: var(--color-error);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.clear-queue-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.queue-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: white;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid #E2E8F0;
+}
+
+.queue-item-text {
+  font-size: 12px;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.remove-queue-item {
+  background: transparent;
+  border: none;
+  color: #94A3B8;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 4px;
+}
+
+.remove-queue-item:hover {
+  background: #F1F5F9;
+  color: var(--color-error);
+}
+
 .chat-input-container {
   display: flex;
+  align-items: flex-end;
   gap: 12px;
-  padding: 20px 24px;
   background: white;
-  border-top: 1px solid #E2E8F0;
+  border: 1px solid #E2E8F0;
+  border-radius: 16px;
+  padding: 8px 12px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s;
 }
 
 .chat-input {
   flex: 1;
-  padding: 14px 18px;
-  border: 1px solid #E2E8F0;
-  border-radius: 14px;
-  font-size: 14px;
+  border: none;
+  background: transparent;
   resize: none;
-  max-height: 120px;
-  font-family: inherit;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  background: #F8FAFC;
-  color: #1E293B;
+  padding: 8px 4px;
+  font-size: 14px;
   line-height: 1.5;
-}
-
-.chat-input::placeholder {
-  color: #94A3B8;
-}
-
-.chat-input:focus {
+  color: inherit;
   outline: none;
-  border-color: var(--color-accent);
-  background: var(--color-bg-primary);
-  box-shadow: 0 0 0 3px var(--color-accent-light);
+  min-height: 40px;
+  max-height: 200px;
 }
 
-.send-btn {
+.action-main-btn {
   width: 48px;
   height: 48px;
   background: #10A37F;
@@ -1173,19 +1382,27 @@ watch(isVisible, (visible) => {
   flex-shrink: 0;
 }
 
-.send-btn:hover:not(:disabled) {
+.action-main-btn:hover:not(:disabled) {
   background: #0d8a6a;
+  transform: scale(1.02);
 }
 
-.send-btn:active:not(:disabled) {
-  transform: translateY(0);
+.action-main-btn.stop-mode {
+  background: #FEF2F2;
+  border: 1px solid #FCA5A5;
+  color: #DC2626;
 }
 
-.send-btn:disabled {
+.action-main-btn.stop-mode:hover {
+  background: #FEE2E2;
+  border-color: #F87171;
+}
+
+.action-main-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
+  background: #E2E8F0;
+  color: #94A3B8;
 }
 
 /* 底部提示 */

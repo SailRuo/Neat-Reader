@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const API_BASE = '/api/qwen'
+const API_BASE = '/api/ai'
 
 export interface QwenTokenResponse {
   access_token: string
@@ -118,7 +118,8 @@ export async function chatStream(
   onChunk?: (content: string) => void,
   chatHistory?: Array<{role: string, content: string}>,  // 对话历史
   conversationId?: string,  // 会话 ID
-  saveToBackend: boolean = true  // 默认启用后端存储（混合模式）
+  saveToBackend: boolean = true,  // 默认启用后端存储（混合模式）
+  abortController?: AbortController // 用于终止请求
 ): Promise<void> {
   // 构建消息数组
   const messages: Array<{role: string, content: string}> = []
@@ -153,7 +154,8 @@ export async function chatStream(
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: abortController?.signal
   })
 
   if (!response.ok) {
@@ -170,6 +172,12 @@ export async function chatStream(
 
   try {
     while (true) {
+      // 💡 检查信号是否已中止
+      if (abortController?.signal.aborted) {
+        console.log('🛑 [chatStream] 请求已被手动中止')
+        break
+      }
+
       const { done, value } = await reader.read()
       
       if (done) break
@@ -202,15 +210,30 @@ export async function chatStream(
         }
       }
     }
+  } catch (e) {
+    if (e instanceof Error && e.name === 'AbortError') {
+      console.log('ℹ️ [chatStream] 捕获到 AbortError，流已正常关闭')
+      return
+    }
+    if (e instanceof Error && e.message !== 'Unexpected end of JSON input') {
+      throw e
+    }
   } finally {
-    reader.releaseLock()
+    try {
+      if (reader) {
+        await reader.cancel()
+        reader.releaseLock()
+      }
+    } catch (cancelError) {
+      // 忽略取消流时的错误
+    }
   }
 }
 
 /**
- * 测试 Qwen API（OAuth 模式）
+ * 测试 AI API（OAuth 模式）
  */
-export async function testQwenAPI(accessToken: string, message?: string, resourceUrl?: string): Promise<QwenTestResponse> {
+export async function testAIAPI(accessToken: string, message?: string, resourceUrl?: string): Promise<QwenTestResponse> {
   const response = await axios.post(`${API_BASE}/test`, {
     access_token: accessToken,
     message,

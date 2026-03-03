@@ -1,6 +1,5 @@
-// API 适配器 - 统一封装 Electron API 和后端 HTTP API
+// API 适配器 - 统一封装后端 HTTP API
 import { baiduApi } from './baidu'
-import { isElectron } from '@/electron'
 
 // 统一的 API 适配器
 export const api = {
@@ -67,29 +66,5 @@ export const api = {
   async deleteFile(accessToken: string, filePaths: string[]): Promise<any> {
     const result = await baiduApi.deleteFile(accessToken, filePaths)
     return result
-  },
-
-  // 文件系统 API (通过 Electron)
-  async openDirectory(): Promise<string> {
-    if (!isElectron()) {
-      throw new Error('Electron API 不可用')
-    }
-    return window.electron!.openDirectory()
-  },
-
-  async readFile(filePath: string): Promise<number[]> {
-    if (!isElectron()) {
-      throw new Error('Electron API 不可用')
-    }
-    return window.electron!.readFile(filePath)
-  },
-
-  async selectFile(): Promise<string> {
-    if (!isElectron()) {
-      throw new Error('Electron API 不可用')
-    }
-    return window.electron!.openFile([
-      { name: '电子书', extensions: ['epub', 'pdf', 'txt'] }
-    ])
   }
 }

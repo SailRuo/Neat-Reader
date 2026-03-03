@@ -10,12 +10,14 @@
       :buttons="dialogStore.buttons"
       @close="dialogStore.closeDialog"
     />
+    <Toast />
   </div>
 </template>
 
 <script setup lang="ts">
 import { useDialogStore } from './stores/dialog'
 import Dialog from './components/Dialog/index.vue'
+import Toast from './components/Toast/index.vue'
 import { useConversationSync } from './composables/useConversationSync'
 
 // 初始化对话框状态管理

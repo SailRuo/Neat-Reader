@@ -3,6 +3,7 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router'
 import './assets/styles/global.css'
+import { qwenTokenManager } from './utils/qwenTokenManager'
 
 const app = createApp(App)
 
@@ -11,5 +12,7 @@ app.use(router)
 
 app.mount('#app')
 
-// Electron 环境不需要 Wails 初始化
-console.log('Neat Reader (Electron) initialized')
+// 💡 核心修复：在 Pinia 激活并挂载应用后，手动初始化 Token Manager
+qwenTokenManager.init()
+
+console.log('Neat Reader initialized')

@@ -14,6 +14,13 @@ export interface DialogConfig {
   }>;
 }
 
+// 定义 Toast 消息类型
+export interface ToastMessage {
+  id: number;
+  message: string;
+  type: 'info' | 'success' | 'error' | 'warning';
+}
+
 export const useDialogStore = defineStore('dialog', () => {
   // 响应式状态
   const visible = ref(false);
@@ -26,6 +33,22 @@ export const useDialogStore = defineStore('dialog', () => {
     primary?: boolean;
     callback?: () => void;
   }>>([{ text: '确定', primary: true }]);
+
+  const toasts = ref<ToastMessage[]>([]);
+  let toastId = 0;
+
+  // 显示 Toast 提示
+  const showToast = (message: string, type: 'info' | 'success' | 'error' | 'warning' = 'success', duration = 3000) => {
+    const id = ++toastId;
+    toasts.value.push({ id, message, type });
+    
+    setTimeout(() => {
+      const index = toasts.value.findIndex(t => t.id === id);
+      if (index > -1) {
+        toasts.value.splice(index, 1);
+      }
+    }, duration);
+  };
 
   // 显示对话框
   const showDialog = (config: DialogConfig) => {
@@ -82,11 +105,14 @@ export const useDialogStore = defineStore('dialog', () => {
     details,
     buttons,
     
+    toasts,
+    
     // 方法
     showDialog,
     showErrorDialog,
     showSuccessDialog,
     showWarningDialog,
+    showToast,
     closeDialog
   };
 });

@@ -1,9 +1,8 @@
 """
-Qwen API 路由
-验证 Python 调用 Qwen API 的可行性
-支持 LangChain Agent 模式
+AI 聊天路由
+支持 LangChain Agent 模式，兼容 Qwen OAuth 和自定义 OpenAI API
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict
@@ -16,7 +15,7 @@ import base64
 import requests
 
 from app.services.qwen_client import QwenClient
-from app.services.langchain_qwen_service import LangChainQwenService
+from app.services.langchain_agent_service import LangChainAgentService
 from app.services.conversation_manager import conversation_manager
 from app.utils.api_logger import log_api_failure
 
@@ -62,7 +61,7 @@ def _resolve_llm_credentials(request_access_token: Optional[str], request_resour
     """
     解析 LLM 调用凭证。
     优先级：1. 请求中的 custom_api  2. 后端已保存的 custom_api  3. OAuth token
-    返回: (creds_ok: bool, kwargs_for_LangChainQwenService)
+    返回: (creds_ok: bool, kwargs_for_LangChainAgentService)
     """
     # 1. 请求中的 custom_api
     if custom_api:
@@ -129,21 +128,21 @@ class QwenTestCustomRequest(BaseModel):
     model_id: str
 
 
-class QwenChatRequest(BaseModel):
-    """Qwen 对话请求"""
-    access_token: Optional[str] = None  # 不传则使用已保存的 token
+class AIChatRequest(BaseModel):
+    """通用 AI 对话请求"""
+    access_token: Optional[str] = None  # OAuth 模式下的 token
     resource_url: Optional[str] = None
-    messages: Optional[List[Dict]] = None  # 完整消息数组（新格式）
+    messages: Optional[List[Dict]] = None  # 完整消息数组
     message: Optional[str] = None  # 单条消息文本（兼容旧格式）
-    images: Optional[List[str]] = None  # Base64 图片数组（兼容旧格式）
+    images: Optional[List[str]] = None  # Base64 图片数组
     model: Optional[str] = "qwen3-coder-plus"
     temperature: Optional[float] = 0.7
     max_tokens: Optional[int] = None
-    tools: Optional[List[Dict]] = None  # 工具定义（Function Calling）
-    tool_choice: Optional[str] = "auto"  # "auto", "none", 或具体工具名
-    conversation_id: Optional[str] = None  # 会话 ID（用于会话管理）
-    save_to_backend: bool = True  # 默认启用后端存储（混合模式）
-    custom_api: Optional[CustomAPIConfig] = None  # 自定义 API 配置（优先于 OAuth）
+    tools: Optional[List[Dict]] = None  # 工具定义
+    tool_choice: Optional[str] = "auto"
+    conversation_id: Optional[str] = None  # 会话 ID
+    save_to_backend: bool = True  # 是否保存到后端
+    custom_api: Optional[CustomAPIConfig] = None  # 自定义 API 配置
 
 @router.post("/device-auth")
 async def start_device_auth():
@@ -609,7 +608,7 @@ async def test_qwen_api(request: QwenTestRequest):
             raise HTTPException(status_code=401, detail="未提供 Qwen Token，请先在前端完成授权")
         logger.info("收到 Qwen API 测试请求")
         
-        service = LangChainQwenService(
+        service = LangChainAgentService(
             access_token=access_token,
             resource_url=resource_url
         )
@@ -650,7 +649,7 @@ async def test_custom_api(request: QwenTestCustomRequest):
             raise HTTPException(status_code=400, detail="请提供 base_url、api_key 和 model_id")
         logger.info(f"收到自定义 API 测试请求，model_id={request.model_id!r}")
         
-        service = LangChainQwenService(
+        service = LangChainAgentService(
             base_url=request.base_url,
             api_key=request.api_key,
             model=request.model_id
@@ -684,7 +683,7 @@ async def test_custom_api(request: QwenTestCustomRequest):
         raise HTTPException(status_code=500, detail=err_str)
 
 
-async def chat_completion(request: QwenChatRequest):
+async def chat_completion(request: AIChatRequest):
     """
     Qwen 对话（非流式）- 使用 LangChain Agent
     
@@ -737,7 +736,7 @@ async def chat_completion(request: QwenChatRequest):
                 logger.info(f"创建新会话: {request.conversation_id}")
         
         # 使用 LangChain 服务
-        service = LangChainQwenService(
+        service = LangChainAgentService(
             access_token=access_token,
             resource_url=resource_url
         )
@@ -783,7 +782,7 @@ async def chat_completion(request: QwenChatRequest):
             raise HTTPException(status_code=500, detail=err_str)
 
 @router.post("/chat-stream")
-async def chat_completion_stream(request: QwenChatRequest):
+async def chat_completion_stream(request: Request, chat_request: AIChatRequest):
     """
     Qwen 对话（流式响应）- 使用 LangChain Agent
     
@@ -797,55 +796,56 @@ async def chat_completion_stream(request: QwenChatRequest):
     """
     try:
         # 构建消息
-        if request.messages:
-            user_messages = [msg for msg in request.messages if msg.get("role") == "user"]
+        if chat_request.messages:
+            user_messages = [msg for msg in chat_request.messages if msg.get("role") == "user"]
             if not user_messages:
                 raise HTTPException(status_code=400, detail="没有找到用户消息")
             user_message = user_messages[-1]["content"]
             if isinstance(user_message, list):
                 # 多模态消息，提取文本部分
-                text_parts = [part.get("text", "") for part in user_message if part.get("type") == "text"]
+                text_parts = [part.get("text", "") for part in user_messages if part.get("type") == "text"]
                 user_message = " ".join(text_parts) if text_parts else "请分析这些内容"
-            chat_history = request.messages[:-1] if len(request.messages) > 1 else None
+            chat_history = chat_request.messages[:-1] if len(chat_request.messages) > 1 else None
         else:
-            user_message = request.message or "你好"
+            user_message = chat_request.message or "你好"
             chat_history = None
         
         creds_ok, llm_kwargs = _resolve_llm_credentials(
-            request.access_token, request.resource_url, request.custom_api
+            chat_request.access_token, chat_request.resource_url, chat_request.custom_api
         )
         if not creds_ok or not llm_kwargs:
             raise HTTPException(status_code=401, detail="未提供 AI 凭证，请在设置中完成 OAuth 授权或配置自定义 API")
         
-        logger.info(f"收到流式对话请求 [会话:{request.conversation_id}]: {user_message[:50]}...")
+        logger.info(f"收到流式对话请求 [会话:{chat_request.conversation_id}]: {user_message[:50]}...")
         
         # 如果启用后端会话管理，从后端加载历史
-        if request.save_to_backend and request.conversation_id:
-            conversation = conversation_manager.get_conversation(request.conversation_id)
+        if chat_request.save_to_backend and chat_request.conversation_id:
+            conversation = conversation_manager.get_conversation(chat_request.conversation_id)
             if conversation:
                 # 使用后端存储的历史记录
                 chat_history = conversation_manager.get_messages(
-                    request.conversation_id,
+                    chat_request.conversation_id,
                     limit=20  # 限制最近 20 条消息
                 )
                 logger.info(f"从后端加载历史记录: {len(chat_history)} 条消息")
             else:
                 # 创建新会话
                 conversation_manager.create_conversation(
-                    conversation_id=request.conversation_id,
+                    conversation_id=chat_request.conversation_id,
                     title=user_message[:50]
                 )
-                logger.info(f"创建新会话: {request.conversation_id}")
+                logger.info(f"创建新会话: {chat_request.conversation_id}")
             
-            # 保存用户消息
+            # 💡 只有在非流式或流式开始时才保存用户消息。
+            # 如果是流式重试，前端应该带上新的消息内容
             conversation_manager.add_message(
-                conversation_id=request.conversation_id,
+                conversation_id=chat_request.conversation_id,
                 role="user",
                 content=user_message
             )
         
         # 使用 LangChain 服务
-        service = LangChainQwenService(**llm_kwargs)
+        service = LangChainAgentService(**llm_kwargs)
         
         async def generate():
             """生成 SSE 流"""
@@ -854,25 +854,36 @@ async def chat_completion_stream(request: QwenChatRequest):
                 async for chunk in service.chat_stream_with_agent(
                     user_message=user_message,
                     chat_history=chat_history,
-                    conversation_id=request.conversation_id
+                    conversation_id=chat_request.conversation_id
                 ):
+                    # 💡 核心检查：如果客户端已断开，立即终止后端生成
+                    if await request.is_disconnected():
+                        logger.warning(f"检测到客户端已断开 [会话:{chat_request.conversation_id}]，终止 AI 生成任务并回滚用户消息。")
+                        if chat_request.save_to_backend and chat_request.conversation_id:
+                            conversation_manager.rollback_message(chat_request.conversation_id)
+                        break
+
                     assistant_message += chunk
                     yield f"data: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
                 
-                # 保存 AI 响应到后端（如果启用）
-                if request.save_to_backend and request.conversation_id:
+                # 只有在完整生成的情况下才保存 AI 响应到后端
+                if chat_request.save_to_backend and chat_request.conversation_id and not await request.is_disconnected():
                     conversation_manager.add_message(
-                        conversation_id=request.conversation_id,
+                        conversation_id=chat_request.conversation_id,
                         role="assistant",
                         content=assistant_message
                     )
-                    logger.info(f"AI 响应已保存到后端会话: {request.conversation_id}")
+                    logger.info(f"AI 响应已保存到后端会话: {chat_request.conversation_id}")
                 
-                yield "data: [DONE]\n\n"
+                if not await request.is_disconnected():
+                    yield "data: [DONE]\n\n"
                 
             except Exception as e:
-                logger.error(f"流式响应错误: {e}")
-                yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+                if not await request.is_disconnected():
+                    logger.error(f"流式响应错误: {e}")
+                    yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+                else:
+                    logger.warning(f"流式响应过程中客户端断开: {e}")
         
         return StreamingResponse(
             generate(),

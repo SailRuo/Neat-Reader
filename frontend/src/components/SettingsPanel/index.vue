@@ -67,7 +67,7 @@
       </section>
 
       <section class="setting-section">
-        <h3 class="section-title">Qwen AI</h3>
+        <h3 class="section-title">AI 配置</h3>
         <div class="setting-card">
           <!-- 模式切换：OAuth / 自定义 API -->
           <div class="setting-row">
@@ -96,7 +96,7 @@
           <div class="setting-row">
             <div class="setting-info">
               <span class="setting-label">授权状态</span>
-              <span class="setting-desc" v-if="qwenAccessToken">已授权，可以使用 Qwen AI 功能</span>
+              <span class="setting-desc" v-if="qwenAccessToken">已授权，可以使用 AI 功能</span>
               <span class="setting-desc" v-else>点击"获取授权"按钮完成 OAuth 授权</span>
             </div>
             <div class="setting-control">
@@ -129,10 +129,10 @@
               <button 
                 class="btn btn-secondary" 
                 style="width: 100%; margin-bottom: 12px;"
-                @click="testQwenAPI"
-                :disabled="isQwenTesting"
+                @click="testAIAPI"
+                :disabled="isAITesting"
               >
-                {{ isQwenTesting ? '测试中...' : '测试 Qwen API' }}
+                {{ isAITesting ? '测试中...' : '测试 API 连接' }}
               </button>
               <button 
                 class="btn btn-danger" 
@@ -281,7 +281,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useEbookStore } from '../../stores/ebook'
 import { useDialogStore } from '../../stores/dialog'
 import { api } from '../../api/adapter'
-import * as qwenAPI from '../../api/qwen'
+import * as aiAPI from '../../api/ai'
 import { qwenTokenManager } from '../../utils/qwenTokenManager'
 import * as Icons from 'lucide-vue-next'
 
@@ -321,7 +321,7 @@ const setAIMode = async (mode: 'oauth' | 'custom') => {
   })
   // 切换到 OAuth 时清除后端保存的自定义配置
   if (mode === 'oauth') {
-    qwenAPI.clearCustomAPIConfigFromBackend().catch((e) =>
+    aiAPI.clearCustomAPIConfigFromBackend().catch((e) =>
       console.warn('清除后端自定义 API 配置失败:', e)
     )
   }
@@ -359,16 +359,16 @@ const saveCustomAPIConfig = async () => {
     }
   })
   // 同步保存到后端，便于重启后继续使用
-  await qwenAPI.saveCustomAPIConfigToBackend({
+  await aiAPI.saveCustomAPIConfigToBackend({
     base_url: config.baseUrl,
     api_key: config.apiKey,
     model_id: config.modelId
   })
-  dialogStore.showSuccessDialog('自定义 API 配置已保存')
+  dialogStore.showToast('自定义 API 配置已保存', 'success')
   // 异步测试自定义 API 连接（不阻塞保存）
   ;(async () => {
     try {
-      const result = await qwenAPI.testCustomAPI({
+      const result = await aiAPI.testCustomAPI({
         base_url: config.baseUrl,
         api_key: config.apiKey,
         model_id: config.modelId
@@ -396,7 +396,7 @@ const refreshCustomModels = async () => {
   }
   isCustomModelsLoading.value = true
   try {
-    const resp = await qwenAPI.listCustomModelsFromBackend({
+    const resp = await aiAPI.listCustomModelsFromBackend({
       base_url: customBaseUrl.value.trim(),
       api_key: customApiKey.value.trim()
     })
@@ -425,8 +425,8 @@ const qwenAccessToken = ref('')
 const qwenRefreshToken = ref('')
 const qwenResourceUrl = ref('')  // 添加 resource_url
 const isQwenLoading = ref(false)
-const isQwenTesting = ref(false)
-const qwenTestResult = ref('')
+const isAITesting = ref(false)
+const aiTestResult = ref('')
 const qwenSessionId = ref('')
 const qwenUserCode = ref('')
 const qwenPollInterval = ref<number | null>(null)
@@ -461,7 +461,7 @@ onMounted(async () => {
   const ai = ebookStore.userConfig.ai
   if (ai?.mode === 'custom' && (!ai.custom?.baseUrl || !ai.custom?.apiKey)) {
     try {
-      const saved = await qwenAPI.getCustomAPIConfigFromBackend()
+      const saved = await aiAPI.getCustomAPIConfigFromBackend()
       if (saved) {
         await ebookStore.updateUserConfig({
           ai: {
@@ -503,7 +503,7 @@ onMounted(async () => {
       qwenResourceUrl.value = tokens.resourceUrl
     }
     // 刷新后同步到后端
-    qwenAPI.saveQwenToken({
+    aiAPI.saveQwenToken({
       access_token: tokens.accessToken,
       refresh_token: tokens.refreshToken,
       expires_at: Math.floor(tokens.expiresAt / 1000),
@@ -527,9 +527,6 @@ onBeforeUnmount(() => {
 
 const getAuthorization = () => {
   console.log('=== 开始获取授权 ===')
-  console.log('当前环境检测:')
-  console.log('- window.electron 存在:', !!window.electron)
-  console.log('- window.location.href:', window.location.href)
   
   // 使用固定的百度授权URL（alist提供的）
   const authUrl = 'https://openapi.baidu.com/oauth/2.0/authorize?response_type=code&client_id=hq9yQ9w9kR4YHj1kyYafLygVocobh7Sf&redirect_uri=https://alistgo.com/tool/baidu/callback&scope=basic,netdisk&qrcode=1'
@@ -537,78 +534,57 @@ const getAuthorization = () => {
   console.log('授权URL:', authUrl)
   
   try {
-    if (window.electron) {
-      // Electron环境：使用内置窗口处理授权
-      console.log('✓ 检测到Electron环境，使用内置窗口处理授权')
-      console.log('调用 window.electron.openAuthWindow...')
+    // 浏览器环境：使用外部浏览器并监听postMessage
+    console.log('✓ 浏览器环境，使用外部浏览器打开授权页面')
+    
+    // 添加 postMessage 监听器
+    const messageHandler = (event: MessageEvent) => {
+      console.log('收到 postMessage:', event.data)
       
-      window.electron.openAuthWindow(authUrl).then((result) => {
-        console.log('openAuthWindow 返回结果:', result)
-        if (result.success && result.code) {
-          console.log('✓ 获取到授权码:', result.code)
-          // 使用alist API获取token
-          handleAuthCodeViaAlist(result.code)
-        } else {
-          console.error('✗ 授权失败:', result.error)
-          dialogStore.showErrorDialog('授权失败', result.error || '用户取消授权')
-        }
-      }).catch((error) => {
-        console.error('✗ 授权窗口Promise异常:', error)
-        dialogStore.showErrorDialog('授权失败', '无法打开授权窗口: ' + error.message)
-      })
-    } else {
-      // 浏览器环境：使用外部浏览器并监听postMessage
-      console.log('✓ 浏览器环境，使用外部浏览器打开授权页面')
-      
-      // 添加 postMessage 监听器
-      const messageHandler = (event: MessageEvent) => {
-        console.log('收到 postMessage:', event.data)
-        
-        // 验证消息来源
-        if (event.origin !== window.location.origin) {
-          console.warn('忽略来自不同源的消息:', event.origin)
-          return
-        }
-        
-        // 检查消息类型
-        if (event.data && event.data.type === 'baidu-auth-code' && event.data.code) {
-          console.log('✓ 收到授权码:', event.data.code)
-          
-          // 移除监听器
-          window.removeEventListener('message', messageHandler)
-          
-          // 使用alist API获取token
-          handleAuthCodeViaAlist(event.data.code)
-        }
+      // 验证消息来源
+      if (event.origin !== window.location.origin) {
+        console.warn('忽略来自不同源的消息:', event.origin)
+        return
       }
       
-      // 添加监听器
-      window.addEventListener('message', messageHandler)
-      console.log('✓ 已添加 postMessage 监听器')
-      
-      // 打开授权窗口
-      const newWindow = window.open(authUrl, '_blank', 'width=800,height=600')
-      if (newWindow) {
-        console.log('✓ 外部浏览器窗口打开成功')
-        dialogStore.showDialog({
-          title: '授权提示',
-          message: '请在打开的页面中完成授权，授权成功后会自动获取授权信息',
-          type: 'info'
-        })
-      } else {
-        console.error('✗ 外部浏览器窗口被阻止')
+      // 检查消息类型
+      if (event.data && event.data.type === 'baidu-auth-code' && event.data.code) {
+        console.log('✓ 收到授权码:', event.data.code)
+        
+        // 移除监听器
         window.removeEventListener('message', messageHandler)
-        dialogStore.showErrorDialog('窗口被阻止', '请允许弹出窗口')
+        
+        // 使用alist API获取token
+        handleAuthCodeViaAlist(event.data.code)
       }
     }
-  } catch (error) {
+    
+    // 添加监听器
+    window.addEventListener('message', messageHandler)
+    console.log('✓ 已添加 postMessage 监听器')
+    
+    // 打开授权窗口
+    const newWindow = window.open(authUrl, '_blank', 'width=800,height=600')
+    if (newWindow) {
+      console.log('✓ 外部浏览器窗口打开成功')
+      dialogStore.showDialog({
+        title: '授权提示',
+        message: '请在打开的页面中完成授权，授权成功后会自动获取授权信息',
+        type: 'info'
+      })
+    } else {
+      console.error('✗ 外部浏览器窗口被阻止')
+      window.removeEventListener('message', messageHandler)
+      dialogStore.showErrorDialog('窗口被阻止', '请允许弹出窗口')
+    }
+  } catch (error: any) {
     console.error('✗ 获取授权过程异常:', error)
     console.error('异常详情:', {
-      message: error.message,
-      stack: error.stack,
-      name: error.name
+      message: error?.message || '未知错误',
+      stack: error?.stack,
+      name: error?.name
     })
-    dialogStore.showErrorDialog('打开失败', '无法打开授权页面: ' + error.message)
+    dialogStore.showErrorDialog('打开失败', '无法打开授权页面: ' + (error?.message || '未知错误'))
   }
   
   console.log('=== 获取授权函数执行完成 ===')
@@ -671,14 +647,14 @@ const handleAuthCodeViaAlist = async (code: string) => {
       console.error('✗ 获取Token失败:', data.error || '响应数据格式错误')
       dialogStore.showErrorDialog('获取Token失败', data.error || '未知错误')
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('✗ 调用alist API异常:', error)
     console.error('异常详情:', {
-      message: error.message,
-      stack: error.stack,
-      name: error.name
+      message: error?.message || '未知错误',
+      stack: error?.stack,
+      name: error?.name
     })
-    dialogStore.showErrorDialog('获取Token失败', '网络错误，请重试: ' + error.message)
+    dialogStore.showErrorDialog('获取Token失败', '网络错误，请重试: ' + (error?.message || '未知错误'))
   } finally {
     isLoading.value = false
     console.log('=== alist API处理完成 ===')
@@ -739,12 +715,12 @@ const verifyAndConnect = async () => {
       
       await ebookStore.fetchBaidupanUserInfo(true)
       
-      dialogStore.showSuccessDialog('百度网盘授权成功')
+      dialogStore.showToast('百度网盘授权成功', 'success')
     } else {
-      dialogStore.showErrorDialog('验证失败', data.message || '无效的token')
+      dialogStore.showToast('验证失败', 'error')
     }
   } catch (error) {
-    dialogStore.showErrorDialog('验证失败', '网络错误，请重试')
+    dialogStore.showToast('验证失败', 'error')
   } finally {
     isLoading.value = false
   }
@@ -773,7 +749,7 @@ const disconnect = async () => {
   // 立即刷新用户信息状态
   await ebookStore.fetchBaidupanUserInfo(true)
   
-  dialogStore.showSuccessDialog('已取消授权')
+  dialogStore.showToast('已取消授权', 'info')
 }
 
 /**
@@ -788,7 +764,7 @@ const syncFromCloud = async () => {
     
     await ebookStore.loadBaidupanBooks()
     
-    dialogStore.showSuccessDialog('同步成功', '已从云端同步最新数据')
+    dialogStore.showToast('同步成功', 'success')
     console.log('✅ [手动同步] 同步完成')
   } catch (error) {
     console.error('❌ [手动同步] 同步失败:', error)
@@ -858,7 +834,7 @@ const startQwenAuth = async () => {
   
   try {
     // 1. 启动 Device Code Flow
-    const deviceAuth = await qwenAPI.startDeviceAuth()
+    const deviceAuth = await aiAPI.startDeviceAuth()
     qwenSessionId.value = deviceAuth.session_id
     qwenUserCode.value = deviceAuth.user_code
     
@@ -867,15 +843,8 @@ const startQwenAuth = async () => {
     console.log('Auth URL:', deviceAuth.auth_url)
     console.log('Session ID:', deviceAuth.session_id)
     
-    // 2. 打开授权页面
-    if (window.electron) {
-      // Electron 环境：使用系统默认浏览器打开（避免白屏）
-      console.log('✓ Electron 环境，使用系统浏览器打开授权页面')
-      window.electron.openExternal(deviceAuth.auth_url)
-    } else {
-      // 浏览器环境
-      window.open(deviceAuth.auth_url, '_blank', 'width=800,height=600')
-    }
+    // 2. 打开授权页面（浏览器环境）
+    window.open(deviceAuth.auth_url, '_blank', 'width=800,height=600')
     
     // 3. 显示用户码和操作指引
     dialogStore.showDialog({
@@ -916,7 +885,7 @@ const startPolling = async (sessionId: string, interval: number) => {
     }
     
     try {
-      const result = await qwenAPI.pollForToken(sessionId)
+      const result = await aiAPI.pollForToken(sessionId)
       
       if (result.status === 'pending') {
         // 还在等待授权
@@ -961,7 +930,7 @@ const startPolling = async (sessionId: string, interval: number) => {
           console.log('✅ [Settings] Token 管理器已启动自动刷新')
         }
         // 授权后同步到后端，后续调用 Qwen 时前端可不传 token
-        qwenAPI.saveQwenToken({
+        aiAPI.saveQwenToken({
           access_token: result.access_token!,
           refresh_token: result.refresh_token,
           expires_at: result.expires_in ? Math.floor(Date.now() / 1000) + result.expires_in : undefined,
@@ -987,7 +956,7 @@ const startPolling = async (sessionId: string, interval: number) => {
         // 自动测试 API（如果不是模拟模式）
         if (!result.is_mock) {
           setTimeout(() => {
-            testQwenAPI()
+            testAIAPI()
           }, 1000)
         }
       }
@@ -1009,12 +978,12 @@ const startPolling = async (sessionId: string, interval: number) => {
 }
 
 /**
- * 测试 Qwen API
+ * 测试 AI API
  */
-const testQwenAPI = async () => {
-  console.log('=== 测试 Qwen API ===')
-  isQwenTesting.value = true
-  qwenTestResult.value = ''
+const testAIAPI = async () => {
+  console.log('=== 测试 AI API ===')
+  isAITesting.value = true
+  aiTestResult.value = ''
   
   try {
     // Qwen OAuth 只支持两个模型（硬编码，不通过 API 获取）
@@ -1025,7 +994,7 @@ const testQwenAPI = async () => {
     console.log('使用模型:', testModel)
     console.log('Resource URL:', qwenResourceUrl.value || '(未设置，使用默认)')
     
-    const result = await qwenAPI.testQwenAPI(
+    const result = await aiAPI.testAIAPI(
       qwenAccessToken.value,
       '你好，请用一句话介绍你自己。',
       qwenResourceUrl.value  // 传递 resource_url
@@ -1035,11 +1004,11 @@ const testQwenAPI = async () => {
     console.log('响应:', result.response)
     console.log('Token 使用:', result.usage)
     
-    qwenTestResult.value = result.response
+    aiTestResult.value = result.response
     
     dialogStore.showDialog({
-      title: 'API 测试成功',
-      message: `模型: ${testModel}\n\nQwen AI 响应：\n\n${result.response}\n\n使用 Token: ${result.usage.total_tokens}`,
+      title: '✅ API 测试成功',
+      message: `模型: ${testModel}\n\nAI 响应：\n\n${result.response}\n\n使用 Token: ${result.usage.total_tokens}`,
       type: 'success'
     })
   } catch (error: any) {
@@ -1049,14 +1018,14 @@ const testQwenAPI = async () => {
     if (error.message?.includes('token') && qwenRefreshToken.value) {
       console.log('尝试刷新 token...')
       try {
-        const tokens = await qwenAPI.refreshToken(qwenRefreshToken.value)
+        const tokens = await aiAPI.refreshToken(qwenRefreshToken.value)
         qwenAccessToken.value = tokens.access_token
         qwenRefreshToken.value = tokens.refresh_token
         localStorage.setItem('qwen_access_token', tokens.access_token)
         localStorage.setItem('qwen_refresh_token', tokens.refresh_token)
         
         // 重试测试
-        await testQwenAPI()
+        await testAIAPI()
         return
       } catch (refreshError: any) {
         console.error('✗ 刷新 token 失败:', refreshError)
@@ -1065,7 +1034,7 @@ const testQwenAPI = async () => {
     
     dialogStore.showErrorDialog('API 测试失败', error.message || '未知错误')
   } finally {
-    isQwenTesting.value = false
+    isAITesting.value = false
   }
 }
 
@@ -1083,7 +1052,7 @@ const disconnectQwen = () => {
   qwenAccessToken.value = ''
   qwenRefreshToken.value = ''
   qwenResourceUrl.value = ''
-  qwenTestResult.value = ''
+  aiTestResult.value = ''
   qwenSessionId.value = ''
   qwenUserCode.value = ''
   

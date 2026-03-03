@@ -34,8 +34,28 @@ class ConversationManager:
         self.baidu_sync_enabled = False
         self.baidu_service = None
         self.baidu_remote_path = "/apps/Neat Reader/conversations"
+        self.sync_meta_path = self.storage_path / ".sync_meta.json"
+        self.sync_meta = self._load_sync_meta()
         
         logger.info(f"会话管理器初始化完成，存储路径: {self.storage_path}")
+    
+    def _load_sync_meta(self) -> Dict[str, float]:
+        """加载同步元数据（文件修改时间）"""
+        if self.sync_meta_path.exists():
+            try:
+                with open(self.sync_meta_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.error(f"加载同步元数据失败: {e}")
+        return {}
+
+    def _save_sync_meta(self):
+        """保存同步元数据"""
+        try:
+            with open(self.sync_meta_path, 'w', encoding='utf-8') as f:
+                json.dump(self.sync_meta, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"保存同步元数据失败: {e}")
     
     def load_baidu_token(self) -> Optional[str]:
         """从统一 token 存储读取百度 access_token（内存缓存或 data/auth_tokens.json）"""
@@ -331,6 +351,29 @@ class ConversationManager:
         
         return deleted_count
     
+    def rollback_message(self, conversation_id: str) -> bool:
+        """
+        回滚最后一条消息（通常用于流式中断后清理残留的提问）
+        
+        Args:
+            conversation_id: 会话 ID
+            
+        Returns:
+            是否成功
+        """
+        conversation = self.get_conversation(conversation_id)
+        if not conversation or not conversation["messages"]:
+            return False
+            
+        # 移除最后一条消息
+        conversation["messages"].pop()
+        conversation["message_count"] -= 1
+        conversation["updated_at"] = time.time()
+        
+        self._save_conversation(conversation_id)
+        logger.info(f"回滚会话 {conversation_id} 的最后一条消息")
+        return True
+    
     def _save_conversation(self, conversation_id: str) -> bool:
         """保存会话到文件"""
         conversation = self.conversations_cache.get(conversation_id)
@@ -400,10 +443,18 @@ class ConversationManager:
             
             logger.info(f"开始同步 {len(files_to_sync)} 个会话文件到百度网盘...")
             
+            synced_any = False
             for file_path in files_to_sync:
                 if not file_path.exists():
                     continue
                 
+                # 增量同步检查：比较文件最后修改时间
+                mtime = file_path.stat().st_mtime
+                if not conversation_id and file_path.name in self.sync_meta:
+                    if mtime <= self.sync_meta[file_path.name]:
+                        logger.debug(f"⏩ 跳过未修改文件: {file_path.name}")
+                        continue
+
                 try:
                     # 读取文件内容
                     with open(file_path, 'rb') as f:
@@ -419,6 +470,8 @@ class ConversationManager:
                     
                     if upload_result.get('success'):
                         result["success"] += 1
+                        self.sync_meta[file_path.name] = mtime
+                        synced_any = True
                         logger.info(f"✅ 同步成功: {file_path.name}")
                     else:
                         result["failed"] += 1
@@ -435,6 +488,9 @@ class ConversationManager:
                         str(e),
                         request_params={"file": file_path.name},
                     )
+            
+            if synced_any:
+                self._save_sync_meta()
             
             logger.info(f"同步完成: 成功 {result['success']}, 失败 {result['failed']}")
             

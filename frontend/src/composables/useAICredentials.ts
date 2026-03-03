@@ -6,8 +6,8 @@
 import { computed, shallowRef } from 'vue'
 import { useEbookStore } from '../stores/ebook'
 import { qwenTokenManager } from '../utils/qwenTokenManager'
-import { getCustomAPIConfigFromBackend } from '../api/qwen'
-import type { CustomAPIConfig } from '../api/qwen'
+import { getCustomAPIConfigFromBackend } from '../api/ai'
+import type { CustomAPIConfig } from '../api/ai'
 
 export type AICredentials =
   | { type: 'oauth'; accessToken: string; resourceUrl: string }

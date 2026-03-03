@@ -9,19 +9,11 @@ import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import localforage from 'localforage'
 
-// 设置 PDF.js worker - 根据环境选择合适的 worker 路径
-const isElectron = typeof window !== 'undefined' && (window as any).electron !== undefined
-
-if (isElectron) {
-  // Electron 环境：使用本地文件路径
-  pdfjsLib.GlobalWorkerOptions.workerSrc = './node_modules/pdfjs-dist/build/pdf.worker.min.mjs'
-} else {
-  // 浏览器环境：使用 import.meta.url
-  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    'pdfjs-dist/build/pdf.worker.min.mjs',
-    import.meta.url
-  ).toString()
-}
+// 设置 PDF.js worker - 使用 import.meta.url
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url
+).toString()
 
 const props = defineProps<{
   bookId: string

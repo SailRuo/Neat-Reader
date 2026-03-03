@@ -4,7 +4,7 @@
  */
 import { ref, onMounted } from 'vue'
 import { syncFromBaidu, syncToBaidu, enableBaiduSync } from '@/api/conversation'
-import { saveQwenToken } from '@/api/qwen'
+import { saveQwenToken } from '@/api/ai'
 import { useEbookStore } from '@/stores/ebook'
 import { qwenTokenManager } from '@/utils/qwenTokenManager'
 import axios from 'axios'

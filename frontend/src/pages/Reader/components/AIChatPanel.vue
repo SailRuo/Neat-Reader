@@ -92,8 +92,9 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted } from 'vue'
-import { chatStream } from '@/api/qwen'
+import { chatStream } from '@/api/ai'
 import { useEbookStore } from '@/stores/ebook'
+import { useAICredentials } from '@/composables/useAICredentials'
 
 // Props
 const props = defineProps<{
@@ -110,6 +111,7 @@ const emit = defineEmits<{
 
 // 状态
 const ebookStore = useEbookStore()
+const aiCreds = useAICredentials()
 const messages = ref<Array<{ role: 'user' | 'assistant'; content: string; timestamp: number }>>([])
 const inputText = ref('')
 const isLoading = ref(false)
@@ -243,8 +245,9 @@ const handleSend = async () => {
     })
 
     const qwenConfig = ebookStore.userConfig.storage.baidupan
-    if (!qwenConfig?.accessToken) {
-      throw new Error('请先在设置中配置 Qwen AI（需要先完成 OAuth 授权）')
+    const aiCreds = useAICredentials()
+    if (!aiCreds.hasCredentials.value) {
+      throw new Error('请先在设置中完成 AI 授权或配置自定义 API。')
     }
 
     console.log('✅ [AI] 配置检查通过')
@@ -299,9 +302,9 @@ const handleSend = async () => {
     let errorMessage = '未知错误'
     if (error instanceof Error) {
       if (error.message.includes('401')) {
-        errorMessage = 'Token 已过期或无效，请在设置中重新授权 Qwen AI'
+        errorMessage = 'Token 已过期或无效，请在设置中重新授权 AI'
       } else if (error.message.includes('403')) {
-        errorMessage = '没有权限访问该 API，请检查 Qwen 配置'
+        errorMessage = '没有权限访问该 API，请检查 AI 配置'
       } else if (error.message.includes('429')) {
         errorMessage = 'API 调用频率超限，请稍后再试'
       } else if (error.message.includes('500')) {
