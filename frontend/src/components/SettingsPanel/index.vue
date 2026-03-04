@@ -825,6 +825,30 @@ const verifyAndConnect = async () => {
         }
       })
       
+      // 🎯 同时保存到后端数据库（供云端同步服务使用）
+      try {
+        console.log('📤 正在保存 Token 到数据库...')
+        const response = await fetch('http://localhost:3002/api/tokens', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            service: 'baidu',
+            access_token: inputAccessToken.value,
+            refresh_token: refreshToken.value,
+            expires_at: Math.floor((Date.now() + 30 * 24 * 60 * 60 * 1000) / 1000)
+          })
+        })
+        
+        if (response.ok) {
+          const result = await response.json()
+          console.log('✅ Token 已保存到数据库:', result)
+        } else {
+          console.error('❌ Token 保存失败:', await response.text())
+        }
+      } catch (e) {
+        console.error('❌ Token 保存到数据库异常:', e)
+      }
+      
       await ebookStore.fetchBaidupanUserInfo(true)
       
       dialogStore.showToast('百度网盘授权成功', 'success')
@@ -876,7 +900,7 @@ const syncFromCloud = async () => {
     
     // 🎯 调用后端强制同步 API
     try {
-      const response = await fetch('http://localhost:8000/api/sync/force', {
+      const response = await fetch('http://localhost:3002/api/sync/force', {
         method: 'POST'
       })
       

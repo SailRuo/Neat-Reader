@@ -29,7 +29,7 @@ import os
 from contextlib import asynccontextmanager
 
 from app.config import settings
-from app.routes import ai, pageindex, health, baidu, tts, conversation, books, sync
+from app.routes import ai, pageindex, health, baidu, tts, conversation, books, sync, tokens
 
 # 配置日志
 logger.remove()
@@ -182,6 +182,7 @@ app.include_router(conversation.router, prefix="/api/conversation", tags=["Conve
 app.include_router(pageindex.router, prefix="/api/pageindex", tags=["PageIndex"])
 app.include_router(books.router, prefix="/api", tags=["Books"])
 app.include_router(sync.router, prefix="/api", tags=["Sync"])
+app.include_router(tokens.router, prefix="/api", tags=["Tokens"])
 
 if __name__ == "__main__":
     # 🎯 设置环境变量增加请求体大小限制
