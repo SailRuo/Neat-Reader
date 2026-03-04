@@ -890,17 +890,34 @@ onMounted(async () => {
   }
   
   try {
-    const contentExists = await localforage.getItem(`ebook_content_${bookId}`)
+    // 🎯 优先从 IndexedDB 缓存获取
+    let contentExists = await localforage.getItem(`ebook_content_${bookId}`)
+    
+    // 🎯 如果缓存不存在，从后端 API 获取
     if (!contentExists) {
-      if (bookData.storageType === 'baidupan') {
-        alert('该书籍尚未下载到本地，请先在首页下载后再阅读')
-      } else {
-        alert('书籍内容加载失败，文件可能已损坏，请重新导入')
+      console.log('📥 从后端 API 获取书籍内容...')
+      try {
+        const { getBookContent } = await import('@/api/books')
+        const arrayBuffer = await getBookContent(bookId)
+        
+        // 保存到 IndexedDB 缓存
+        await localforage.setItem(`ebook_content_${bookId}`, arrayBuffer)
+        contentExists = arrayBuffer
+        console.log('✅ 书籍内容已从后端加载并缓存')
+      } catch (apiError) {
+        console.error('❌ 从后端 API 获取书籍内容失败:', apiError)
+        
+        if (bookData.storageType === 'baidupan') {
+          alert('该书籍尚未下载到本地，请先在首页下载后再阅读')
+        } else {
+          alert('书籍内容加载失败，无法从服务器获取文件')
+        }
+        router.push('/')
+        return
       }
-      router.push('/')
-      return
     }
   } catch (error) {
+    console.error('❌ 加载书籍内容失败:', error)
     router.push('/')
     return
   }

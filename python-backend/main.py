@@ -29,7 +29,7 @@ import os
 from contextlib import asynccontextmanager
 
 from app.config import settings
-from app.routes import ai, pageindex, health, baidu, tts, conversation
+from app.routes import ai, pageindex, health, baidu, tts, conversation, books, sync
 
 # 配置日志
 logger.remove()
@@ -72,8 +72,16 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Neat Reader Python Backend 启动中...")
     logger.info(f"📍 监听地址: {settings.HOST}:{settings.PORT}")
     logger.info(f"🔧 环境: {'开发' if settings.DEBUG else '生产'}")
-    logger.info(f"📦 已注册路由: Health, Baidu, TTS, AI, Conversation, PageIndex")
+    logger.info(f"📦 已注册路由: Health, Baidu, TTS, AI, Conversation, PageIndex, Books")
     logger.info(f"📁 PageIndex 缓存目录: {settings.PAGEINDEX_CACHE_DIR}")
+    
+    # 初始化数据库
+    try:
+        from app.db import get_db
+        db = get_db()
+        logger.info("📊 SQLite 数据库已初始化")
+    except Exception as e:
+        logger.error(f"数据库初始化失败: {e}")
     
     # 启动时从统一 token 文件加载到内存缓存（无缓存时从 data/auth_tokens.json 读取）
     try:
@@ -102,10 +110,37 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"百度网盘同步初始化失败（不影响使用）: {e}")
     
+    # 🎯 启动云端同步服务（定时同步数据库、书籍、索引）
+    sync_task = None
+    try:
+        from app.services.cloud_sync_service import get_sync_service
+        import asyncio
+        
+        sync_service = get_sync_service()
+        sync_task = asyncio.create_task(sync_service.start())
+        
+        logger.info("☁️ 云端同步服务已启动（每5分钟自动同步）")
+        logger.info("📤 自动同步内容: 数据库、书籍文件、PageIndex、AI对话")
+        
+    except Exception as e:
+        logger.warning(f"云端同步服务启动失败（不影响使用）: {e}")
+    
     yield  # 应用运行期间
     
     # 关闭时执行（Ctrl+C 时会执行到这里，完成对话同步后再退出）
     logger.info("👋 Python Backend 关闭中...")
+    
+    # 停止云端同步服务
+    if sync_task:
+        try:
+            from app.services.cloud_sync_service import get_sync_service
+            sync_service = get_sync_service()
+            sync_service.stop()
+            sync_task.cancel()
+            logger.info("☁️ 云端同步服务已停止")
+        except Exception as e:
+            logger.warning(f"停止云端同步服务失败: {e}")
+    
     await _run_exit_sync()
     logger.info("👋 Python Backend 已关闭")
 
@@ -116,6 +151,11 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan
 )
+
+# 🎯 增加 multipart form 大小限制（支持大封面图片）
+# 修改 Starlette 的默认配置
+from starlette.formparsers import MultiPartParser
+MultiPartParser.max_file_size = 100 * 1024 * 1024  # 100MB
 
 # CORS 配置
 app.add_middleware(
@@ -140,8 +180,14 @@ app.include_router(tts.router, prefix="/api/tts", tags=["TTS"])
 app.include_router(ai.router, prefix="/api/ai", tags=["AI"])
 app.include_router(conversation.router, prefix="/api/conversation", tags=["Conversation"])
 app.include_router(pageindex.router, prefix="/api/pageindex", tags=["PageIndex"])
+app.include_router(books.router, prefix="/api", tags=["Books"])
+app.include_router(sync.router, prefix="/api", tags=["Sync"])
 
 if __name__ == "__main__":
+    # 🎯 设置环境变量增加请求体大小限制
+    import os
+    os.environ['STARLETTE_MAX_BODY_SIZE'] = str(100 * 1024 * 1024)  # 100MB
+    
     uvicorn.run(
         "main:app",
         host=settings.HOST,
@@ -149,4 +195,9 @@ if __name__ == "__main__":
         reload=settings.DEBUG,
         log_level=settings.LOG_LEVEL.lower(),
         log_config=None,
+        limit_max_requests=100000,
+        timeout_keep_alive=300,
+        limit_concurrency=1000,
+        # 🎯 增加请求体大小限制为 100MB
+        h11_max_incomplete_event_size=100 * 1024 * 1024
     )

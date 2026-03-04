@@ -52,7 +52,7 @@
                 :disabled="isSyncing"
               >
                 <Icons.RefreshCw :size="16" :class="{ 'spinning': isSyncing }" />
-                {{ isSyncing ? '同步中...' : '从云端同步数据' }}
+                {{ isSyncing ? '同步中...' : '同步数据' }}
               </button>
               <button 
                 class="btn btn-danger" 
@@ -865,15 +865,32 @@ const disconnect = async () => {
 }
 
 /**
- * 从云端同步数据
+ * 同步数据（云端和本地保持一致）
  */
 const syncFromCloud = async () => {
   if (isSyncing.value) return
   
   try {
     isSyncing.value = true
-    console.log('🔄 [手动同步] 开始从云端同步数据...')
+    console.log('🔄 [手动同步] 开始同步数据（云端 ↔ 本地）...')
     
+    // 🎯 调用后端强制同步 API
+    try {
+      const response = await fetch('http://localhost:8000/api/sync/force', {
+        method: 'POST'
+      })
+      
+      if (response.ok) {
+        const result = await response.json()
+        console.log('✅ [后端同步] 数据已同步到云端:', result)
+      } else {
+        console.warn('⚠️ [后端同步] 同步失败:', await response.text())
+      }
+    } catch (syncError) {
+      console.warn('⚠️ [后端同步] 调用失败:', syncError)
+    }
+    
+    // 🎯 从云端加载数据到本地
     await ebookStore.loadBaidupanBooks()
     
     dialogStore.showToast('同步成功', 'success')

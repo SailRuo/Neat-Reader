@@ -219,13 +219,7 @@
                       <span class="cloud-text">点击下载</span>
                     </div>
                     
-                    <!-- 本地书籍上传提示覆盖层 -->
-                    <div v-else-if="book.storageType === 'local' && isBaidupanAuthorized" class="book-upload-hint-overlay" @click.stop="handleUploadToBaidupan(book)">
-                      <div class="upload-hint-icon-wrapper">
-                        <Icons.CloudUpload :size="28" />
-                      </div>
-                      <span class="upload-hint-text">上传到云端</span>
-                    </div>
+                    <!-- 🎯 已移除：上传到云端功能由后端自动处理 -->
                   </div>
                 </div>
                 
@@ -904,15 +898,7 @@ const showContextMenu = (event: MouseEvent, book: any) => {
     }
   ]
   
-  // 只在本地书籍时显示上传选项
-  if (book.storageType === 'local') {
-    menuItems.push({
-      label: '上传到百度网盘',
-      icon: Icons.UploadCloud,
-      onClick: () => handleUploadToBaidupan(book),
-      divided: true
-    })
-  }
+  // 🎯 已移除：上传到百度网盘功能由后端自动处理
   
   // 删除选项
   menuItems.push({

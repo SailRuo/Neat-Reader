@@ -242,68 +242,43 @@ export const useEbookStore = defineStore('ebook', () => {
   // 方法
   const loadBooks = async () => {
     try {
-      console.log('开始加载书籍列表...');
-      const savedBooks = await localforage.getItem<EbookMetadata[]>('books');
+      console.log('🔄 开始加载书籍列表（从后端 API）...');
       
-      if (savedBooks) {
-        console.log('成功加载书籍列表，书籍数量:', savedBooks.length);
-        books.value = savedBooks;
+      // 🎯 从后端 API 加载书籍
+      const { listBooks: apiListBooks } = await import('@/api/books');
+      const result = await apiListBooks();
+      
+      if (result.success && result.books) {
+        console.log('✅ 成功从后端加载书籍列表，书籍数量:', result.books.length);
         
-        // 为EPUB书籍重新生成封面（并行处理）
-        await Promise.all(books.value.map(async (book) => {
-          if (book.cover && book.cover.startsWith('blob:')) {
-            console.log('清除失效的 blob 封面链接:', book.id);
-            book.cover = '';
-          }
-          
-          if (book.format === 'epub' && !book.cover) {
-            try {
-              //console.log('为书籍重新生成封面:', book.id);
-              const fileContent = await localforage.getItem<ArrayBuffer>(`ebook_content_${book.id}`);
-              if (fileContent) {
-                const epubBook = ePub(fileContent as ArrayBuffer);
-                await new Promise((resolve, reject) => {
-                  epubBook.ready.then(resolve).catch(reject);
-                });
-                const coverUrl = await epubBook.coverUrl();
-                if (coverUrl) {
-                  if (coverUrl.startsWith('blob:')) {
-                    try {
-                      console.log('将重新生成的封面转换为 Base64');
-                      book.cover = await blobToBase64(coverUrl);
-                      console.log('封面重新生成并转换成功:', book.id);
-                      URL.revokeObjectURL(coverUrl);
-                    } catch (e) {
-                      console.warn('封面转换 Base64 失败:', e);
-                    }
-                  } else {
-                    book.cover = coverUrl;
-                    console.log('封面重新生成成功:', book.id);
-                  }
-                }
-              }
-            } catch (e) {
-              console.warn('封面重新生成失败:', book.id, e);
-            }
-          }
+        // 转换后端数据格式到前端格式
+        books.value = result.books.map(book => ({
+          id: book.id,
+          title: book.title,
+          author: book.author || '未知作者',
+          cover: book.cover || '',
+          path: book.file_path,
+          format: book.format,
+          size: book.size,
+          lastRead: book.last_read || 0,
+          totalChapters: book.total_chapters,
+          readingProgress: book.reading_progress,
+          storageType: book.storage_type as 'local' | 'synced' | 'baidupan',
+          baidupanPath: book.baidupan_path,
+          categoryId: book.category_id,
+          addedAt: book.added_at,
+          downloading: book.downloading === 1,
+          uploading: book.uploading === 1,
+          uploadProgress: book.upload_progress
         }));
         
-        // 验证加载的数据
-        // if (books.value.length > 0) {
-        //   console.log('加载的书籍示例:', {
-        //     id: books.value[0].id,
-        //     title: books.value[0].title,
-        //     author: books.value[0].author,
-        //     cover: books.value[0].cover,
-        //     storageType: books.value[0].storageType
-        //   });
-        // }
+        console.log('✅ 书籍列表加载完成');
       } else {
-        console.log('未找到保存的书籍列表，初始化为空数组');
+        console.log('未找到书籍，初始化为空数组');
         books.value = [];
       }
     } catch (error) {
-      console.error('加载电子书列表失败:', error);
+      console.error('❌ 加载电子书列表失败:', error);
       if (error instanceof Error) {
         console.error('错误详情:', error.message);
         console.error('错误堆栈:', error.stack);
@@ -315,14 +290,14 @@ export const useEbookStore = defineStore('ebook', () => {
 
   const saveBooks = async (syncToCloud: boolean = true) => {
     try {
-      // 保存书籍列表，确保数据可序列化
+      // 🎯 新架构：书籍元数据已通过 API 保存到后端 SQLite
+      // 这里保留 localforage 作为缓存层（可选）
       const booksToSave = books.value.map(book => {
-        // 创建可序列化的书籍对象
         const serializableBook: EbookMetadata = {
           id: book.id,
           title: book.title,
           author: book.author,
-          cover: book.cover || '', // 确保封面字段存在，如果是blob URL会在加载时重新生成
+          cover: book.cover || '',
           path: book.path,
           format: book.format,
           size: book.size,
@@ -334,18 +309,14 @@ export const useEbookStore = defineStore('ebook', () => {
           categoryId: book.categoryId,
           addedAt: book.addedAt
         };
-        
         return serializableBook;
       });
       
-      //console.log('正在保存书籍列表，书籍数量:', booksToSave.length);
-      
+      // 保存到 IndexedDB 作为缓存
       await localforage.setItem('books', booksToSave);
-      // 只在需要时异步同步到云端（不阻塞 UI）
-      if (syncToCloud) {
-        scheduleCloudSyncBooks();
-      }
-      // console.log('书籍列表保存成功');
+      
+      // 🎯 云端同步已移至后端定时任务，前端不再触发
+      // 后端会每5分钟自动同步数据库、书籍文件、PageIndex
     } catch (error) {
       console.error('保存电子书列表失败:', error);
       if (error instanceof Error) {
@@ -358,12 +329,40 @@ export const useEbookStore = defineStore('ebook', () => {
   // 加载分类列表
   const loadCategories = async () => {
     try {
-      // console.log('开始加载分类列表...');
+      console.log('🔄 开始加载分类列表（从后端 API）...');
+      
+      // 🎯 从后端 API 加载分类
+      try {
+        const { listCategories: apiListCategories } = await import('@/api/books');
+        const result = await apiListCategories();
+        
+        if (result.success && result.categories && result.categories.length > 0) {
+          console.log('✅ 成功从后端加载分类列表，分类数量:', result.categories.length);
+          
+          // 转换后端数据格式到前端格式
+          categories.value = result.categories.map(cat => ({
+            id: cat.id,
+            name: cat.name,
+            color: cat.color,
+            bookIds: [], // 后端不存储 bookIds，通过 book.category_id 关联
+            createdAt: cat.created_at,
+            updatedAt: cat.updated_at
+          }));
+          
+          // 保存到 IndexedDB 作为缓存
+          await localforage.setItem('categories', categories.value);
+          console.log('✅ 分类列表加载完成');
+          return;
+        }
+      } catch (apiError) {
+        console.warn('⚠️ 从后端加载分类失败，尝试从缓存加载:', apiError);
+      }
+      
+      // 如果后端加载失败，尝试从 IndexedDB 缓存加载
       const savedCategories = await localforage.getItem<BookCategory[]>('categories');
       
       if (savedCategories && Array.isArray(savedCategories) && savedCategories.length > 0) {
-        //console.log('成功加载分类列表，分类数量:', savedCategories.length);
-        // 确保数据是干净的纯对象
+        console.log('从缓存加载分类列表，分类数量:', savedCategories.length);
         categories.value = savedCategories.map(category => ({
           id: category.id || `category_${Date.now()}_${Math.random()}`,
           name: category.name || '未命名',
@@ -375,7 +374,6 @@ export const useEbookStore = defineStore('ebook', () => {
       } else {
         console.log('未找到保存的分类列表或分类为空，创建默认分类');
         categories.value = [];
-        // 直接设置默认分类，不调用addCategory以避免可能的递归问题
         const defaultCategory: BookCategory = {
           id: `category_default_${Date.now()}`,
           name: '未分类',
@@ -385,7 +383,6 @@ export const useEbookStore = defineStore('ebook', () => {
           updatedAt: Date.now()
         };
         categories.value.push(defaultCategory);
-        // 保存到本地存储
         await localforage.setItem('categories', [defaultCategory]);
         console.log('默认分类创建成功');
       }
@@ -425,9 +422,10 @@ export const useEbookStore = defineStore('ebook', () => {
         updatedAt: category.updatedAt
       }));
       
+      // 保存到 IndexedDB 作为缓存
       await localforage.setItem('categories', categoriesToSave);
-      // 异步同步到云端（不阻塞 UI）
-      scheduleCloudSyncCategories();
+      
+      // 🎯 云端同步已移至后端定时任务，前端不再触发
       
       // 验证保存是否成功并刷新内存状态
       const savedData = await localforage.getItem<BookCategory[]>('categories');
@@ -842,6 +840,22 @@ export const useEbookStore = defineStore('ebook', () => {
         uploading: books.value[index].uploading 
       });
       
+      // 🎯 调用后端 API 更新书籍信息
+      try {
+        const { updateBook: apiUpdateBook } = await import('@/api/books');
+        await apiUpdateBook(bookId, {
+          title: updates.title,
+          author: updates.author,
+          cover: updates.cover,
+          category_id: updates.categoryId,
+          last_read: updates.lastRead,
+          reading_progress: updates.readingProgress
+        });
+        console.log('✅ 书籍信息已同步到后端');
+      } catch (error) {
+        console.warn('⚠️ 同步书籍信息到后端失败:', error);
+      }
+      
       await saveBooks();
     } else {
       console.error('updateBook - 未找到书籍:', bookId);
@@ -857,10 +871,19 @@ export const useEbookStore = defineStore('ebook', () => {
       const book = books.value[index];
       const actualStorageType = storageType || book.storageType;
 
-      // 2. 立即从 UI 中移除（响应式更新）
+      // 2. 🎯 调用后端 API 删除书籍
+      try {
+        const { deleteBook: apiDeleteBook } = await import('@/api/books');
+        await apiDeleteBook(bookId);
+        console.log('✅ 书籍已从后端删除');
+      } catch (error) {
+        console.warn('⚠️ 从后端删除书籍失败:', error);
+      }
+
+      // 3. 立即从 UI 中移除（响应式更新）
       books.value.splice(index, 1);
       
-      // 3. 从所有分类中移除该书籍 ID
+      // 4. 从所有分类中移除该书籍 ID
       let categoryTouched = false;
       for (const category of categories.value) {
         if (!Array.isArray(category.bookIds)) continue;
@@ -872,7 +895,7 @@ export const useEbookStore = defineStore('ebook', () => {
         }
       }
       
-      // 4. 立即保存到本地存储（不阻塞）
+      // 5. 立即保存到本地存储（不阻塞）
       Promise.all([
         saveBooks(false), // 不触发云端同步，后面统一处理
         categoryTouched ? localforage.setItem('categories', categories.value.map(c => ({
@@ -889,7 +912,7 @@ export const useEbookStore = defineStore('ebook', () => {
         ]) : Promise.resolve()
       ]).catch(err => console.error('本地清理失败:', err));
 
-      // 5. 异步处理云端删除（不阻塞 UI）
+      // 6. 异步处理云端删除（不阻塞 UI）
       const isCloudBook = actualStorageType === 'baidupan' || actualStorageType === 'synced';
       if (isCloudBook && book.baidupanPath && deleteFromCloud) {
         // 完全异步，不等待结果
@@ -952,6 +975,41 @@ export const useEbookStore = defineStore('ebook', () => {
 
   const loadReadingProgress = async (ebookId: string) => {
     try {
+      console.log('🔄 开始加载阅读进度（从后端 API）:', ebookId);
+      
+      // 🎯 从后端 API 加载阅读进度
+      try {
+        const { getProgress: apiGetProgress } = await import('@/api/books');
+        const result = await apiGetProgress(ebookId);
+        
+        if (result.success && result.progress) {
+          console.log('✅ 成功从后端加载阅读进度');
+          
+          // 转换后端数据格式到前端格式
+          const progress: ReadingProgress = {
+            ebookId: result.progress.ebook_id,
+            chapterIndex: result.progress.chapter_index,
+            chapterTitle: result.progress.chapter_title || '',
+            position: result.progress.position,
+            cfi: result.progress.cfi,
+            timestamp: result.progress.timestamp,
+            deviceId: result.progress.device_id,
+            deviceName: result.progress.device_name,
+            readingTime: result.progress.reading_time
+          };
+          
+          readingProgress.value = progress;
+          
+          // 保存到 IndexedDB 作为缓存
+          await localforage.setItem(`progress_${ebookId}`, progress);
+          
+          return progress;
+        }
+      } catch (apiError) {
+        console.warn('⚠️ 从后端加载阅读进度失败，尝试从缓存加载:', apiError);
+      }
+      
+      // 如果后端加载失败，尝试从 IndexedDB 缓存加载
       const progress = await localforage.getItem<ReadingProgress>(`progress_${ebookId}`);
       readingProgress.value = progress || null;
       return progress;
@@ -964,6 +1022,26 @@ export const useEbookStore = defineStore('ebook', () => {
   const saveReadingProgress = async (progress: ReadingProgress) => {
     try {
       readingProgress.value = progress;
+      
+      // 🎯 调用后端 API 保存阅读进度
+      try {
+        const { saveProgress: apiSaveProgress } = await import('@/api/books');
+        await apiSaveProgress({
+          ebook_id: progress.ebookId,
+          chapter_index: progress.chapterIndex,
+          chapter_title: progress.chapterTitle,
+          position: progress.position,
+          cfi: progress.cfi,
+          device_id: progress.deviceId,
+          device_name: progress.deviceName,
+          reading_time: progress.readingTime
+        });
+        console.log('✅ 阅读进度已同步到后端');
+      } catch (error) {
+        console.warn('⚠️ 同步阅读进度到后端失败:', error);
+      }
+      
+      // 保存到 IndexedDB 作为缓存
       await localforage.setItem(`progress_${progress.ebookId}`, progress);
       
       // 更新电子书的阅读进度
@@ -2064,11 +2142,71 @@ export const useEbookStore = defineStore('ebook', () => {
   // 导入 EPUB 文件
   const importEpubFile = async (file: File): Promise<EbookMetadata | null> => {
     try {
-      console.log('开始导入 EPUB 文件:', file.name);
+      console.log('🚀 开始导入 EPUB 文件（使用新 API）:', file.name);
       
-      // 1. 计算 MD5 作为唯一 ID
-      const fileHash = await calculateMD5(file);
-      const id = `epub_${fileHash}`;
+      // 🔄 先提取元数据（封面、作者、标题等）
+      const arrayBuffer = await file.arrayBuffer();
+      let coverData = '';
+      let authorData = '未知作者';
+      let titleData = file.name.replace('.epub', '');
+      
+      try {
+        const book = ePub(arrayBuffer as ArrayBuffer);
+        await new Promise((resolve, reject) => {
+          book.ready.then(resolve).catch(reject);
+        });
+        
+        const metadata = await book.loaded.metadata;
+        console.log('EPUB 元数据:', metadata);
+        
+        if (metadata.creator) {
+          authorData = Array.isArray(metadata.creator) 
+            ? metadata.creator.join(', ') 
+            : metadata.creator;
+        }
+        
+        if (metadata.title) {
+          titleData = metadata.title;
+        }
+        
+        const coverUrl = await book.coverUrl();
+        if (coverUrl && typeof coverUrl === 'string' && coverUrl.startsWith('blob:')) {
+          try {
+            coverData = await blobToBase64(coverUrl);
+            URL.revokeObjectURL(coverUrl);
+          } catch (e) {
+            console.warn('封面转换失败:', e);
+          }
+        } else if (coverUrl) {
+          coverData = coverUrl;
+        }
+      } catch (e) {
+        console.warn('元数据提取失败:', e);
+      }
+      
+      // 🎯 第一步：上传书籍文件（不带封面）
+      const { uploadBook } = await import('@/api/books');
+      
+      const result = await uploadBook({
+        file,
+        title: titleData,
+        author: authorData
+      });
+      
+      console.log('✅ 书籍上传成功:', result.book_id);
+      
+      const id = result.book_id;
+      
+      // 🎯 第二步：如果有封面，单独更新封面
+      if (coverData) {
+        try {
+          const { updateBook: apiUpdateBook } = await import('@/api/books');
+          await apiUpdateBook(id, { cover: coverData });
+          console.log('✅ 封面更新成功');
+        } catch (e) {
+          console.warn('⚠️ 封面更新失败:', e);
+        }
+      }
       
       // 检查是否已存在
       const existing = books.value.find(b => b.id === id);
@@ -2077,67 +2215,8 @@ export const useEbookStore = defineStore('ebook', () => {
         return existing;
       }
       
-      // 将文件转换为 ArrayBuffer
-      const arrayBuffer = await file.arrayBuffer();
-      
-      // 保存文件内容到 IndexedDB
-      console.log('保存文件内容到 IndexedDB，键名:', `ebook_content_${id}`);
+      // 🔄 保存到 IndexedDB 作为缓存
       await localforage.setItem(`ebook_content_${id}`, arrayBuffer);
-      
-      // 提取元数据（封面、作者、标题等）
-      let coverData = '';
-      let authorData = '未知作者';
-      let titleData = file.name.replace('.epub', '');
-      
-      try {
-        const book = ePub(arrayBuffer as ArrayBuffer);
-        // 等待书籍加载完成
-        await new Promise((resolve, reject) => {
-          book.ready.then(resolve).catch(reject);
-        });
-        
-        // 提取书籍元数据
-        const metadata = await book.loaded.metadata;
-        console.log('EPUB 元数据:', metadata);
-        
-        // 提取作者
-        if (metadata.creator) {
-          if (Array.isArray(metadata.creator)) {
-            authorData = metadata.creator.join(', ');
-          } else {
-            authorData = metadata.creator;
-          }
-        }
-        
-        // 提取标题
-        if (metadata.title) {
-          titleData = metadata.title;
-        }
-        
-        // 获取封面 URL
-        const coverUrl = await book.coverUrl();
-        console.log('封面 URL:', coverUrl);
-        if (coverUrl) {
-          // 如果是 blob URL，转换为 Base64 持久化存储
-          if (typeof coverUrl === 'string' && coverUrl.startsWith('blob:')) {
-            try {
-              console.log('将 Blob URL 转换为 Base64');
-              coverData = await blobToBase64(coverUrl);
-              console.log('封面转换成功，Base64 长度:', coverData.length);
-              // 释放原有的 Blob 内存
-              URL.revokeObjectURL(coverUrl);
-            } catch (e) {
-              console.warn('封面转换 Base64 失败:', e);
-              coverData = '';
-            }
-          } else {
-            // 对于相对路径或其他格式，直接使用
-            coverData = coverUrl;
-          }
-        }
-      } catch (e) {
-        console.warn('元数据提取失败:', e);
-      }
       
       // 创建电子书元数据
       const ebookMetadata: EbookMetadata = {
@@ -2145,7 +2224,7 @@ export const useEbookStore = defineStore('ebook', () => {
         title: titleData,
         author: authorData,
         cover: coverData,
-        path: id, // 使用 ID 作为路径，后续通过 ID 获取文件内容
+        path: id,
         format: 'epub',
         size: file.size,
         lastRead: Date.now(),
@@ -2154,14 +2233,6 @@ export const useEbookStore = defineStore('ebook', () => {
         storageType: 'local',
         addedAt: Date.now()
       };
-      
-      console.log('创建电子书元数据:', {
-        id: ebookMetadata.id,
-        title: ebookMetadata.title,
-        author: ebookMetadata.author,
-        cover: ebookMetadata.cover,
-        storageType: ebookMetadata.storageType
-      });
       
       // 保存到本地存储
       await addBook(ebookMetadata);
@@ -2190,9 +2261,20 @@ export const useEbookStore = defineStore('ebook', () => {
   // 导入 PDF 文件
   const importPdfFile = async (file: File): Promise<EbookMetadata | null> => {
     try {
-      // 1. 计算 MD5 作为唯一 ID
-      const fileHash = await calculateMD5(file);
-      const id = `pdf_${fileHash}`;
+      console.log('🚀 开始导入 PDF 文件（使用新 API）:', file.name);
+      
+      // 🎯 调用新的后端 API 上传书籍
+      const { uploadBook } = await import('@/api/books');
+      
+      const result = await uploadBook({
+        file,
+        title: file.name.replace('.pdf', ''),
+        author: '未知作者'
+      });
+      
+      console.log('✅ PDF 上传成功:', result.book_id);
+      
+      const id = result.book_id;
       
       // 检查是否已存在
       const existing = books.value.find(b => b.id === id);
@@ -2201,10 +2283,8 @@ export const useEbookStore = defineStore('ebook', () => {
         return existing;
       }
       
-      // 将文件转换为 ArrayBuffer
+      // 🔄 兼容旧代码：仍然保存到 IndexedDB（可选，用于缓存）
       const arrayBuffer = await file.arrayBuffer();
-      
-      // 保存文件内容到 IndexedDB
       await localforage.setItem(`ebook_content_${id}`, arrayBuffer);
       
       // 创建电子书元数据
@@ -2213,7 +2293,7 @@ export const useEbookStore = defineStore('ebook', () => {
         title: file.name.replace('.pdf', ''),
         author: '未知作者',
         cover: '',
-        path: id, // 使用 ID 作为路径，后续通过 ID 获取文件内容
+        path: id,
         format: 'pdf',
         size: file.size,
         lastRead: Date.now(),
@@ -2236,9 +2316,20 @@ export const useEbookStore = defineStore('ebook', () => {
   // 导入 TXT 文件
   const importTxtFile = async (file: File): Promise<EbookMetadata | null> => {
     try {
-      // 1. 计算 MD5 作为唯一 ID
-      const fileHash = await calculateMD5(file);
-      const id = `txt_${fileHash}`;
+      console.log('🚀 开始导入 TXT 文件（使用新 API）:', file.name);
+      
+      // 🎯 调用新的后端 API 上传书籍
+      const { uploadBook } = await import('@/api/books');
+      
+      const result = await uploadBook({
+        file,
+        title: file.name.replace('.txt', ''),
+        author: '未知作者'
+      });
+      
+      console.log('✅ TXT 上传成功:', result.book_id);
+      
+      const id = result.book_id;
       
       // 检查是否已存在
       const existing = books.value.find(b => b.id === id);
@@ -2247,10 +2338,8 @@ export const useEbookStore = defineStore('ebook', () => {
         return existing;
       }
       
-      // 将文件转换为 ArrayBuffer
+      // 🔄 兼容旧代码：仍然保存到 IndexedDB（可选，用于缓存）
       const arrayBuffer = await file.arrayBuffer();
-      
-      // 保存文件内容到 IndexedDB
       await localforage.setItem(`ebook_content_${id}`, arrayBuffer);
       
       // 创建电子书元数据
@@ -2259,7 +2348,7 @@ export const useEbookStore = defineStore('ebook', () => {
         title: file.name.replace('.txt', ''),
         author: '未知作者',
         cover: '',
-        path: id, // 使用 ID 作为路径，后续通过 ID 获取文件内容
+        path: id,
         format: 'txt',
         size: file.size,
         lastRead: Date.now(),
