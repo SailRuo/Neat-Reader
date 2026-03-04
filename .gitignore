@@ -1,4 +1,4 @@
-# Electron 构建产物
+﻿# Electron 鏋勫缓浜х墿
 dist-electron/
 *.exe
 *.dmg
@@ -12,37 +12,36 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 package-lock.json
-src-tauri
-# 环境变量
+# 鐜鍙橀噺
 .env
 .env.local
 .env.*.local
 
-# 编辑器
+# 缂栬緫鍣?
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# 操作系统
+# 鎿嶄綔绯荤粺
 .DS_Store
 Thumbs.db
 
-# 日志
+# 鏃ュ織
 logs/
 *.log
 
-# 临时文件
+# 涓存椂鏂囦欢
 tmp/
 temp/
 *.tmp
 
-# Wails 相关（保留以便回退）
+# Wails 鐩稿叧锛堜繚鐣欎互渚垮洖閫€锛?
 build/bin/
 wails.json.bak
 
-# Go 相关（保留以便回退）
+# Go 鐩稿叧锛堜繚鐣欎互渚垮洖閫€锛?
 *.exe~
 *.dll
 *.so

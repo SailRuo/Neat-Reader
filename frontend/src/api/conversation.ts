@@ -2,9 +2,9 @@
  * 会话管理 API
  * 与后端 LangChain 会话管理系统交互
  */
-import axios from 'axios'
+import service from './request'
 
-const API_BASE_URL = import.meta.env.VITE_PYTHON_BACKEND_URL || 'http://localhost:3001'
+const API_BASE_URL = import.meta.env.VITE_PYTHON_BACKEND_URL || ''
 
 export interface ConversationContext {
   book_id?: string
@@ -48,7 +48,7 @@ export async function createConversation(
   context?: ConversationContext,
   userId?: string
 ): Promise<Conversation> {
-  const response = await axios.post(`${API_BASE_URL}/api/conversation/create`, {
+  const response = await service.post(`${API_BASE_URL}/api/conversation/create`, {
     conversation_id: conversationId,
     user_id: userId,
     title,
@@ -66,7 +66,7 @@ export async function createConversation(
  * 获取会话详情
  */
 export async function getConversation(conversationId: string): Promise<Conversation> {
-  const response = await axios.get(`${API_BASE_URL}/api/conversation/get/${conversationId}`)
+  const response = await service.get(`${API_BASE_URL}/api/conversation/get/${conversationId}`)
   
   if (!response.data.success) {
     throw new Error('获取会话失败')
@@ -84,7 +84,7 @@ export async function addMessage(
   content: string,
   metadata?: Record<string, any>
 ): Promise<void> {
-  const response = await axios.post(`${API_BASE_URL}/api/conversation/messages/add`, {
+  const response = await service.post(`${API_BASE_URL}/api/conversation/messages/add`, {
     conversation_id: conversationId,
     role,
     content,
@@ -103,7 +103,7 @@ export async function getMessages(
   conversationId: string,
   limit?: number
 ): Promise<Message[]> {
-  const response = await axios.post(`${API_BASE_URL}/api/conversation/messages/get`, {
+  const response = await service.post(`${API_BASE_URL}/api/conversation/messages/get`, {
     conversation_id: conversationId,
     limit
   })
@@ -119,7 +119,7 @@ export async function getMessages(
  * 删除会话
  */
 export async function deleteConversation(conversationId: string): Promise<void> {
-  const response = await axios.delete(`${API_BASE_URL}/api/conversation/delete/${conversationId}`)
+  const response = await service.delete(`${API_BASE_URL}/api/conversation/delete/${conversationId}`)
   
   if (!response.data.success) {
     throw new Error('删除会话失败')
@@ -138,7 +138,7 @@ export async function listConversations(
     params.user_id = userId
   }
   
-  const response = await axios.get(`${API_BASE_URL}/api/conversation/list`, { params })
+  const response = await service.get(`${API_BASE_URL}/api/conversation/list`, { params })
   
   if (!response.data.success) {
     throw new Error('列出会话失败')
@@ -151,7 +151,7 @@ export async function listConversations(
  * 清理旧会话
  */
 export async function clearOldConversations(days: number = 30): Promise<number> {
-  const response = await axios.post(`${API_BASE_URL}/api/conversation/clear-old`, null, {
+  const response = await service.post(`${API_BASE_URL}/api/conversation/clear-old`, null, {
     params: { days }
   })
   
@@ -166,7 +166,7 @@ export async function clearOldConversations(days: number = 30): Promise<number> 
  * 同步会话到百度网盘
  */
 export async function syncToBaidu(conversationId?: string): Promise<{success: number, failed: number}> {
-  const response = await axios.post(`${API_BASE_URL}/api/conversation/sync/to-baidu`, null, {
+  const response = await service.post(`${API_BASE_URL}/api/conversation/sync/to-baidu`, null, {
     params: conversationId ? { conversation_id: conversationId } : {}
   })
   
@@ -181,7 +181,7 @@ export async function syncToBaidu(conversationId?: string): Promise<{success: nu
  * 从百度网盘同步会话
  */
 export async function syncFromBaidu(): Promise<{success: number, failed: number}> {
-  const response = await axios.post(`${API_BASE_URL}/api/conversation/sync/from-baidu`)
+  const response = await service.post(`${API_BASE_URL}/api/conversation/sync/from-baidu`)
   
   if (!response.data.success) {
     throw new Error('从百度网盘同步失败')
@@ -194,7 +194,7 @@ export async function syncFromBaidu(): Promise<{success: number, failed: number}
  * 启用百度网盘同步
  */
 export async function enableBaiduSync(): Promise<void> {
-  const response = await axios.post(`${API_BASE_URL}/api/conversation/sync/enable`)
+  const response = await service.post(`${API_BASE_URL}/api/conversation/sync/enable`)
   
   if (!response.data.success) {
     throw new Error('启用百度网盘同步失败')
@@ -205,7 +205,7 @@ export async function enableBaiduSync(): Promise<void> {
  * 禁用百度网盘同步
  */
 export async function disableBaiduSync(): Promise<void> {
-  const response = await axios.post(`${API_BASE_URL}/api/conversation/sync/disable`)
+  const response = await service.post(`${API_BASE_URL}/api/conversation/sync/disable`)
   
   if (!response.data.success) {
     throw new Error('禁用百度网盘同步失败')

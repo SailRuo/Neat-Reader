@@ -1,6 +1,6 @@
-import axios from 'axios'
+import service from './request'
 
-const API_BASE = 'http://localhost:3002/api/pageindex'
+const API_BASE = '/api/pageindex'
 
 export interface CustomAPIConfig {
   base_url: string
@@ -13,7 +13,7 @@ export async function buildPageIndex(bookId: string, file: File): Promise<any> {
   form.append('book_id', bookId)
   form.append('epub_file', file, file.name)
 
-  const response = await axios.post(`${API_BASE}/build`, form, {
+  const response = await service.post(`${API_BASE}/build`, form, {
     headers: {
       'Content-Type': 'multipart/form-data'
     }
@@ -22,7 +22,7 @@ export async function buildPageIndex(bookId: string, file: File): Promise<any> {
 }
 
 export async function getPageIndexStatus(bookId: string): Promise<any> {
-  const response = await axios.get(`${API_BASE}/status/${bookId}`)
+  const response = await service.get(`${API_BASE}/status/${bookId}`)
   return response.data
 }
 
@@ -36,7 +36,7 @@ export async function answerPageIndex(params: {
   temperature?: number
   top_k?: number
 }): Promise<any> {
-  const response = await axios.post(`${API_BASE}/answer`, params)
+  const response = await service.post(`${API_BASE}/answer`, params)
   return response.data
 }
 
@@ -46,6 +46,6 @@ export async function searchLibrary(params: {
   top_k_per_book?: number
   top_k_total?: number
 }): Promise<any> {
-  const response = await axios.post(`${API_BASE}/search`, params)
+  const response = await service.post(`${API_BASE}/search`, params)
   return response.data
 }

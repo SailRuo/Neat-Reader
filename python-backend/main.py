@@ -2,11 +2,30 @@
 Python Backend for PageIndex RAG
 FastAPI 服务器入口
 """
+import sys
+
+
+class _NullStream:
+    def write(self, _s):
+        return 0
+
+    def flush(self):
+        return None
+
+    def isatty(self):
+        return False
+
+
+if getattr(sys, "stdout", None) is None:
+    sys.stdout = _NullStream()
+if getattr(sys, "stderr", None) is None:
+    sys.stderr = _NullStream()
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
-import sys
+import os
 from contextlib import asynccontextmanager
 
 from app.config import settings
@@ -14,10 +33,17 @@ from app.routes import ai, pageindex, health, baidu, tts, conversation
 
 # 配置日志
 logger.remove()
+
+_sink = sys.stdout if getattr(sys, "stdout", None) else None
+if _sink is None and getattr(sys, "stderr", None):
+    _sink = sys.stderr
+if _sink is None:
+    _sink = os.path.join(os.environ.get("TEMP") or os.getcwd(), "neat-reader-backend.log")
+
 logger.add(
-    sys.stdout,
+    _sink,
     format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-    level=settings.LOG_LEVEL
+    level=settings.LOG_LEVEL,
 )
 
 async def _run_exit_sync():
@@ -121,5 +147,6 @@ if __name__ == "__main__":
         host=settings.HOST,
         port=settings.PORT,
         reload=settings.DEBUG,
-        log_level=settings.LOG_LEVEL.lower()
+        log_level=settings.LOG_LEVEL.lower(),
+        log_config=None,
     )

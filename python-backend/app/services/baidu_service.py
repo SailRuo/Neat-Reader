@@ -413,40 +413,77 @@ class BaiduNetdiskService:
         Returns:
             下载结果
         """
-        try:
-            logger.info("下载文件")
-            
-            headers = {
-                'User-Agent': 'pan.baidu.com'
-            }
-            
-            response = requests.get(
-                dlink,
-                params={'access_token': access_token},
-                headers=headers,
-                timeout=60,
-                stream=True
-            )
-            
-            response.raise_for_status()
-            
-            logger.info("文件下载成功")
-            return {
-                'success': True,
-                'content': response.content
-            }
-            
-        except Exception as e:
-            resp = getattr(e, "response", None)
-            log_api_failure(
-                "百度网盘 下载文件",
-                str(e),
-                method="GET",
-                url=str(dlink)[:200],
-                status_code=resp.status_code if resp else None,
-                response_body=resp.text[:500] if resp and resp.text else None,
-            )
-            raise
+        max_retries = 3
+        retry_delay = 2
+        
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"下载文件 (尝试 {attempt + 1}/{max_retries})")
+                
+                headers = {
+                    'User-Agent': 'pan.baidu.com',
+                    'Connection': 'keep-alive',
+                    'Accept': '*/*',
+                    'Accept-Encoding': 'gzip, deflate',
+                }
+                
+                response = requests.get(
+                    dlink,
+                    params={'access_token': access_token},
+                    headers=headers,
+                    timeout=120,
+                    stream=True,
+                    verify=True  # 验证 SSL 证书
+                )
+                
+                response.raise_for_status()
+                
+                # 读取内容
+                content = b''
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        content += chunk
+                
+                logger.info(f"文件下载成功，大小: {len(content)} 字节")
+                return {
+                    'success': True,
+                    'data': list(content)  # 转换为数组格式供前端使用
+                }
+                
+            except requests.exceptions.SSLError as e:
+                logger.warning(f"SSL 错误 (尝试 {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    import time
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    raise Exception(f"下载失败: SSL 连接错误，请检查网络连接或稍后重试")
+                    
+            except requests.exceptions.Timeout as e:
+                logger.warning(f"超时错误 (尝试 {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    import time
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    raise Exception(f"下载失败: 请求超时，请检查网络连接")
+                    
+            except Exception as e:
+                resp = getattr(e, "response", None)
+                log_api_failure(
+                    "百度网盘 下载文件",
+                    str(e),
+                    method="GET",
+                    url=str(dlink)[:200],
+                    status_code=resp.status_code if resp else None,
+                    response_body=resp.text[:500] if resp and resp.text else None,
+                )
+                if attempt < max_retries - 1:
+                    import time
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    raise
 
     def create_directory(
         self,

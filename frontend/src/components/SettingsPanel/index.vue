@@ -164,6 +164,17 @@
           <template v-if="aiMode === 'custom'">
           <div class="setting-row">
             <div class="setting-info" style="width: 100%;">
+              <label class="custom-api-label">base_url 预设</label>
+              <select
+                class="form-control form-input"
+                v-model="customBaseUrlPreset"
+                @change="applyCustomBaseUrlPreset"
+                style="margin-bottom: 12px;"
+              >
+                <option v-for="p in customBaseUrlPresets" :key="p.value" :value="p.value">
+                  {{ p.label }}
+                </option>
+              </select>
               <label class="custom-api-label">API 基础地址 (base_url)</label>
               <input 
                 type="text" 
@@ -202,7 +213,7 @@
                   v-if="customModelOptions.length"
                   class="form-control form-input"
                   v-model="customModelId"
-                  :disabled="isCustomModelsLoading"
+                  :disabled="isCustomModelsLoading || !customModelOptions.length"
                 >
                   <option v-for="m in customModelOptions" :key="m" :value="m">{{ m }}</option>
                 </select>
@@ -213,6 +224,7 @@
                 class="form-control form-input"
                 v-model="customModelId"
                 placeholder="gpt-3.5-turbo / qwen-plus / 自建模型名"
+                :disabled="isCustomModelsLoading"
               >
             </div>
           </div>
@@ -222,8 +234,9 @@
                 class="btn btn-primary" 
                 style="width: 100%; margin-bottom: 8px;"
                 @click="saveCustomAPIConfig"
+                :disabled="isSavingCustomConfig"
               >
-                保存配置
+                {{ isSavingCustomConfig ? '保存中...' : '保存配置' }}
               </button>
               <p style="font-size: 12px; color: #999; margin: 8px 0 0 0;">
                 兼容 OpenAI API 格式，可用于通义千问 API、自建模型等
@@ -305,15 +318,38 @@ const inputAccessToken = ref('')
 const isLoading = ref(false)
 const isAutoConnecting = ref(false)
 const isSyncing = ref(false)
+const clipboardMonitorInterval = ref<number | null>(null)
+const lastClipboardContent = ref('')
 
 // AI 配置：OAuth / 自定义 API
 const aiMode = computed(() => ebookStore.userConfig.ai?.mode ?? 'oauth')
 const customBaseUrl = ref('')
 const customApiKey = ref('')
 const customModelId = ref('')
+const customBaseUrlPreset = ref<'custom' | 'openai' | 'deepseek' | 'dashscope'>('custom')
 const showCustomApiKey = ref(false)
 const isCustomModelsLoading = ref(false)
 const customModelOptions = ref<string[]>([])
+const isSavingCustomConfig = ref(false)
+
+// Qwen OAuth 相关状态
+const qwenAccessToken = ref('')
+const qwenTestResult = ref('')
+const isQwenLoading = ref(false)
+
+const customBaseUrlPresets = [
+  { label: '自定义', value: 'custom' as const },
+  { label: 'OpenAI', value: 'openai' as const },
+  { label: 'DeepSeek', value: 'deepseek' as const },
+  { label: '阿里百炼（DashScope 兼容）', value: 'dashscope' as const }
+]
+
+const applyCustomBaseUrlPreset = () => {
+  const v = customBaseUrlPreset.value
+  if (v === 'openai') customBaseUrl.value = 'https://api.openai.com/v1'
+  if (v === 'deepseek') customBaseUrl.value = 'https://api.deepseek.com/v1'
+  if (v === 'dashscope') customBaseUrl.value = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+}
 
 const setAIMode = async (mode: 'oauth' | 'custom') => {
   await ebookStore.updateUserConfig({
@@ -346,36 +382,38 @@ const saveCustomAPIConfig = async () => {
     return
   }
 
-  const config = {
-    baseUrl,
-    apiKey,
-    modelId
-  }
-  await ebookStore.updateUserConfig({
-    ai: {
-      ...ebookStore.userConfig.ai,
-      mode: 'custom',
-      custom: config
+  isSavingCustomConfig.value = true
+  try {
+    const config = {
+      baseUrl,
+      apiKey,
+      modelId
     }
-  })
-  // 同步保存到后端，便于重启后继续使用
-  await aiAPI.saveCustomAPIConfigToBackend({
-    base_url: config.baseUrl,
-    api_key: config.apiKey,
-    model_id: config.modelId
-  })
-  dialogStore.showToast('自定义 API 配置已保存', 'success')
-  // 异步测试自定义 API 连接（不阻塞保存）
-  ;(async () => {
-    try {
-      const result = await aiAPI.testCustomAPI({
-        base_url: config.baseUrl,
-        api_key: config.apiKey,
-        model_id: config.modelId
-      })
-      // 测试成功只在控制台输出
-      console.log('[Custom API] 连接测试成功:', {
-        modelId: config.modelId,
+    await ebookStore.updateUserConfig({
+      ai: {
+        ...ebookStore.userConfig.ai,
+        mode: 'custom',
+        custom: config
+      }
+    })
+    // 同步保存到后端，便于重启后继续使用
+    await aiAPI.saveCustomAPIConfigToBackend({
+      base_url: config.baseUrl,
+      api_key: config.apiKey,
+      model_id: config.modelId
+    })
+    dialogStore.showToast('自定义 API 配置已保存', 'success')
+    // 异步测试自定义 API 连接（不阻塞保存）
+    ;(async () => {
+      try {
+        const result = await aiAPI.testCustomAPI({
+          base_url: config.baseUrl,
+          api_key: config.apiKey,
+          model_id: config.modelId
+        })
+        // 测试成功只在控制台输出
+        console.log('[Custom API] 连接测试成功:', {
+          modelId: config.modelId,
         response: result.response,
         usage: result.usage
       })
@@ -387,6 +425,9 @@ const saveCustomAPIConfig = async () => {
       dialogStore.showErrorDialog('自定义 API 测试失败', message)
     }
   })()
+  } finally {
+    isSavingCustomConfig.value = false
+  }
 }
 
 const refreshCustomModels = async () => {
@@ -400,13 +441,22 @@ const refreshCustomModels = async () => {
       base_url: customBaseUrl.value.trim(),
       api_key: customApiKey.value.trim()
     })
-    const raw: any = resp?.models
-    const ids: string[] = Array.isArray(raw?.data)
-      ? raw.data.map((x: any) => String(x?.id || '')).filter(Boolean)
+    console.log('🔍 [refreshCustomModels] 完整响应:', resp)
+    
+    // 响应结构: { success, cached, base_url, fetched_at, models: { object: "list", data: [...] } }
+    const modelsData = resp?.models?.data
+    console.log('🔍 [refreshCustomModels] models.data:', modelsData)
+    
+    const ids: string[] = Array.isArray(modelsData)
+      ? modelsData.map((x: any) => String(x?.id || '')).filter(Boolean)
       : []
+    
+    console.log('🔍 [refreshCustomModels] 解析出的模型 IDs:', ids)
     customModelOptions.value = ids
+    
     if (ids.length && !ids.includes(customModelId.value.trim())) {
       customModelId.value = ids[0]
+      console.log('🔍 [refreshCustomModels] 自动选择第一个模型:', ids[0])
     }
   } catch (e: any) {
     customModelOptions.value = []
@@ -420,11 +470,9 @@ const refreshCustomModels = async () => {
 let autoConnectTimer: number | null = null
 let customModelsTimer: number | null = null
 
-// Qwen OAuth 相关状态
-const qwenAccessToken = ref('')
+// Qwen OAuth 相关状态（已在上面定义，这里添加缺失的变量）
 const qwenRefreshToken = ref('')
 const qwenResourceUrl = ref('')  // 添加 resource_url
-const isQwenLoading = ref(false)
 const isAITesting = ref(false)
 const aiTestResult = ref('')
 const qwenSessionId = ref('')
@@ -441,7 +489,25 @@ const syncCustomConfig = () => {
   }
 }
 
+const syncCustomBaseUrlPreset = () => {
+  const v = customBaseUrl.value.trim()
+  if (v === 'https://api.openai.com/v1') {
+    customBaseUrlPreset.value = 'openai'
+  } else if (v === 'https://api.deepseek.com/v1') {
+    customBaseUrlPreset.value = 'deepseek'
+  } else if (v === 'https://dashscope.aliyuncs.com/compatible-mode/v1') {
+    customBaseUrlPreset.value = 'dashscope'
+  } else {
+    customBaseUrlPreset.value = 'custom'
+  }
+}
+
 watch(() => ebookStore.userConfig.ai, () => syncCustomConfig(), { deep: true })
+
+watch(
+  () => customBaseUrl.value,
+  () => syncCustomBaseUrlPreset(),
+)
 
 watch(
   () => [customBaseUrl.value, customApiKey.value],
@@ -457,6 +523,7 @@ watch(
 // 从 localStorage、userConfig 及后端加载
 onMounted(async () => {
   syncCustomConfig()
+  syncCustomBaseUrlPreset()
   // 若本地无自定义配置，尝试从后端恢复（如重启后、新设备）
   const ai = ebookStore.userConfig.ai
   if (ai?.mode === 'custom' && (!ai.custom?.baseUrl || !ai.custom?.apiKey)) {
@@ -523,7 +590,69 @@ onMounted(async () => {
 // 组件卸载时清理
 onBeforeUnmount(() => {
   qwenTokenManager.destroy()
+  stopClipboardMonitor()
 })
+
+/**
+ * 启动剪贴板监听（用于百度网盘授权）
+ */
+const startClipboardMonitor = () => {
+  console.log('🔍 [剪贴板监听] 开始监听剪贴板')
+  
+  // 清除之前的监听
+  stopClipboardMonitor()
+  
+  // 每 1 秒检查一次剪贴板
+  clipboardMonitorInterval.value = window.setInterval(async () => {
+    try {
+      // 读取剪贴板内容
+      const text = await navigator.clipboard.readText()
+      
+      // 如果内容没有变化，跳过
+      if (text === lastClipboardContent.value) {
+        return
+      }
+      
+      lastClipboardContent.value = text
+      const trimmedText = text.trim()
+      
+      // 验证是否是百度 Refresh Token 格式
+      // 百度 token 通常是 122.xxx 格式，长度较长
+      if (trimmedText.length > 20 && /^[\d\.]+[a-zA-Z0-9\-_]+/.test(trimmedText)) {
+        console.log('✅ [剪贴板监听] 检测到疑似 Refresh Token，自动填入')
+        
+        // 自动填入输入框
+        refreshToken.value = trimmedText
+        
+        // 触发自动连接
+        handleRefreshTokenInput({ target: { value: trimmedText } } as any)
+        
+        // 停止监听
+        stopClipboardMonitor()
+        
+        // 提示用户
+        dialogStore.showToast('已自动填入 Refresh Token', 'success')
+      }
+    } catch (error) {
+      // 剪贴板读取失败（可能是权限问题），静默处理
+      console.debug('剪贴板读取失败:', error)
+    }
+  }, 1000)
+  
+  console.log('✅ [剪贴板监听] 监听已启动')
+}
+
+/**
+ * 停止剪贴板监听
+ */
+const stopClipboardMonitor = () => {
+  if (clipboardMonitorInterval.value) {
+    clearInterval(clipboardMonitorInterval.value)
+    clipboardMonitorInterval.value = null
+    lastClipboardContent.value = ''
+    console.log('🛑 [剪贴板监听] 监听已停止')
+  }
+}
 
 const getAuthorization = () => {
   console.log('=== 开始获取授权 ===')
@@ -534,49 +663,32 @@ const getAuthorization = () => {
   console.log('授权URL:', authUrl)
   
   try {
-    // 浏览器环境：使用外部浏览器并监听postMessage
-    console.log('✓ 浏览器环境，使用外部浏览器打开授权页面')
+    // 统一使用系统浏览器打开授权页面
+    console.log('✓ 使用系统浏览器打开授权页面')
     
-    // 添加 postMessage 监听器
-    const messageHandler = (event: MessageEvent) => {
-      console.log('收到 postMessage:', event.data)
-      
-      // 验证消息来源
-      if (event.origin !== window.location.origin) {
-        console.warn('忽略来自不同源的消息:', event.origin)
-        return
-      }
-      
-      // 检查消息类型
-      if (event.data && event.data.type === 'baidu-auth-code' && event.data.code) {
-        console.log('✓ 收到授权码:', event.data.code)
-        
-        // 移除监听器
-        window.removeEventListener('message', messageHandler)
-        
-        // 使用alist API获取token
-        handleAuthCodeViaAlist(event.data.code)
-      }
-    }
-    
-    // 添加监听器
-    window.addEventListener('message', messageHandler)
-    console.log('✓ 已添加 postMessage 监听器')
-    
-    // 打开授权窗口
-    const newWindow = window.open(authUrl, '_blank', 'width=800,height=600')
-    if (newWindow) {
-      console.log('✓ 外部浏览器窗口打开成功')
-      dialogStore.showDialog({
-        title: '授权提示',
-        message: '请在打开的页面中完成授权，授权成功后会自动获取授权信息',
-        type: 'info'
-      })
+    // 尝试使用 Tauri shell.open（如果可用）
+    const isTauri = !!(window as any).__TAURI_INTERNALS__
+    if (isTauri) {
+      import('@tauri-apps/plugin-shell')
+        .then(({ open }) => open(authUrl))
+        .catch((e) => {
+          console.error('Tauri shell.open 失败，回退到 window.open:', e)
+          window.open(authUrl, '_blank')
+        })
     } else {
-      console.error('✗ 外部浏览器窗口被阻止')
-      window.removeEventListener('message', messageHandler)
-      dialogStore.showErrorDialog('窗口被阻止', '请允许弹出窗口')
+      // 浏览器环境直接使用 window.open
+      window.open(authUrl, '_blank')
     }
+    
+    // 启动剪贴板监听
+    startClipboardMonitor()
+    
+    dialogStore.showDialog({
+      title: '百度网盘授权',
+      message: '已在系统浏览器中打开授权页面。\n\n📋 完成授权后，请按以下步骤操作：\n\n1️⃣ 在授权页面完成登录和授权\n2️⃣ 授权成功后会显示 Refresh Token\n3️⃣ 复制 Refresh Token\n\n✨ 系统会自动检测剪贴板并填入 Token\n💡 也可以手动粘贴到下方输入框',
+      type: 'info'
+    })
+    return
   } catch (error: any) {
     console.error('✗ 获取授权过程异常:', error)
     console.error('异常详情:', {
@@ -843,13 +955,27 @@ const startQwenAuth = async () => {
     console.log('Auth URL:', deviceAuth.auth_url)
     console.log('Session ID:', deviceAuth.session_id)
     
-    // 2. 打开授权页面（浏览器环境）
-    window.open(deviceAuth.auth_url, '_blank', 'width=800,height=600')
+    // 2. 统一使用系统浏览器打开授权页面
+    console.log('✓ 使用系统浏览器打开授权页面')
+    
+    const isTauriEnv = !!(window as any).__TAURI_INTERNALS__
+    if (isTauriEnv) {
+      // Tauri 环境：使用 shell.open
+      import('@tauri-apps/plugin-shell')
+        .then(({ open }) => open(deviceAuth.auth_url))
+        .catch((e) => {
+          console.error('Tauri shell.open 失败，回退到 window.open:', e)
+          window.open(deviceAuth.auth_url, '_blank')
+        })
+    } else {
+      // 浏览器环境：直接使用 window.open
+      window.open(deviceAuth.auth_url, '_blank')
+    }
     
     // 3. 显示用户码和操作指引
     dialogStore.showDialog({
-      title: 'Qwen 授权 - 步骤说明',
-      message: `📋 请按以下步骤完成授权：\n\n1️⃣ 在打开的浏览器页面中输入用户码：\n   ${deviceAuth.user_code}\n\n2️⃣ 点击"确认"完成授权\n\n3️⃣ 看到"认证成功"后，可以关闭浏览器窗口\n\n⏳ 应用将自动获取 token，请稍候...`,
+      title: 'Qwen 授权',
+      message: `已在系统浏览器中打开授权页面。\n\n📋 请按以下步骤完成授权：\n\n1️⃣ 在浏览器页面中输入用户码：\n   ${deviceAuth.user_code}\n\n2️⃣ 点击"确认"完成授权\n\n3️⃣ 看到"认证成功"后，可以关闭浏览器窗口\n\n⏳ 应用将自动获取 token，请稍候...`,
       type: 'info'
     })
     

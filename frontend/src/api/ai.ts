@@ -1,4 +1,4 @@
-import axios from 'axios'
+import service, { API_BASE_URL } from './request'
 
 const API_BASE = '/api/ai'
 
@@ -62,7 +62,7 @@ export interface CustomAPIConfig {
  * 启动 Device Code Flow
  */
 export async function startDeviceAuth(): Promise<QwenDeviceAuthResponse> {
-  const response = await axios.post(`${API_BASE}/device-auth`)
+  const response = await service.post(`${API_BASE}/device-auth`)
   return response.data
 }
 
@@ -70,7 +70,7 @@ export async function startDeviceAuth(): Promise<QwenDeviceAuthResponse> {
  * 轮询获取 token
  */
 export async function pollForToken(sessionId: string): Promise<QwenPollResponse> {
-  const response = await axios.post(`${API_BASE}/poll-token`, { session_id: sessionId })
+  const response = await service.post(`${API_BASE}/poll-token`, { session_id: sessionId })
   return response.data
 }
 
@@ -78,7 +78,7 @@ export async function pollForToken(sessionId: string): Promise<QwenPollResponse>
  * 刷新 token
  */
 export async function refreshToken(refreshToken: string): Promise<QwenTokenResponse> {
-  const response = await axios.post(`${API_BASE}/refresh`, { refresh_token: refreshToken })
+  const response = await service.post(`${API_BASE}/refresh`, { refresh_token: refreshToken })
   return response.data
 }
 
@@ -92,14 +92,14 @@ export async function saveQwenToken(params: {
   expires_at?: number
   resource_url?: string
 }): Promise<void> {
-  await axios.post(`${API_BASE}/token`, params)
+  await service.post(`${API_BASE}/token`, params)
 }
 
 /**
  * 获取可用的模型列表
  */
 export async function listModels(accessToken: string, resourceUrl?: string): Promise<QwenModelsResponse> {
-  const response = await axios.post(`${API_BASE}/models`, {
+  const response = await service.post(`${API_BASE}/models`, {
     access_token: accessToken,
     resource_url: resourceUrl
   })
@@ -149,7 +149,7 @@ export async function chatStream(
     body.resource_url = resourceUrl
   }
   
-  const response = await fetch(`${API_BASE}/chat-stream`, {
+  const response = await fetch(`${API_BASE_URL}${API_BASE}/chat-stream`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -234,7 +234,7 @@ export async function chatStream(
  * 测试 AI API（OAuth 模式）
  */
 export async function testAIAPI(accessToken: string, message?: string, resourceUrl?: string): Promise<QwenTestResponse> {
-  const response = await axios.post(`${API_BASE}/test`, {
+  const response = await service.post(`${API_BASE}/test`, {
     access_token: accessToken,
     message,
     resource_url: resourceUrl
@@ -246,7 +246,7 @@ export async function testAIAPI(accessToken: string, message?: string, resourceU
  * 测试自定义 API（OpenAI 兼容格式）
  */
 export async function testCustomAPI(config: CustomAPIConfig): Promise<QwenTestResponse> {
-  const response = await axios.post(`${API_BASE}/test-custom`, config)
+  const response = await service.post(`${API_BASE}/test-custom`, config)
   return response.data
 }
 
@@ -254,7 +254,7 @@ export async function testCustomAPI(config: CustomAPIConfig): Promise<QwenTestRe
  * 从后端获取已保存的自定义 API 配置（用于同步/恢复）
  */
 export async function getCustomAPIConfigFromBackend(): Promise<CustomAPIConfig | null> {
-  const response = await axios.get(`${API_BASE}/custom-api`)
+  const response = await service.get(`${API_BASE}/custom-api`)
   if (response.data?.has_config && response.data?.base_url && response.data?.api_key && response.data?.model_id) {
     return {
       base_url: response.data.base_url,
@@ -270,7 +270,7 @@ export async function getCustomAPIConfigFromBackend(): Promise<CustomAPIConfig |
  * 后端会写入 data/auth_tokens.json，重启后仍可使用。
  */
 export async function saveCustomAPIConfigToBackend(config: CustomAPIConfig): Promise<void> {
-  await axios.post(`${API_BASE}/custom-api`, config)
+  await service.post(`${API_BASE}/custom-api`, config)
 }
 
 export interface CustomModelsResponse {
@@ -285,7 +285,7 @@ export async function listCustomModelsFromBackend(params?: {
   base_url?: string
   api_key?: string
 }): Promise<CustomModelsResponse> {
-  const response = await axios.post(`${API_BASE}/custom-models`, params || {})
+  const response = await service.post(`${API_BASE}/custom-models`, params || {})
   return response.data
 }
 
@@ -293,5 +293,5 @@ export async function listCustomModelsFromBackend(params?: {
  * 清除后端保存的自定义 API 配置
  */
 export async function clearCustomAPIConfigFromBackend(): Promise<void> {
-  await axios.delete(`${API_BASE}/custom-api`)
+  await service.delete(`${API_BASE}/custom-api`)
 }

@@ -1,11 +1,10 @@
 import axios from 'axios'
+import { API_BASE_URL } from './request'
 
-const API_BASE = 'http://localhost:3002/api'
-
-// 创建 axios 实例
+// 创建独立的 axios 实例（避免污染全局 service）
 const client = axios.create({
-  baseURL: API_BASE,
-  timeout: 30000
+  baseURL: API_BASE_URL,
+  timeout: 60000,
 })
 
 // 响应拦截器
@@ -29,17 +28,17 @@ client.interceptors.response.use(
 export const baiduApi = {
   // 获取访问令牌
   async getToken(code: string, clientId: string, clientSecret: string, redirectUri: string) {
-    return client.post('/baidu/token', { code, clientId, clientSecret, redirectUri })
+    return client.post('/api/baidu/token', { code, clientId, clientSecret, redirectUri })
   },
   
   // 刷新令牌
   async refreshToken(refreshToken: string, clientId: string, clientSecret: string) {
-    return client.post('/baidu/refresh', { refreshToken, clientId, clientSecret })
+    return client.post('/api/baidu/refresh', { refreshToken, clientId, clientSecret })
   },
   
   // 验证令牌
   async verifyToken(accessToken: string) {
-    return client.get('/baidu/verify', { params: { accessToken } })
+    return client.get('/api/baidu/verify', { params: { accessToken } })
   },
   
   // 获取文件列表
@@ -52,7 +51,7 @@ export const baiduApi = {
     method: string = 'list',
     recursion: number = 0
   ) {
-    return client.get('/baidu/files', {
+    return client.get('/api/baidu/files', {
       params: { accessToken, dir, pageNum, pageSize, order, method, recursion }
     })
   },
@@ -65,37 +64,37 @@ export const baiduApi = {
     method: string = 'search',
     recursion: number = 1
   ) {
-    return client.get('/baidu/search', {
+    return client.get('/api/baidu/search', {
       params: { accessToken, key, dir, method, recursion }
     })
   },
   
   // 获取文件信息
   async getFileInfo(accessToken: string, fsids: string) {
-    return client.get('/baidu/fileinfo', {
+    return client.get('/api/baidu/fileinfo', {
       params: { accessToken, fsids }
     })
   },
   
   // 下载文件
   async downloadFile(dlink: string, accessToken: string) {
-    return client.get('/baidu/download', {
+    return client.get('/api/baidu/download', {
       params: { dlink, accessToken }
     })
   },
   
   // 上传文件
   async uploadFile(fileName: string, fileData: number[], accessToken: string) {
-    return client.post('/baidu/upload', { fileName, fileData, accessToken })
+    return client.post('/api/baidu/upload', { fileName, fileData, accessToken })
   },
   
   // 创建目录
   async createDirectory(accessToken: string, dir: string) {
-    return client.post('/baidu/mkdir', { accessToken, dir })
+    return client.post('/api/baidu/mkdir', { accessToken, dir })
   },
   
   // 删除文件（使用文件路径）
   async deleteFile(accessToken: string, filePaths: string[]) {
-    return client.post('/baidu/delete', { accessToken, filePaths })
+    return client.post('/api/baidu/delete', { accessToken, filePaths })
   }
 }

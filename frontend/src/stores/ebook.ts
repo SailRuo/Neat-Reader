@@ -443,6 +443,9 @@ export const useEbookStore = defineStore('ebook', () => {
   // ===== 云端同步（全异步，先落本地） =====
   let cloudSyncBooksTimer: number | null = null;
   let cloudSyncCategoriesTimer: number | null = null;
+  
+  // 目录存在性缓存（避免重复检查）
+  const directoryExistsCache = new Set<string>();
 
   const scheduleCloudSyncBooks = (delayMs: number = 800) => {
     if (cloudSyncBooksTimer) window.clearTimeout(cloudSyncBooksTimer);
@@ -1102,6 +1105,11 @@ export const useEbookStore = defineStore('ebook', () => {
             }
           }
         });
+        
+        // 清除目录缓存（token 刷新后可能需要重新检查）
+        directoryExistsCache.clear();
+        console.log('📂 [Cloud Sync] 已清除目录缓存');
+        
         return true;
       }
       
@@ -1132,9 +1140,15 @@ export const useEbookStore = defineStore('ebook', () => {
     return await refreshBaidupanToken();
   };
 
-  // 🎯 核心修复：确保网盘目录存在
+  // 🎯 核心修复：确保网盘目录存在（带缓存）
   const ensureDirectoryExists = async (relativePath: string): Promise<boolean> => {
     try {
+      // 检查缓存
+      if (directoryExistsCache.has(relativePath)) {
+        console.log(`📂 [Cloud Sync] 目录已缓存，跳过检查: ${relativePath}`);
+        return true;
+      }
+      
       if (!await ensureBaidupanToken() || !userConfig.value.storage.baidupan) return false;
       const { accessToken } = userConfig.value.storage.baidupan;
       
@@ -1142,6 +1156,8 @@ export const useEbookStore = defineStore('ebook', () => {
       const result = await api.createDirectory(accessToken, relativePath);
       if (result.success) {
         console.log(`✅ [Cloud Sync] 目录就绪: ${relativePath} (${result.exists ? '已存在' : '新创建'})`);
+        // 添加到缓存
+        directoryExistsCache.add(relativePath);
         return true;
       }
       return false;

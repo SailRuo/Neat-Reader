@@ -1,6 +1,6 @@
-import axios from 'axios'
+import service from './request'
 
-const API_BASE = 'http://localhost:3002/api/tts'
+const API_BASE = '/api/tts'
 
 export interface TTSVoice {
     Name: string
@@ -29,7 +29,7 @@ export interface VoicesResponse {
  */
 export async function getVoices(): Promise<VoicesResponse> {
     try {
-        const response = await axios.get(`${API_BASE}/voices`)
+        const response = await service.get(`${API_BASE}/voices`)
         return response.data.data
     } catch (error) {
         console.error('获取语音列表失败:', error)
@@ -45,7 +45,7 @@ export async function getVoices(): Promise<VoicesResponse> {
  */
 export async function synthesize(text: string, options: TTSOptions = {}): Promise<Blob> {
     try {
-        const response = await axios.post(
+        const response = await service.post(
             `${API_BASE}/synthesize`,
             {
                 text,
@@ -73,7 +73,7 @@ export async function synthesize(text: string, options: TTSOptions = {}): Promis
  */
 export async function synthesizeStream(text: string, options: TTSOptions = {}): Promise<Blob> {
     try {
-        const response = await axios.post(
+        const response = await service.post(
             `${API_BASE}/synthesize-stream`,
             {
                 text,
@@ -98,7 +98,7 @@ export async function synthesizeStream(text: string, options: TTSOptions = {}): 
  */
 export async function clearCache(): Promise<void> {
     try {
-        await axios.delete(`${API_BASE}/cache`)
+        await service.delete(`${API_BASE}/cache`)
     } catch (error) {
         console.error('清理缓存失败:', error)
         throw error
