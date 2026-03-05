@@ -295,8 +295,8 @@ class Database:
         
         sql = """
         INSERT INTO annotations (
-            id, book_id, cfi, text, note, color, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            id, book_id, cfi, text, note, color, type, chapter_index, chapter_title, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         
         params = (
@@ -306,6 +306,9 @@ class Database:
             annotation_data.get('text'),
             annotation_data.get('note'),
             annotation_data.get('color'),
+            annotation_data.get('type'),  # 🎯 修复：不使用默认值，保留原始类型
+            annotation_data.get('chapter_index', 0),
+            annotation_data.get('chapter_title'),
             now,
             now
         )

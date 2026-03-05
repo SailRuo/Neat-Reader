@@ -556,6 +556,19 @@ export const useEbookStore = defineStore('ebook', () => {
       
       await saveCategories();
       
+      // 🎯 同步到后端数据库
+      try {
+        const { createCategory: apiCreateCategory } = await import('@/api/books');
+        await apiCreateCategory({
+          name: newCategory.name,
+          color: newCategory.color
+        });
+        console.log('✅ 分类已同步到后端数据库');
+      } catch (apiError) {
+        console.error('⚠️ 同步分类到后端失败:', apiError);
+        // 失败不影响本地使用
+      }
+      
       console.log('分类添加成功:', newCategory.name);
       return newCategory;
     } catch (error) {
@@ -579,6 +592,22 @@ export const useEbookStore = defineStore('ebook', () => {
           updatedAt: Date.now()
         };
         await saveCategories();
+        
+        // 🎯 同步到后端数据库（只同步 name 和 color）
+        try {
+          const { updateCategory: apiUpdateCategory } = await import('@/api/books');
+          const syncUpdates: any = {};
+          if (updates.name) syncUpdates.name = updates.name;
+          if (updates.color) syncUpdates.color = updates.color;
+          
+          if (Object.keys(syncUpdates).length > 0) {
+            await apiUpdateCategory(categoryId, syncUpdates);
+            console.log('✅ 分类更新已同步到后端数据库');
+          }
+        } catch (apiError) {
+          console.error('⚠️ 同步分类更新到后端失败:', apiError);
+        }
+        
         console.log('分类更新成功:', categories.value[index].name);
         return true;
       }
@@ -627,6 +656,15 @@ export const useEbookStore = defineStore('ebook', () => {
         
         categories.value.splice(index, 1);
         await saveCategories();
+        
+        // 🎯 同步到后端数据库
+        try {
+          const { deleteCategory: apiDeleteCategory } = await import('@/api/books');
+          await apiDeleteCategory(categoryId);
+          console.log('✅ 分类删除已同步到后端数据库');
+        } catch (apiError) {
+          console.error('⚠️ 同步分类删除到后端失败:', apiError);
+        }
         
         console.log('分类删除成功:', categoryName);
         return true;
@@ -819,13 +857,6 @@ export const useEbookStore = defineStore('ebook', () => {
   const updateBook = async (bookId: string, updates: Partial<EbookMetadata>) => {
     const index = books.value.findIndex(book => book.id === bookId);
     if (index !== -1) {
-      console.log('updateBook - 更新前:', { 
-        id: books.value[index].id, 
-        storageType: books.value[index].storageType,
-        uploading: books.value[index].uploading 
-      });
-      console.log('updateBook - 更新内容:', updates);
-      
       // 使用 Object.assign 直接修改对象，确保响应式更新
       Object.assign(books.value[index], updates);
       
@@ -833,12 +864,6 @@ export const useEbookStore = defineStore('ebook', () => {
       if (updates.storageType === 'synced') {
         books.value[index].uploading = false;
       }
-      
-      console.log('updateBook - 更新后:', { 
-        id: books.value[index].id, 
-        storageType: books.value[index].storageType,
-        uploading: books.value[index].uploading 
-      });
       
       // 🎯 调用后端 API 更新书籍信息
       try {

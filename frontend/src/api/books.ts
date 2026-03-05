@@ -61,6 +61,9 @@ export interface Annotation {
   text?: string
   note?: string
   color?: string
+  type?: string
+  chapter_index?: number
+  chapter_title?: string
   created_at: number
   updated_at: number
 }
@@ -169,6 +172,20 @@ export async function listCategories(): Promise<{ success: boolean; categories: 
 }
 
 /**
+ * 更新分类
+ */
+export async function updateCategory(
+  categoryId: string,
+  updates: {
+    name?: string
+    color?: string
+  }
+): Promise<{ success: boolean; message: string }> {
+  const response = await service.put(`${API_BASE}/categories/${categoryId}`, updates)
+  return response.data
+}
+
+/**
  * 删除分类
  */
 export async function deleteCategory(categoryId: string): Promise<{ success: boolean; message: string }> {
@@ -218,8 +235,31 @@ export async function createAnnotation(params: {
   text?: string
   note?: string
   color?: string
+  type?: string
+  chapter_index?: number
+  chapter_title?: string
 }): Promise<{ success: boolean; annotation_id: string; message: string }> {
   const response = await service.post(`${API_BASE}/annotations`, params)
+  return response.data
+}
+
+/**
+ * 更新注释
+ */
+export async function updateAnnotation(
+  annotationId: string,
+  params: {
+    book_id: string
+    cfi: string
+    text?: string
+    note?: string
+    color?: string
+    type?: string
+    chapter_index?: number
+    chapter_title?: string
+  }
+): Promise<{ success: boolean; message: string }> {
+  const response = await service.put(`${API_BASE}/annotations/${annotationId}`, params)
   return response.data
 }
 

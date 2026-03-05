@@ -50,18 +50,30 @@ if not exist "frontend\node_modules" (
 )
 echo.
 
-echo Starting Tauri Dev Mode...
-echo - Vite Dev Server will start automatically
-echo - Desktop app window will open
-echo - Hot reload enabled
-echo - Press Ctrl+C to stop
+echo ========================================
+echo Starting Development Servers...
+echo ========================================
+echo.
+echo [Step 1] Starting Frontend Dev Server (Vite)...
+echo [Step 2] Waiting for http://localhost:5173...
+echo [Step 3] Starting Tauri Desktop App...
 echo.
 echo Note: 请确保后端已启动 (http://localhost:3002)
 echo ========================================
 echo.
 
 cd frontend
+
+REM Start Vite dev server in background
+start /B cmd /c "npm run dev 2>&1"
+
+REM Wait for Vite to be ready
+echo Waiting for Vite dev server...
+timeout /t 3 /nobreak >nul
+
+REM Start Tauri
 call npm run tauri:dev
+
 cd ..
 
 echo.

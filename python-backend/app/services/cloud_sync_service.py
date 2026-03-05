@@ -32,14 +32,24 @@ class CloudSyncService:
         
         logger.info("云端同步服务初始化完成")
     
-    async def start(self):
-        """启动定时同步任务"""
+    async def start(self, delay_first_sync: bool = True):
+        """
+        启动定时同步任务
+        
+        Args:
+            delay_first_sync: 是否延迟首次同步（默认 True，避免阻塞启动）
+        """
         if self.is_running:
             logger.warning("云端同步服务已在运行")
             return
         
         self.is_running = True
         logger.info(f"云端同步服务已启动，同步间隔: {self.sync_interval}秒")
+        
+        # 如果延迟首次同步，先等待一个周期
+        if delay_first_sync:
+            logger.info(f"首次同步将在 {self.sync_interval} 秒后执行")
+            await asyncio.sleep(self.sync_interval)
         
         while self.is_running:
             try:
@@ -250,7 +260,11 @@ class CloudSyncService:
             logger.info(f"PageIndex 同步完成: 同步 {synced_count} 个，跳过 {skipped_count} 个")
     
     async def _sync_conversations(self, access_token: str):
-        """同步 AI 对话记录"""
+        """
+        同步 AI 对话记录
+        注意：对话已经存储在数据库中，会随数据库文件一起同步
+        这里只是额外导出一份 JSON 格式的备份
+        """
         try:
             # 获取所有对话
             conversations = self.db.list_conversations(limit=1000)
@@ -281,21 +295,21 @@ class CloudSyncService:
                 'synced_at': int(time.time())
             }, ensure_ascii=False, indent=2)
             
-            # 上传到百度网盘
+            # 上传到百度网盘（作为备份）
             result = self.baidu_service.upload_file(
-                file_name="conversations.json",
+                file_name="conversations_backup.json",
                 file_data=conversations_json.encode('utf-8'),
                 access_token=access_token,
                 path="/apps/Neat Reader/sync"
             )
             
             if result.get('success'):
-                logger.info(f"✅ AI 对话记录同步成功: {len(conversations_data)} 个对话")
+                logger.info(f"✅ AI 对话备份同步成功: {len(conversations_data)} 个对话")
             else:
-                logger.error(f"❌ AI 对话记录同步失败: {result.get('error', '未知错误')}")
+                logger.error(f"❌ AI 对话备份同步失败: {result.get('error', '未知错误')}")
                 
         except Exception as e:
-            logger.error(f"同步 AI 对话记录异常: {e}")
+            logger.error(f"同步 AI 对话备份异常: {e}")
     
     async def force_sync(self):
         """强制执行一次完整同步"""

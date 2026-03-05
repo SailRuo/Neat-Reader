@@ -69,6 +69,9 @@ CREATE TABLE IF NOT EXISTS annotations (
     text TEXT,                     -- 选中的文本
     note TEXT,                     -- 用户笔记
     color TEXT,                    -- 高亮颜色
+    type TEXT DEFAULT 'highlight', -- 注释类型: highlight, underline, note
+    chapter_index INTEGER DEFAULT 0,  -- 章节索引
+    chapter_title TEXT,            -- 章节标题
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE

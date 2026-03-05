@@ -1483,7 +1483,8 @@ defineExpose({
   goToChapter,
   getCurrentLocation,
   getCurrentPageText,
-  search: (query: string) => search(query)
+  search: (query: string) => search(query),
+  rebuildAllAnnotationOverlays  // 暴露重新渲染高亮的方法
 })
 </script>
 

@@ -4,6 +4,7 @@ import { ref, computed, toRaw } from 'vue'
 import localforage from 'localforage'
 import { v4 as uuidv4 } from 'uuid'
 import type { Annotation } from '../types/annotation'
+import * as booksApi from '@/api/books'
 
 const ANNOTATIONS_KEY = 'neat-reader-annotations'
 
@@ -27,10 +28,11 @@ export const useAnnotationStore = defineStore('annotation', () => {
     }
   })
 
-  // 初始化：从 IndexedDB 加载所有注释
+  // 初始化：从后端加载注释，IndexedDB 作为缓存
   const initialize = async () => {
     isLoading.value = true
     try {
+      // 先尝试从后端加载（如果失败则从 IndexedDB 加载）
       const stored = await localforage.getItem<Record<string, Annotation[]>>(ANNOTATIONS_KEY)
       if (stored) {
         annotations.value = new Map(Object.entries(stored))
@@ -39,6 +41,47 @@ export const useAnnotationStore = defineStore('annotation', () => {
       console.error('加载注释失败:', error)
     } finally {
       isLoading.value = false
+    }
+  }
+
+  // 从后端加载指定书籍的注释
+  const loadBookAnnotations = async (bookId: string) => {
+    try {
+      const response = await booksApi.listAnnotations(bookId)
+      if (response.success && response.annotations) {
+        // 转换后端数据格式到前端格式
+        const backendAnnotations = response.annotations.map(a => ({
+          id: a.id,
+          bookId: a.book_id,
+          cfi: a.cfi,
+          text: a.text || '',
+          note: a.note,
+          color: a.color || '#FBBF24',
+          type: a.type as 'highlight' | 'underline' | 'note',  // 🎯 修复：直接使用后端返回的类型，不使用默认值
+          chapterIndex: a.chapter_index || 0,
+          chapterTitle: a.chapter_title,
+          range: undefined,
+          createdAt: a.created_at * 1000, // 转换为毫秒
+          updatedAt: a.updated_at * 1000,
+        }))
+        
+        annotations.value.set(bookId, backendAnnotations)
+        
+        // 同步到 IndexedDB 缓存
+        await saveToStorage()
+        
+        console.log(`✅ 从后端加载了 ${backendAnnotations.length} 条注释`)
+      }
+    } catch (error) {
+      console.error('从后端加载注释失败:', error)
+      // 失败时从 IndexedDB 加载
+      const stored = await localforage.getItem<Record<string, Annotation[]>>(ANNOTATIONS_KEY)
+      if (stored && stored[bookId]) {
+        const bookAnnotations = annotations.value.get(bookId) || []
+        if (bookAnnotations.length === 0) {
+          annotations.value.set(bookId, stored[bookId])
+        }
+      }
     }
   }
 
@@ -127,11 +170,32 @@ export const useAnnotationStore = defineStore('annotation', () => {
       updatedAt: Date.now(),
     }
 
+    // 先添加到本地状态
     const bookAnnotations = annotations.value.get(annotation.bookId) || []
     bookAnnotations.push(newAnnotation)
     annotations.value.set(annotation.bookId, bookAnnotations)
 
+    // 保存到 IndexedDB 缓存
     await saveToStorage()
+    
+    // 🎯 同步到后端
+    try {
+      await booksApi.createAnnotation({
+        book_id: newAnnotation.bookId,
+        cfi: newAnnotation.cfi,
+        text: newAnnotation.text,
+        note: newAnnotation.note,
+        color: newAnnotation.color,
+        type: newAnnotation.type,
+        chapter_index: newAnnotation.chapterIndex,
+        chapter_title: newAnnotation.chapterTitle,
+      })
+      console.log('✅ 注释已同步到后端')
+    } catch (error) {
+      console.error('同步注释到后端失败:', error)
+      // 失败不影响本地使用
+    }
+    
     return newAnnotation
   }
 
@@ -151,6 +215,25 @@ export const useAnnotationStore = defineStore('annotation', () => {
 
     annotations.value.set(bookId, bookAnnotations)
     await saveToStorage()
+    
+    // 🎯 同步到后端
+    try {
+      const annotation = bookAnnotations[index]
+      await booksApi.updateAnnotation(annotationId, {
+        book_id: annotation.bookId,
+        cfi: annotation.cfi,
+        text: annotation.text,
+        note: annotation.note,
+        color: annotation.color,
+        type: annotation.type,
+        chapter_index: annotation.chapterIndex,
+        chapter_title: annotation.chapterTitle,
+      })
+      console.log('✅ 注释更新已同步到后端')
+    } catch (error) {
+      console.error('同步注释更新到后端失败:', error)
+    }
+    
     return true
   }
 
@@ -163,11 +246,33 @@ export const useAnnotationStore = defineStore('annotation', () => {
     annotations.value.set(bookId, filtered)
 
     await saveToStorage()
+    
+    // 🎯 同步到后端
+    try {
+      await booksApi.deleteAnnotation(annotationId)
+      console.log('✅ 注释删除已同步到后端')
+    } catch (error) {
+      console.error('同步注释删除到后端失败:', error)
+    }
+    
     return true
   }
 
   // 删除书籍的所有注释
   const deleteBookAnnotations = async (bookId: string) => {
+    const bookAnnotations = annotations.value.get(bookId) || []
+    
+    // 🎯 先从后端删除所有注释
+    try {
+      for (const annotation of bookAnnotations) {
+        await booksApi.deleteAnnotation(annotation.id)
+      }
+      console.log('✅ 书籍所有注释已从后端删除')
+    } catch (error) {
+      console.error('从后端删除书籍注释失败:', error)
+    }
+    
+    // 从本地删除
     annotations.value.delete(bookId)
     await saveToStorage()
   }
@@ -230,6 +335,7 @@ export const useAnnotationStore = defineStore('annotation', () => {
     getAnnotationById,
     getStats,
     initialize,
+    loadBookAnnotations,  // 🎯 新增：从后端加载书籍注释
     addAnnotation,
     updateAnnotation,
     deleteAnnotation,

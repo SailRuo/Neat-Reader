@@ -59,6 +59,9 @@ class AnnotationCreate(BaseModel):
     text: Optional[str] = None
     note: Optional[str] = None
     color: Optional[str] = None
+    type: str  # 🎯 修复：移除默认值，要求必须明确指定类型 (highlight, underline, note)
+    chapter_index: Optional[int] = 0
+    chapter_title: Optional[str] = None
 
 
 # ============================================
@@ -351,6 +354,30 @@ async def list_categories():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.put("/categories/{category_id}")
+async def update_category(category_id: str, updates: CategoryCreate):
+    """更新分类"""
+    try:
+        db = get_db()
+        
+        update_data = {}
+        if updates.name:
+            update_data['name'] = updates.name
+        if updates.color:
+            update_data['color'] = updates.color
+        
+        db.update_category(category_id, update_data)
+        
+        return {
+            "success": True,
+            "message": "更新成功"
+        }
+        
+    except Exception as e:
+        logger.error(f"更新分类失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.delete("/categories/{category_id}")
 async def delete_category(category_id: str):
     """删除分类"""
@@ -459,6 +486,38 @@ async def list_annotations(book_id: str):
         
     except Exception as e:
         logger.error(f"列出注释失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/annotations/{annotation_id}")
+async def update_annotation(annotation_id: str, updates: AnnotationCreate):
+    """更新注释"""
+    try:
+        db = get_db()
+        
+        update_data = {}
+        if updates.note is not None:
+            update_data['note'] = updates.note
+        if updates.color is not None:
+            update_data['color'] = updates.color
+        if updates.text is not None:
+            update_data['text'] = updates.text
+        if updates.type is not None:
+            update_data['type'] = updates.type
+        if updates.chapter_index is not None:
+            update_data['chapter_index'] = updates.chapter_index
+        if updates.chapter_title is not None:
+            update_data['chapter_title'] = updates.chapter_title
+        
+        db.update_annotation(annotation_id, update_data)
+        
+        return {
+            "success": True,
+            "message": "更新成功"
+        }
+        
+    except Exception as e:
+        logger.error(f"更新注释失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

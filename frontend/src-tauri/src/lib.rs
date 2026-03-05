@@ -3,6 +3,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::panic;
 use std::sync::Mutex;
+use tauri::Manager;
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 
@@ -18,16 +19,20 @@ pub fn run() {
     .setup(|app| {
       let shell = app.shell();
 
+      // 在 release 模式启动打包的 backend.exe
       if !cfg!(debug_assertions) {
         match shell.sidecar("backend").and_then(|command| command.spawn()) {
           Ok(child) => {
-            // 保存子进程句柄到 app state
             app.manage(Mutex::new(Some(child)));
           }
           Err(e) => {
             error!("failed to spawn backend sidecar: {e}");
           }
         }
+      } else {
+        // 开发模式：不自动启动后端，需要手动启动
+        println!("� [DEV] 开发模试式：请手动启动后端 (http://localhost:3002)");
+        println!("💡 提示：cd python-backend && python -m uvicorn main:app --host 127.0.0.1 --port 3002 --reload");
       }
 
       Ok(())
@@ -35,8 +40,8 @@ pub fn run() {
     .on_window_event(|window, event| {
       if let tauri::WindowEvent::CloseRequested { .. } = event {
         // 在窗口关闭时终止后端进程
-        if let Some(child_mutex) = window.state::<Mutex<Option<CommandChild>>>().try_lock().ok() {
-          if let Some(mut child) = child_mutex.as_ref().and_then(|c| c.as_ref()) {
+        if let Ok(mut child_mutex) = window.state::<Mutex<Option<CommandChild>>>().lock() {
+          if let Some(child) = child_mutex.take() {
             let _ = child.kill();
           }
         }

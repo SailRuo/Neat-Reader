@@ -392,7 +392,10 @@ class ConversationManager:
     
     async def sync_to_baidu(self, conversation_id: Optional[str] = None, access_token: Optional[str] = None) -> Dict[str, int]:
         """
-        同步会话到百度网盘（上传）
+        同步会话到百度网盘（已废弃）
+        
+        注意：对话现在存储在数据库中，会随数据库文件自动同步到百度网盘。
+        不再需要单独的 JSON 文件同步。
         
         Args:
             conversation_id: 指定会话 ID（None 则同步所有）
@@ -401,102 +404,8 @@ class ConversationManager:
         Returns:
             同步结果统计 {success: 成功数, failed: 失败数}
         """
-        if not self.baidu_sync_enabled or not self.baidu_service:
-            logger.warning("百度网盘同步未启用")
-            return {"success": 0, "failed": 0}
-        
-        if not access_token:
-            logger.warning("未提供 access_token，无法上传到百度网盘")
-            return {"success": 0, "failed": 0}
-        
-        result = {"success": 0, "failed": 0}
-        
-        try:
-            logger.info("准备同步到百度网盘...")
-            
-            # 确保远程目录存在
-            try:
-                create_result = self.baidu_service.create_directory(access_token, self.baidu_remote_path)
-                if not create_result.get("success"):
-                    log_api_failure(
-                        "会话同步-创建目录",
-                        f"errno={create_result.get('errno')} errmsg={create_result.get('errmsg')}",
-                        request_params={"path": self.baidu_remote_path},
-                        response_body=create_result,
-                    )
-            except Exception as e:
-                log_api_failure(
-                    "会话同步-创建目录",
-                    str(e),
-                    request_params={"path": self.baidu_remote_path},
-                )
-            
-            # 确定要同步的文件
-            if conversation_id:
-                files_to_sync = [self._get_conversation_file(conversation_id)]
-            else:
-                files_to_sync = list(self.storage_path.glob("*.json"))
-            
-            if len(files_to_sync) == 0:
-                logger.info("没有需要同步的会话文件")
-                return result
-            
-            logger.info(f"开始同步 {len(files_to_sync)} 个会话文件到百度网盘...")
-            
-            synced_any = False
-            for file_path in files_to_sync:
-                if not file_path.exists():
-                    continue
-                
-                # 增量同步检查：比较文件最后修改时间
-                mtime = file_path.stat().st_mtime
-                if not conversation_id and file_path.name in self.sync_meta:
-                    if mtime <= self.sync_meta[file_path.name]:
-                        logger.debug(f"⏩ 跳过未修改文件: {file_path.name}")
-                        continue
-
-                try:
-                    # 读取文件内容
-                    with open(file_path, 'rb') as f:
-                        file_data = f.read()
-                    
-                    # 上传到百度网盘（覆盖模式）
-                    upload_result = self.baidu_service.upload_file(
-                        file_name=f"conversations/{file_path.name}",
-                        file_data=file_data,
-                        access_token=access_token,
-                        path="/apps/Neat Reader"
-                    )
-                    
-                    if upload_result.get('success'):
-                        result["success"] += 1
-                        self.sync_meta[file_path.name] = mtime
-                        synced_any = True
-                        logger.info(f"✅ 同步成功: {file_path.name}")
-                    else:
-                        result["failed"] += 1
-                        log_api_failure(
-                            "会话同步-上传文件",
-                            upload_result.get("error", "上传失败"),
-                            request_params={"file": file_path.name, "path": "/apps/Neat Reader"},
-                            response_body=upload_result,
-                        )
-                except Exception as e:
-                    result["failed"] += 1
-                    log_api_failure(
-                        "会话同步-上传文件",
-                        str(e),
-                        request_params={"file": file_path.name},
-                    )
-            
-            if synced_any:
-                self._save_sync_meta()
-            
-            logger.info(f"同步完成: 成功 {result['success']}, 失败 {result['failed']}")
-            
-        except Exception as e:
-            log_api_failure("会话同步-百度网盘", str(e))
-        return result
+        logger.info("⚠️ 对话同步功能已废弃，对话会随数据库自动同步")
+        return {"success": 0, "failed": 0}
     
     async def sync_from_baidu(self) -> Dict[str, int]:
         """

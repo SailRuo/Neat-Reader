@@ -47,21 +47,13 @@ logger.add(
 )
 
 async def _run_exit_sync():
-    """退出时同步会话到百度网盘（lifespan 与 /api/shutdown 共用）"""
-    try:
-        from app.services.conversation_manager import conversation_manager
-        if conversation_manager.baidu_sync_enabled:
-            access_token = conversation_manager.load_baidu_token() or settings.BAIDU_ACCESS_TOKEN
-            if access_token:
-                logger.info("📤 正在同步会话到百度网盘...")
-                result = await conversation_manager.sync_to_baidu(access_token=access_token)
-                logger.info(f"✅ 同步完成: 成功 {result['success']}, 失败 {result['failed']}")
-                return result
-            logger.info("💾 未找到百度网盘 Token，跳过上传")
-        else:
-            logger.info("💾 百度网盘同步未启用")
-    except Exception as e:
-        logger.error(f"退出时同步失败: {e}")
+    """
+    退出时同步会话到百度网盘（已废弃）
+    
+    注意：对话现在存储在数据库中，会随数据库自动同步。
+    不再需要单独的退出同步。
+    """
+    logger.info("💾 对话会随数据库自动同步，无需单独处理")
     return None
 
 

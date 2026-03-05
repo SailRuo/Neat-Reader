@@ -160,7 +160,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useEbookStore } from '../../stores/ebook'
 import localforage from 'localforage'
@@ -833,6 +833,23 @@ watch([theme, fontSize, lineHeight, brightness], () => {
   saveUserConfig()
 })
 
+// 监听 AI 对话框的显示/隐藏，重新渲染高亮
+watch(showAIChat, async (newValue) => {
+  // 等待布局完成
+  await nextTick()
+  
+  // 延迟一点，确保 flex 布局完全生效
+  setTimeout(() => {
+    if (book.value?.format === 'epub' && foliateReaderRef.value) {
+      // 调用 FoliateReader 的重新渲染方法
+      if (foliateReaderRef.value.rebuildAllAnnotationOverlays) {
+        foliateReaderRef.value.rebuildAllAnnotationOverlays()
+        console.log('🎨 [Reader] AI 对话框切换，已重新渲染高亮')
+      }
+    }
+  }, 100)
+})
+
 const togglePdfTextMode = async () => {
   console.log('按钮被点击: togglePdfTextMode', { isPdfTextMode: isPdfTextMode.value, hasContent: !!pdfReflowContent.value })
   if (isPdfTextMode.value) {
@@ -880,6 +897,9 @@ onMounted(async () => {
   
   // 初始化注释存储
   await annotationStore.initialize()
+  
+  // 🎯 从后端加载当前书籍的注释
+  await annotationStore.loadBookAnnotations(bookId)
   
   // 先设置 book，避免 v-if 闪烁
   const bookData = ebookStore.getBookById(bookId)
