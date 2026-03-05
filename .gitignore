@@ -7,6 +7,9 @@ dist-electron/
 # Node.js
 node_modules/
 PageIndex-Project/
+cache/
+backend/
+venv/
 backend/node_modules/
 frontend/node_modules/
 npm-debug.log*
