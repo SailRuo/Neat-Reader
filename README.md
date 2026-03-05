@@ -144,19 +144,21 @@ npm run build:linux  # Linux
 ---
 
 ### 预览截图
-<img width="2158" height="1271" alt="image" src="https://github.com/user-attachments/assets/83438abb-9055-4f50-98ed-5a449d4ea4cc" />
+<img width="1183" height="729" alt="image" src="https://github.com/user-attachments/assets/98fc55d9-ada7-4022-be58-cca63f3debef" />
 
-<img width="2158" height="1271" alt="image" src="https://github.com/user-attachments/assets/9dead75d-2e38-4668-b148-6f59aa8d315a" />
+<img width="1183" height="729" alt="image" src="https://github.com/user-attachments/assets/f56b45cf-a460-4fd4-8167-18276dae0039" />
 
-<img width="2158" height="1271" alt="image" src="https://github.com/user-attachments/assets/ad75008e-9a5d-4342-bd23-a36905503a16" />
+<img width="1919" height="1017" alt="image" src="https://github.com/user-attachments/assets/1a5fe7dd-3abe-4023-a2f0-58d5fd6803dd" />
 
-<img width="2158" height="1271" alt="image" src="https://github.com/user-attachments/assets/eded8d41-a671-470b-9e04-10e9609a0d7b" />
+<img width="1920" height="1017" alt="image" src="https://github.com/user-attachments/assets/39bfa579-92b2-4db9-bbdf-e5def2b50986" />
 
-<img width="2158" height="1271" alt="image" src="https://github.com/user-attachments/assets/237df806-603e-4979-97f6-67d57869e1cf" />
+<img width="1920" height="1017" alt="image" src="https://github.com/user-attachments/assets/5c45533b-b756-4ac4-a5a0-c7659d625a9a" />
 
-<img width="2158" height="1271" alt="image" src="https://github.com/user-attachments/assets/cf0db06d-06b0-4a66-b0dc-cd7bbac3be88" />
+<img width="1920" height="1017" alt="image" src="https://github.com/user-attachments/assets/a1a8b548-8abb-424f-a4f4-cc63a938af92" />
 
-<img width="2158" height="1271" alt="image" src="https://github.com/user-attachments/assets/197c5b5b-d67f-42ac-9e45-71ccc00b5615" />
+<img width="1920" height="1017" alt="image" src="https://github.com/user-attachments/assets/b460a430-774e-4249-92f9-cb3ae2cfe123" />
+
+<img width="1920" height="1017" alt="image" src="https://github.com/user-attachments/assets/2724a50c-9c75-4c58-8ef0-802798ac8e8e" />
 
 ---
 
